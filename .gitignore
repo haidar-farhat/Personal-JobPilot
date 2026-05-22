@@ -1,0 +1,51 @@
+# ─── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ─── Virtual envs ───────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ─── Database & runtime state ───────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+jobpilot.db
+logs/
+
+# ─── Generated artifacts ────────────────────────────────
+output/
+*.bak
+*.docx.bak
+
+# ─── Personal data (sanitized examples committed) ──────
+config/applicant_profile.yaml
+config/base_resume.yaml
+
+# ─── Credentials & secrets ──────────────────────────────
+credentials.json
+token.json
+*.json.bak
+config/google_credentials.json
+.env
+.env.local
+
+# ─── IDE / editor / OS ──────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# ─── Claude Code / planning workspace ───────────────────
+.claude/
+.planning/
+
+# ─── Playwright ─────────────────────────────────────────
+playwright-report/
+test-results/

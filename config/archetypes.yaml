@@ -1,0 +1,157 @@
+# Job Archetypes — borrowed from career-ops's archetype-routed scoring.
+# Each archetype gets its own scoring weights so a Data Analyst role and an
+# ML Engineer role aren't judged by the same rubric.
+#
+# Used by agents/ranker.py:
+#   1. _classify_archetype(job)   → picks one of these keys
+#   2. _score_dimensions(job, archetype) → uses that archetype's weights
+#
+# Weights MUST sum to 1.0 within each archetype. Validated on load.
+
+# 10 scoring dimensions, scored 0-100 by the LLM
+dimensions:
+  - technical_fit       # tooling/languages overlap with JD requirements
+  - level_match         # is this entry-level/IC1-IC2? (Matthew is junior)
+  - comp_range          # is the comp in range / disclosed / good for SF Bay
+  - location_remote     # SF Bay or remote-friendly?
+  - archetype_fit       # does the role align with this archetype's core work
+  - skills_overlap      # specific skill keywords from JD found in CV
+  - growth_signal       # does the role offer learning trajectory
+  - company_reputation  # is the company known/respected/profitable
+  - ats_keyword_density # density of ATS-friendly keywords in JD vs CV
+  - gap_severity        # how big are the gaps (INVERSE — high score = small gaps)
+
+# Default fallback weights (used if archetype detection fails)
+default_weights:
+  technical_fit:       0.20
+  level_match:         0.15
+  comp_range:          0.10
+  location_remote:     0.10
+  archetype_fit:       0.10
+  skills_overlap:      0.10
+  growth_signal:       0.05
+  company_reputation:  0.05
+  ats_keyword_density: 0.05
+  gap_severity:        0.10
+
+# Per-archetype configurations
+archetypes:
+
+  data_analyst:
+    label: "Data Analyst"
+    description: "SQL-heavy, dashboard-driven, stakeholder-facing analytics. Tableau, Looker, Excel, basic Python."
+    keywords: ["data analyst", "business analyst", "analytics analyst", "reporting analyst", "bi analyst", "insights analyst"]
+    auto_apply_min_score: 72   # we're picky-but-not-stingy here, this is his sweet spot
+    weights:
+      technical_fit:       0.18
+      level_match:         0.18   # critical — must be junior/IC1
+      comp_range:          0.10
+      location_remote:     0.10
+      archetype_fit:       0.12
+      skills_overlap:      0.12   # SQL/Tableau presence matters
+      growth_signal:       0.05
+      company_reputation:  0.05
+      ats_keyword_density: 0.05
+      gap_severity:        0.05
+
+  data_scientist:
+    label: "Data Scientist"
+    description: "Statistical modeling, experimentation, A/B testing, Python/R, some ML."
+    keywords: ["data scientist", "junior data scientist", "applied scientist", "decision scientist", "product data scientist"]
+    auto_apply_min_score: 75
+    weights:
+      technical_fit:       0.20   # Python/R/stats core
+      level_match:         0.18   # senior/staff DS = mismatch
+      comp_range:          0.08
+      location_remote:     0.08
+      archetype_fit:       0.12
+      skills_overlap:      0.12
+      growth_signal:       0.06
+      company_reputation:  0.05
+      ats_keyword_density: 0.05
+      gap_severity:        0.06
+
+  quantitative_analyst:
+    label: "Quantitative Analyst"
+    description: "Econometrics, financial modeling, time-series, statistical inference. Strong fit for Matthew's MS."
+    keywords: ["quantitative analyst", "quant analyst", "quantitative researcher", "econometrician", "research analyst"]
+    auto_apply_min_score: 73   # MS Quant Econ → bonus zone
+    weights:
+      technical_fit:       0.18
+      level_match:         0.15
+      comp_range:          0.10
+      location_remote:     0.08
+      archetype_fit:       0.18   # archetype alignment is the headline match
+      skills_overlap:      0.12
+      growth_signal:       0.05
+      company_reputation:  0.05
+      ats_keyword_density: 0.04
+      gap_severity:        0.05
+
+  ml_engineer:
+    label: "ML Engineer"
+    description: "Production ML, MLOps, model serving, training pipelines. Lighter fit — score conservatively."
+    keywords: ["machine learning engineer", "ml engineer", "ai engineer", "mlops engineer", "applied ml engineer"]
+    auto_apply_min_score: 80   # be picky — gap is bigger here
+    weights:
+      technical_fit:       0.22   # heavier weight, gap more visible
+      level_match:         0.15
+      comp_range:          0.08
+      location_remote:     0.08
+      archetype_fit:       0.10
+      skills_overlap:      0.12
+      growth_signal:       0.05
+      company_reputation:  0.05
+      ats_keyword_density: 0.05
+      gap_severity:        0.10   # bigger penalty for big gaps
+
+  business_analyst:
+    label: "Business Analyst"
+    description: "Operational analysis, requirements gathering, less technical. Some SQL, lots of stakeholder mgmt."
+    keywords: ["business analyst", "operations analyst", "strategy analyst", "business intelligence analyst"]
+    auto_apply_min_score: 70
+    weights:
+      technical_fit:       0.12
+      level_match:         0.18
+      comp_range:          0.10
+      location_remote:     0.10
+      archetype_fit:       0.12
+      skills_overlap:      0.10
+      growth_signal:       0.08
+      company_reputation:  0.08
+      ats_keyword_density: 0.07
+      gap_severity:        0.05
+
+  product_analyst:
+    label: "Product Analyst"
+    description: "Product metrics, growth experimentation, funnel analysis, dashboards. Product-team-embedded."
+    keywords: ["product analyst", "growth analyst", "experimentation analyst", "product data analyst"]
+    auto_apply_min_score: 73
+    weights:
+      technical_fit:       0.16
+      level_match:         0.18
+      comp_range:          0.10
+      location_remote:     0.08
+      archetype_fit:       0.12
+      skills_overlap:      0.12
+      growth_signal:       0.06
+      company_reputation:  0.06
+      ats_keyword_density: 0.06
+      gap_severity:        0.06
+
+  unknown:
+    label: "Unknown / Other"
+    description: "Could not confidently classify. Use default weights and score conservatively."
+    keywords: []
+    auto_apply_min_score: 80   # higher bar when we're unsure
+    weights:                   # mirrors default_weights
+      technical_fit:       0.20
+      level_match:         0.15
+      comp_range:          0.10
+      location_remote:     0.10
+      archetype_fit:       0.10
+      skills_overlap:      0.10
+      growth_signal:       0.05
+      company_reputation:  0.05
+      ats_keyword_density: 0.05
+      gap_severity:        0.10

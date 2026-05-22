@@ -1,0 +1,41 @@
+# Core
+sqlalchemy>=2.0
+apscheduler>=3.10
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Web scraping
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+playwright>=1.40
+
+# LLM
+ollama>=0.4
+
+# Document generation
+python-docx>=1.1
+fpdf2>=2.8
+
+# Google Sheets
+gspread>=6.0
+google-auth>=2.25
+google-auth-oauthlib>=1.2
+
+# UI
+streamlit>=1.30
+
+# Deduplication
+thefuzz>=0.22
+python-Levenshtein>=0.25
+
+# Notifications
+win10toast-reborn>=1.0
+
+# Utilities
+rich>=13.0
+
+# Testing
+pytest>=8.0
+pytest-playwright>=0.5
+pytest-asyncio>=0.23

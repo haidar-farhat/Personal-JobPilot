@@ -1,0 +1,59 @@
+# Base Resume — your structured resume that the LLM tailors per job
+# ============================================================================
+# Copy to `base_resume.yaml` and fill in your data.
+# Each bullet is individually selectable so the tailor can pick the best ones
+# for any given job description.
+
+contact:
+  name: "Jane Doe"
+  phone: "555-555-5555"
+  email: "your.email@example.com"
+  linkedin: "linkedin.com/in/your-handle"
+  github: "github.com/your-handle"
+  location: "San Francisco, CA"
+
+education:
+  - degree: "M.S. in Quantitative Economics"
+    school: "Your University"
+    location: "City, State"
+    graduation: "2024"
+    gpa: ""
+    coursework:
+      - "Econometrics"
+      - "Time Series Analysis"
+      - "Machine Learning"
+      - "Optimization"
+
+experience:
+  - title: "Data Analyst"
+    company: "Acme Corp"
+    location: "Remote"
+    dates: "Jan 2024 - Present"
+    bullets:
+      - "Built SQL pipelines processing 5M+ rows/day, cutting weekly reporting time by 60%."
+      - "Designed A/B test framework adopted by 4 product teams; lifted activation by 12%."
+
+projects:
+  - title: "Personal JobPilot"
+    stack: "Python · FastAPI · SQLAlchemy · Ollama"
+    url: "github.com/your-handle/Personal-JobPilot"
+    bullets:
+      - "Local job-search agent that scrapes Greenhouse / Lever / Ashby, scores fit with a local LLM, and auto-submits applications via Playwright."
+
+skills:
+  Languages:
+    - Python
+    - SQL
+    - R
+  "Data & ML":
+    - pandas
+    - scikit-learn
+    - XGBoost
+  "Tools & Infrastructure":
+    - Git
+    - Docker
+    - PostgreSQL
+
+certifications:
+  - name: "AWS Certified Cloud Practitioner"
+    year: 2024

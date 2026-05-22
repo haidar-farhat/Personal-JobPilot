@@ -1,0 +1,278 @@
+# Target Companies for Career Page Monitoring
+# =============================================
+
+companies:
+  # Priority targets (Matthew's specific requests)
+  - name: "Kaiser Permanente"
+    career_url: "https://www.kaiserpermanentejobs.org/search-jobs"
+    ats_platform: "workday"
+    location: "Oakland, CA"
+    priority: high
+    search_params:
+      keywords: "data analyst"
+      location: "Oakland"
+
+  - name: "Lawrence Berkeley National Laboratory"
+    career_url: "https://jobs.lbl.gov"
+    ats_platform: "custom"
+    location: "Berkeley, CA"
+    priority: high
+    search_params:
+      keywords: "data"
+
+  # Big Tech - Greenhouse / Lever based (easy to scrape)
+  - name: "Anthropic"
+    career_url: "https://www.anthropic.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/anthropic/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: high
+
+  - name: "OpenAI"
+    career_url: "https://openai.com/careers/search"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/openaisf/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: high
+
+  - name: "Scale AI"
+    career_url: "https://scale.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/scaleai/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: high
+
+  - name: "Databricks"
+    career_url: "https://www.databricks.com/company/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/databricks/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Weights & Biases"
+    career_url: "https://wandb.ai/site/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/weightsandbiases/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Together AI"
+    career_url: "https://www.together.ai/careers"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Stripe"
+    career_url: "https://stripe.com/jobs/search"
+    ats_platform: "custom"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "DoorDash"
+    career_url: "https://careers.doordash.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/doordashusa/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Pinterest"
+    career_url: "https://www.pinterestcareers.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/pinterest/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Airbnb"
+    career_url: "https://careers.airbnb.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  # Lever-based companies
+  - name: "Netflix"
+    career_url: "https://jobs.netflix.com"
+    api_url: "https://jobs.lever.co/netflix"
+    ats_platform: "lever"
+    location: "Los Gatos, CA"
+    priority: medium
+
+  # Large tech (Workday/custom ATS - harder to scrape)
+  - name: "Google"
+    career_url: "https://www.google.com/about/careers/applications/jobs/results"
+    ats_platform: "custom"
+    location: "Mountain View, CA"
+    priority: medium
+    search_params:
+      keywords: "data analyst"
+      location: "San Francisco Bay Area"
+
+  - name: "Meta"
+    career_url: "https://www.metacareers.com/jobs"
+    ats_platform: "custom"
+    location: "Menlo Park, CA"
+    priority: medium
+    search_params:
+      keywords: "data analyst"
+
+  - name: "Apple"
+    career_url: "https://jobs.apple.com/en-us/search"
+    ats_platform: "custom"
+    location: "Cupertino, CA"
+    priority: medium
+    search_params:
+      keywords: "data analyst"
+
+  - name: "Salesforce"
+    career_url: "https://careers.salesforce.com/en/jobs"
+    ats_platform: "custom"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Uber"
+    career_url: "https://www.uber.com/us/en/careers/list"
+    ats_platform: "custom"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Lyft"
+    career_url: "https://www.lyft.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/lyft/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Block (Square)"
+    career_url: "https://block.xyz/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/block/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Mistral AI"
+    career_url: "https://mistral.ai/careers"
+    ats_platform: "custom"
+    location: "San Francisco, CA"
+    priority: low
+
+  # Greenhouse — additional Bay Area DS/DA targets
+  - name: "Anyscale"
+    career_url: "https://www.anyscale.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/anyscale1/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Snowflake"
+    career_url: "https://careers.snowflake.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/snowflake/jobs"
+    ats_platform: "greenhouse"
+    location: "San Mateo, CA"
+    priority: medium
+
+  - name: "Cohere"
+    career_url: "https://cohere.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/cohere/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Hugging Face"
+    career_url: "https://huggingface.co/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/huggingface/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote"
+    priority: medium
+
+  - name: "Mode Analytics"
+    career_url: "https://mode.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/modeanalytics/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Coinbase"
+    career_url: "https://www.coinbase.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Instacart"
+    career_url: "https://careers.instacart.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/instacart/jobs"
+    ats_platform: "greenhouse"
+    location: "San Francisco, CA"
+    priority: medium
+
+  # Lever — additional targets
+  - name: "Palantir"
+    career_url: "https://jobs.lever.co/palantir"
+    api_url: "https://api.lever.co/v0/postings/palantir"
+    ats_platform: "lever"
+    location: "Palo Alto, CA"
+    priority: high
+
+  - name: "Brex"
+    career_url: "https://www.brex.com/careers"
+    api_url: "https://api.lever.co/v0/postings/brex"
+    ats_platform: "lever"
+    location: "San Francisco, CA"
+    priority: medium
+
+  # Ashby — modern startups, no scraping required
+  - name: "Linear"
+    career_url: "https://linear.app/careers"
+    ashby_slug: "Linear"
+    ats_platform: "ashby"
+    location: "Remote"
+    priority: medium
+
+  - name: "Ramp"
+    career_url: "https://ramp.com/careers"
+    ashby_slug: "ramp"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Mercury"
+    career_url: "https://mercury.com/jobs"
+    ashby_slug: "mercury"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Modal"
+    career_url: "https://modal.com/careers"
+    ashby_slug: "modal"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Posthog"
+    career_url: "https://posthog.com/careers"
+    ashby_slug: "posthog"
+    ats_platform: "ashby"
+    location: "Remote"
+    priority: medium
+
+  - name: "Hex"
+    career_url: "https://hex.tech/careers"
+    ashby_slug: "hex"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Replit"
+    career_url: "https://replit.com/careers"
+    ashby_slug: "replit"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium
+
+  - name: "Cursor (Anysphere)"
+    career_url: "https://cursor.com/careers"
+    ashby_slug: "anysphere"
+    ats_platform: "ashby"
+    location: "San Francisco, CA"
+    priority: medium

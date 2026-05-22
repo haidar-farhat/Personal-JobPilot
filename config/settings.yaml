@@ -1,0 +1,89 @@
+# JobPilot Configuration
+# =====================
+
+# Job search parameters
+search:
+  keywords:
+    - "Data Analyst"
+    - "Data Scientist"
+    - "Junior Data Scientist"
+    - "Junior Data Analyst"
+    - "Analytics Analyst"
+    - "Business Analyst"
+    - "Quantitative Analyst"
+    - "Data Science Intern"
+    - "Data Analyst Intern"
+    - "Entry Level Data Scientist"
+    - "Entry Level Data Analyst"
+
+  locations:
+    - "San Francisco, CA"
+    - "Oakland, CA"
+    - "San Jose, CA"
+    - "Berkeley, CA"
+    - "Bay Area"
+    - "Remote"
+
+  # Maximum years of experience to filter (skip jobs requiring more)
+  max_experience_years: 5
+
+  # Keywords in title that mean auto-skip
+  excluded_title_keywords:
+    - "Senior Staff"
+    - "Staff"
+    - "Principal"
+    - "Director"
+    - "VP"
+    - "Vice President"
+    - "Lead"
+    - "Manager"
+    - "Head of"
+
+# Scoring thresholds
+scoring:
+  auto_queue_threshold: 60    # Score >= 60 → auto-generate materials
+  maybe_threshold: 40          # Score 40-59 → "maybe" list
+  skip_threshold: 40           # Score < 40 → auto-skip
+
+# Schedule (24-hour format, local time)
+schedule:
+  active_hours:
+    start: 7    # 7 AM
+    end: 22     # 10 PM
+
+  intervals:
+    # Single ATS-API sweep (Greenhouse + Lever + Ashby) — every 30 minutes
+    career_pages_scan_minutes: 30
+
+# Ollama configuration
+ollama:
+  base_url: "http://localhost:11434"
+  model: "gemma4:31b"
+  timeout: 120  # seconds
+
+# Dashboard configuration
+dashboard:
+  port: 7777            # Not 3000 — reserved for trading bot
+  host: "127.0.0.1"
+  auto_open_browser: true
+
+# Notifications
+notifications:
+  enabled: true
+  high_score_threshold: 80    # Notify for jobs scoring 80+
+  daily_summary_hour: 8       # 8 AM daily summary
+
+# Output paths
+output:
+  resumes_dir: "output/resumes"
+  cover_letters_dir: "output/cover_letters"
+  database_path: "jobpilot.db"
+
+# User info (for cover letters and applications)
+user:
+  name: "Matthew Cromaz"
+  email: "matthewcromaz37@gmail.com"
+  phone: "415-745-5603"
+  linkedin: "linkedin.com/in/matthew-cromaz"
+  github: "github.com/TheCromazone"
+  location: "San Francisco, CA"

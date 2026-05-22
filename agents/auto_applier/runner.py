@@ -1,0 +1,304 @@
+"""Auto-applier orchestrator.
+
+Pulls candidate applications from the DB (status=MATERIALS_READY, score >= threshold,
+ATS in allowlist), dispatches each one to the correct ATS-specific filler, and
+records the outcome.
+
+Public entry point:
+    run_auto_apply(config: dict) -> dict
+
+Returns a summary dict with counts: {submitted, dry_run, skipped_score, skipped_ats,
+skipped_files, skipped_captcha, failed, total_attempted, daily_cap_hit}
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+from agents.auto_applier.base import ApplyResult, load_profile
+from agents.auto_applier.greenhouse import GreenhouseAutoApplier
+from agents.auto_applier.ashby import AshbyAutoApplier
+from agents.auto_applier.lever import LeverAutoApplier
+from agents.auto_applier.workday import WorkdayAutoApplier
+from agents.auto_applier.generic import GenericAutoApplier
+from db.database import get_session
+from db.models import Application, ApplicationStatus, Job, JobScore
+
+logger = logging.getLogger(__name__)
+
+
+# Maps a job's `source` prefix to the right applier class.
+# Order matters only for documentation — dispatch is by exact prefix match.
+APPLIER_MAP = {
+    "greenhouse": GreenhouseAutoApplier,
+    "ashby": AshbyAutoApplier,
+    "lever": LeverAutoApplier,
+    "workday": WorkdayAutoApplier,
+    # `generic` and `custom` both route to the heuristic fallback applier
+    "generic": GenericAutoApplier,
+    "custom": GenericAutoApplier,
+}
+
+
+def _applier_for_source(source: str | None):
+    """Pick the right applier for a job. Falls back to generic if no exact match."""
+    if not source:
+        return GenericAutoApplier
+    prefix = source.split(":", 1)[0].lower().strip()
+    return APPLIER_MAP.get(prefix, GenericAutoApplier)
+
+
+def _ats_key_for_source(source: str | None) -> str:
+    """Return the ATS key (e.g. 'greenhouse', 'workday') for guardrail lookups."""
+    if not source:
+        return "generic"
+    prefix = source.split(":", 1)[0].lower().strip()
+    return prefix if prefix in APPLIER_MAP else "generic"
+
+
+def _min_score_for_ats(ats_key: str, profile: dict) -> int:
+    """Return the per-ATS min_score (falls back to global)."""
+    guardrails = profile.get("guardrails", {})
+    per_ats = guardrails.get("min_score_per_ats", {}) or {}
+    return per_ats.get(ats_key, guardrails.get("min_score", 75))
+
+
+# ============================================================
+# Daily cap helper
+# ============================================================
+
+def _count_auto_applies_today(session) -> int:
+    """How many auto-applies have already happened today (UTC)?"""
+    start_of_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        session.query(Application)
+        .filter(Application.auto_applied.is_(True))
+        .filter(Application.auto_apply_attempted_at >= start_of_day)
+        .count()
+    )
+
+
+# ============================================================
+# Candidate selection
+# ============================================================
+
+def _candidates(session, profile: dict, max_candidates: int = 50) -> list[tuple[Application, Job, JobScore]]:
+    """Find applications eligible for auto-submit.
+
+    Filters:
+      * status == MATERIALS_READY
+      * resume_path AND cover_letter_path both set + files exist on disk
+      * job.source prefix in profile.guardrails.allowed_ats_platforms
+      * score.fit_score >= per-ATS min_score (defaults to global guardrails.min_score)
+      * not already auto-applied
+    """
+    guardrails = profile.get("guardrails", {})
+    fallback_min = guardrails.get("min_score", 75)
+    allowed_ats = set(guardrails.get("allowed_ats_platforms", ["greenhouse", "ashby", "lever"]))
+
+    # Pull every plausibly-eligible row, then filter ATS + per-ATS threshold in Python
+    # (SQL would need an enum over ATS prefixes; the dataset is small enough to filter in app code)
+    rows = (
+        session.query(Application, Job, JobScore)
+        .join(Job, Application.job_id == Job.id)
+        .join(JobScore, JobScore.job_id == Job.id)
+        .filter(Application.status == ApplicationStatus.MATERIALS_READY)
+        .filter(Application.auto_applied.is_(False))
+        .filter(JobScore.fit_score >= max(fallback_min - 10, 0))  # over-pull, threshold-filter below
+        .filter(Application.resume_path.isnot(None))
+        .filter(Application.cover_letter_path.isnot(None))
+        .order_by(JobScore.fit_score.desc())
+        .limit(max_candidates * 3)  # over-pull to allow per-ATS filtering
+        .all()
+    )
+
+    eligible: list[tuple[Application, Job, JobScore]] = []
+    for app, job, score in rows:
+        ats_key = _ats_key_for_source(job.source)
+        if ats_key not in allowed_ats:
+            continue
+        per_ats_min = _min_score_for_ats(ats_key, profile)
+        if score.fit_score < per_ats_min:
+            continue
+        if not Path(app.resume_path).exists() or not Path(app.cover_letter_path).exists():
+            continue
+        eligible.append((app, job, score))
+        if len(eligible) >= max_candidates:
+            break
+    return eligible
+
+
+# ============================================================
+# Result persistence
+# ============================================================
+
+def _record_result(session, app: Application, result: ApplyResult) -> None:
+    """Persist the auto-apply outcome onto the Application row."""
+    app.auto_applied = bool(result.success and result.status == "submitted")
+    app.auto_apply_status = result.status
+    app.auto_apply_log = result.to_log_json()
+    app.auto_apply_attempted_at = datetime.now(timezone.utc)
+
+    if result.success and result.status == "submitted":
+        app.status = ApplicationStatus.APPLIED
+        app.date_applied = datetime.now(timezone.utc)
+
+    session.commit()
+
+
+# ============================================================
+# Main runner
+# ============================================================
+
+def run_auto_apply(config: dict | None = None) -> dict:
+    """Run one auto-apply cycle.
+
+    Args:
+        config: Optional pipeline-level config (reserved for future use).
+
+    Returns:
+        Summary dict with counts.
+    """
+    profile = load_profile()
+    guardrails = profile.get("guardrails", {})
+
+    if not guardrails.get("enabled", False):
+        logger.info("[auto_apply] disabled in profile.guardrails — skipping")
+        return {"enabled": False}
+
+    daily_cap = guardrails.get("daily_cap", 10)
+    max_failures = guardrails.get("max_consecutive_failures", 3)
+    per_app_timeout = guardrails.get("per_app_timeout_seconds", 90)
+    dry_run = bool(guardrails.get("dry_run", False))
+
+    session = get_session()
+    try:
+        applied_today = _count_auto_applies_today(session)
+        remaining_quota = max(0, daily_cap - applied_today)
+        if remaining_quota == 0:
+            logger.info(f"[auto_apply] daily cap of {daily_cap} already reached — skipping")
+            return {"daily_cap_hit": True, "applied_today": applied_today}
+
+        candidates = _candidates(session, profile, max_candidates=remaining_quota * 2)
+        if not candidates:
+            logger.info("[auto_apply] no eligible candidates this cycle")
+            return {"total_attempted": 0, "submitted": 0}
+
+        logger.info(
+            f"[auto_apply] {len(candidates)} candidates; "
+            f"daily quota remaining: {remaining_quota}; "
+            f"dry_run={dry_run}"
+        )
+    finally:
+        session.close()
+
+    summary = {
+        "submitted": 0,
+        "dry_run_count": 0,
+        "failed_captcha": 0,
+        "failed_other": 0,
+        "total_attempted": 0,
+    }
+    consecutive_failures = 0
+    submitted_count = 0
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,  # set to False during debugging to watch it work
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = browser.new_context(
+            viewport={"width": 1366, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/121.0.0.0 Safari/537.36"
+            ),
+        )
+        # Reduce automation fingerprint
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+        )
+
+        try:
+            for app_data in candidates[:remaining_quota]:
+                app, job, score = app_data
+                if submitted_count >= remaining_quota:
+                    break
+                if consecutive_failures >= max_failures:
+                    logger.warning(f"[auto_apply] {max_failures} consecutive failures — halting cycle")
+                    break
+
+                summary["total_attempted"] += 1
+                ats_key = _ats_key_for_source(job.source)
+                applier_cls = _applier_for_source(job.source)
+                applier = applier_cls(profile=profile, dry_run=dry_run)
+                result = ApplyResult(success=False, status="pending")
+                t0 = time.time()
+                page = None
+
+                try:
+                    logger.info(
+                        f"[auto_apply] {ats_key}: {job.title} @ {job.company} "
+                        f"(score={score.fit_score})"
+                    )
+                    page = context.new_page()
+                    page.set_default_timeout(per_app_timeout * 1000)
+                    page.goto(job.url, wait_until="domcontentloaded", timeout=20000)
+                    applier.apply(page, job, app.resume_path, app.cover_letter_path, result)
+                except Exception as e:
+                    result.success = False
+                    if not result.status or result.status == "pending":
+                        result.status = "failed_unknown"
+                    result.message = f"Unhandled: {e}"
+                    result.add_step("exception", str(e), success=False)
+                    logger.exception(f"[auto_apply] error on job {job.id}")
+                finally:
+                    if page is not None:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                    result.duration_seconds = time.time() - t0
+
+                # Persist result and bookkeeping
+                # New session per write so the auto-apply loop doesn't hold a long-lived txn
+                fresh_session = get_session()
+                try:
+                    fresh_app = fresh_session.query(Application).get(app.id)
+                    if fresh_app is not None:
+                        _record_result(fresh_session, fresh_app, result)
+                finally:
+                    fresh_session.close()
+
+                if result.success and result.status == "submitted":
+                    summary["submitted"] += 1
+                    submitted_count += 1
+                    consecutive_failures = 0
+                elif result.status == "dry_run":
+                    summary["dry_run_count"] += 1
+                    consecutive_failures = 0
+                elif result.status == "failed_captcha":
+                    summary["failed_captcha"] += 1
+                    consecutive_failures += 1
+                else:
+                    summary["failed_other"] += 1
+                    consecutive_failures += 1
+
+                # Polite gap between submissions so we don't look like a flood
+                time.sleep(3)
+
+        finally:
+            try:
+                context.close()
+                browser.close()
+            except Exception:
+                pass
+
+    logger.info(f"[auto_apply] cycle complete: {summary}")
+    return summary
