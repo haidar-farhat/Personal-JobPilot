@@ -76,8 +76,8 @@ Location: {location}
 - NO professional summary section (Jake's style omits it)
 - Education: list both schools. For Reed include the Senior Thesis line. For each school
   add ONE coursework line listing 5 relevant courses (no full sentences).
-- Skills: EXACTLY 4 grouped lines: "Languages", "Data & ML", "AI Engineering",
-  "Tools & Infrastructure" (matches the canonical resume)
+- Skills: use the SAME category labels that appear in the candidate's résumé above
+  (3-4 grouped lines). Do NOT invent or substitute category names.
 - Certifications: list each cert with its year — they will be joined into one
   pipe-separated line at render time
 
@@ -205,9 +205,15 @@ def _archetype_guidance(archetype: str | None) -> str:
     return "Use the default ordering and emphasis; tailor bullets to the JD's keywords."
 
 
-def _load_resume_yaml() -> str:
-    config_path = Path(__file__).parent.parent / "config" / "base_resume.yaml"
-    with open(config_path, encoding="utf-8") as f:
+def _load_resume_yaml(archetype: str | None = None) -> str:
+    """Raw résumé YAML fed to the tailoring prompt. BT roles use the SFUSD/
+    behavioral résumé; everything else uses the AI/data résumé."""
+    fname = "base_resume_bt.yaml" if archetype == "behavioral_technician" else "base_resume.yaml"
+    base = Path(__file__).parent.parent / "config"
+    path = base / fname
+    if not path.exists():
+        path = base / "base_resume.yaml"
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -644,9 +650,10 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
         Dict with paths: {resume_docx, cover_letter_docx}
     """
     config = _load_config()
-    resume_yaml = _load_resume_yaml()
+    archetype = getattr(job_score, "archetype", None)
+    resume_yaml = _load_resume_yaml(archetype)
     user = config.get("user", {})
-    guidance = _archetype_guidance(getattr(job_score, "archetype", None))
+    guidance = _archetype_guidance(archetype)
 
     # Generate tailored resume
     logger.info(f"[tailor] Generating resume for: {job.title} at {job.company}")

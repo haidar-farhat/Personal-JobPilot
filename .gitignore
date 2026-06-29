@@ -26,6 +26,7 @@ output/
 # ─── Personal data (sanitized examples committed) ──────
 config/applicant_profile.yaml
 config/base_resume.yaml
+config/base_resume_bt.yaml
 
 # ─── Credentials & secrets ──────────────────────────────
 credentials.json

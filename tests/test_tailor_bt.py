@@ -1,5 +1,7 @@
 """Archetype-aware tailoring guidance + prompt-format integrity."""
 
+import pytest
+
 from agents.tailor import (
     _archetype_guidance,
     RESUME_PROMPT_TEMPLATE,
@@ -44,3 +46,28 @@ def test_cover_prompt_formats_with_guidance():
         archetype_guidance=_archetype_guidance("behavioral_technician"),
     )
     assert "ARCHETYPE GUIDANCE" in out
+
+
+# --- BT résumé routing (SFUSD résumé for behavioral_technician) ---
+from pathlib import Path as _Path  # noqa: E402
+
+_CFG = _Path(__file__).resolve().parents[1] / "config"
+_have_resumes = (_CFG / "base_resume_bt.yaml").exists() and (_CFG / "base_resume.yaml").exists()
+
+
+@pytest.mark.skipif(not _have_resumes, reason="personal résumé files not present")
+def test_bt_resume_routing_ranker():
+    from agents.ranker import _load_resume_summary
+    bt = _load_resume_summary("behavioral_technician")
+    ai = _load_resume_summary("ai_engineer")
+    assert bt != ai
+    assert "aba" in bt.lower() or "behavior" in bt.lower()
+
+
+@pytest.mark.skipif(not _have_resumes, reason="personal résumé files not present")
+def test_bt_resume_routing_tailor():
+    from agents.tailor import _load_resume_yaml
+    bt = _load_resume_yaml("behavioral_technician")
+    ai = _load_resume_yaml("ai_analyst")  # non-BT -> AI résumé
+    assert bt != ai
+    assert "behavior" in bt.lower()

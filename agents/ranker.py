@@ -48,9 +48,17 @@ def _archetype_config() -> dict:
     return _ARCHETYPE_CONFIG_CACHE
 
 
-def _load_resume_summary() -> str:
-    """Load and format the resume for the ranking prompts."""
-    config_path = Path(__file__).parent.parent / "config" / "base_resume.yaml"
+def _load_resume_summary(archetype: str | None = None) -> str:
+    """Load and format the resume for the ranking prompts.
+
+    Behavioral Technician roles score against the SFUSD/behavioral résumé
+    (base_resume_bt.yaml); every other archetype uses the AI/data résumé.
+    """
+    fname = "base_resume_bt.yaml" if archetype == "behavioral_technician" else "base_resume.yaml"
+    base = Path(__file__).parent.parent / "config"
+    config_path = base / fname
+    if not config_path.exists():
+        config_path = base / "base_resume.yaml"
     with open(config_path, encoding="utf-8") as f:
         resume = yaml.safe_load(f)
 
@@ -117,8 +125,13 @@ Description (first 1500 chars):
 {job_description}
 
 ## INSTRUCTIONS:
-- Pick the SINGLE archetype that best fits the role's day-to-day work
-- If genuinely ambiguous OR none fit well, return "unknown"
+- Pick the SINGLE archetype that best fits the role's day-to-day work.
+- ALWAYS prefer a concrete archetype. Titles are often non-obvious — map the role to its
+  closest archetype by the ACTUAL work described (e.g. a software/engineering role centered on
+  LLM/GenAI/agents -> ai_engineer; an analytics role that runs on AI tooling -> ai_analyst).
+- If two archetypes both fit, pick the stronger one. Do NOT retreat to "unknown" just because a
+  title is unusual or spans two archetypes.
+- Use "unknown" ONLY as a last resort, when the role genuinely matches NONE of the archetypes.
 - Confidence is 0.0-1.0
 
 Respond with this exact JSON:
@@ -127,6 +140,23 @@ Respond with this exact JSON:
     "confidence": <0.0-1.0>,
     "reasoning": "<one sentence>"
 }}"""
+
+
+def _match_archetype_by_title(title: str | None, archetypes: dict) -> str | None:
+    """Keyword-match a job title against each archetype's ``keywords`` list.
+
+    Returns the first archetype key with a substring hit in the (lower-cased)
+    title — config order, so earlier archetypes win ties — or None if nothing
+    matches. The "unknown" archetype has an empty keyword list, so it is never
+    selected here.
+    """
+    title_lower = (title or "").lower()
+    if not title_lower:
+        return None
+    for key, arch in archetypes.items():
+        if any(kw in title_lower for kw in arch.get("keywords", [])):
+            return key
+    return None
 
 
 def classify_archetype(job: Job) -> dict:
@@ -160,18 +190,23 @@ def classify_archetype(job: Job) -> dict:
         return {"archetype": "unknown", "confidence": 0.0, "reasoning": f"classification failed: {e}"}
 
     arch_key = str(result.get("archetype", "unknown")).strip().lower().replace(" ", "_")
-    if arch_key not in archetypes:
-        # Try keyword-fallback against the title
-        title_lower = (job.title or "").lower()
-        for key, arch in archetypes.items():
-            if any(kw in title_lower for kw in arch.get("keywords", [])):
-                arch_key = key
-                break
-        else:
-            arch_key = "unknown"
-
     confidence = float(result.get("confidence", 0.5))
     confidence = max(0.0, min(1.0, confidence))
+
+    # The local LLM over-uses "unknown" and occasionally returns an out-of-set key
+    # or a low-confidence guess. In any of those cases, try to rescue the routing
+    # with a verbatim title-keyword match BEFORE accepting "unknown". Note "unknown"
+    # is itself a valid key, so it must be checked explicitly (not just `not in`).
+    if arch_key not in archetypes or arch_key == "unknown" or confidence < 0.5:
+        kw_match = _match_archetype_by_title(job.title, archetypes)
+        if kw_match:
+            arch_key = kw_match
+            confidence = max(confidence, 0.6)  # a verbatim title hit is a strong signal
+        elif arch_key not in archetypes:
+            # Out-of-set key with no keyword rescue → fall back to unknown.
+            arch_key = "unknown"
+        # Otherwise keep arch_key: a real low-confidence archetype stays as the
+        # LLM's guess rather than being downgraded to "unknown".
 
     return {
         "archetype": arch_key,
@@ -509,12 +544,13 @@ def _pre_filter(job: Job, config: dict) -> bool:
 
 def score_job(job: Job, write_eval_report: bool = True) -> JobScore:
     """Run all 3 stages on a single job and return an unsaved JobScore."""
-    resume_summary = _load_resume_summary()
-
     # Stage 1
     classification = classify_archetype(job)
     archetype = classification["archetype"]
     archetype_conf = classification["confidence"]
+
+    # Load the résumé matching this archetype (BT -> SFUSD/behavioral résumé)
+    resume_summary = _load_resume_summary(archetype)
 
     # Stage 2
     dim_result = score_dimensions(job, archetype, resume_summary)
