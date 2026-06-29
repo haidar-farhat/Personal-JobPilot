@@ -24,6 +24,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DASH = "http://127.0.0.1:7777"
 OLLAMA = "http://127.0.0.1:11434"
+LOG_FILE = Path(__file__).resolve().parents[1] / "logs" / "qa_loop.log"
+LOG_FILE.parent.mkdir(exist_ok=True)
+
+
+def emit(line: str) -> None:
+    """Print + append one status line to logs/qa_loop.log (UTF-8)."""
+    print(line, flush=True)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 AUTO_QUEUE = 60          # settings.scoring.auto_queue_threshold
 KEYWORDS = ["AI Engineer", "Solutions Engineer", "Data Analyst",
             "Behavioral Technician", "Machine Learning Engineer", "Quantitative Analyst"]
@@ -116,8 +128,8 @@ def run_once(n):
         status = "FAILED"
         err = f"{type(e).__name__}: {e}"
     sim_str = "PASS" if sim else "FAIL"
-    print(f"[Loop {n}] | Status: {status} | Search Term: {kw} | Jobs Scanned: {raw} | "
-          f"Filtered: {filt} | App Simulation: {sim_str} | Error Log: {err}", flush=True)
+    emit(f"[Loop {n}] | Status: {status} | Search Term: {kw} | Jobs Scanned: {raw} | "
+         f"Filtered: {filt} | App Simulation: {sim_str} | Error Log: {err}")
     return status == "SUCCESS"
 
 
