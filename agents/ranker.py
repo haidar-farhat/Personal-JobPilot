@@ -221,6 +221,11 @@ Description:
 - An ML Eng role for a junior MS Quant Econ candidate should give technical_fit ~50, gap_severity ~40.
 - A data-analyst role at a Bay Area tech company should generally score well across the board for this candidate.
 
+## AI-FORWARD SIGNAL (separate from the 10 dimensions above):
+- ai_intensity (0-100): how central is BUILDING WITH or USING AI/LLM tooling to THIS role's day-to-day?
+  100 = core AI/LLM/GenAI engineering (build LLM apps, agents, RAG); 60-90 = heavy daily AI-tool use (Copilot, ChatGPT, internal LLM tools); 20-50 = some AI exposure; 0-15 = no AI involvement.
+- ai_tools: the specific AI tools/tech the JD names (e.g. "LLM APIs", "RAG", "LangChain", "Copilot", "agents", "fine-tuning"); [] if none.
+
 Respond with this exact JSON:
 {{
     "dimensions": {{
@@ -239,7 +244,9 @@ Respond with this exact JSON:
     "key_gaps":    ["<top 2-5 specific gaps>"],
     "ats_keywords":["<keywords from the JD to weave into the resume>"],
     "seniority_match": <true|false>,
-    "reasoning": "<2-3 sentence summary>"
+    "reasoning": "<2-3 sentence summary>",
+    "ai_intensity": <int 0-100>,
+    "ai_tools": ["<AI tools/tech the role builds with or uses; [] if none>"]
 }}"""
 
 
@@ -275,6 +282,17 @@ def score_dimensions(job: Job, archetype: str, resume_summary: str) -> dict:
         except (ValueError, TypeError):
             dims[d] = 0
 
+    # AI-forward signal (stored alongside the weighted dims, not part of the rubric)
+    ai_raw = result.get("ai_intensity", None)
+    try:
+        ai_intensity = max(0, min(100, int(ai_raw))) if ai_raw is not None else None
+    except (ValueError, TypeError):
+        ai_intensity = None
+    ai_tools = result.get("ai_tools") or []
+    if not isinstance(ai_tools, list):
+        ai_tools = []
+    ai_tools = [str(t)[:60] for t in ai_tools][:12]
+
     return {
         "dimensions": dims,
         "key_matches": result.get("key_matches", [])[:8],
@@ -282,6 +300,8 @@ def score_dimensions(job: Job, archetype: str, resume_summary: str) -> dict:
         "ats_keywords": result.get("ats_keywords", [])[:12],
         "seniority_match": bool(result.get("seniority_match", True)),
         "reasoning": str(result.get("reasoning", ""))[:600],
+        "ai_intensity": ai_intensity,
+        "ai_tools": ai_tools,
     }
 
 
@@ -525,6 +545,8 @@ def score_job(job: Job, write_eval_report: bool = True) -> JobScore:
         dimensions=dim_result["dimensions"],
         dimension_weights=weights,
         evaluation_path=eval_path,
+        ai_intensity=dim_result.get("ai_intensity"),
+        ai_tools=dim_result.get("ai_tools"),
     )
 
 

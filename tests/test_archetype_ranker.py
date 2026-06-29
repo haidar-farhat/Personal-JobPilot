@@ -161,6 +161,53 @@ def test_jobscore_model_has_new_columns():
     assert "evaluation_path" in cols
 
 
+def test_jobscore_has_ai_intensity_columns():
+    """AI-forward signal columns (migration 004, 2026-06-29)."""
+    from db.models import JobScore
+    cols = {c.name for c in JobScore.__table__.columns}
+    assert "ai_intensity" in cols
+    assert "ai_tools" in cols
+
+
+def test_score_dimensions_extracts_ai_intensity(monkeypatch):
+    """score_dimensions parses ai_intensity + ai_tools from the LLM JSON
+    (no Ollama — generate_json is monkeypatched)."""
+    from agents import ranker
+    from db.models import Job
+
+    canned = {
+        "dimensions": {d: 50 for d in ranker._archetype_config()["dimensions"]},
+        "key_matches": [], "key_gaps": [], "ats_keywords": [],
+        "seniority_match": True, "reasoning": "ok",
+        "ai_intensity": 82, "ai_tools": ["LLM APIs", "RAG", "agents"],
+    }
+    monkeypatch.setattr(ranker, "generate_json", lambda *a, **k: canned)
+
+    job = Job(title="AI Engineer", company="X", location="San Francisco",
+              description="Build LLM agents", url="http://x", source="test",
+              dedup_hash="hash-aieng")
+    out = ranker.score_dimensions(job, "ai_engineer", "resume summary")
+    assert out["ai_intensity"] == 82
+    assert "RAG" in out["ai_tools"]
+
+
+def test_score_dimensions_ai_intensity_missing_is_none(monkeypatch):
+    """If the model omits ai_intensity, we store None (not 0) and an empty list."""
+    from agents import ranker
+    from db.models import Job
+
+    canned = {
+        "dimensions": {d: 40 for d in ranker._archetype_config()["dimensions"]},
+        "reasoning": "no ai mention",
+    }
+    monkeypatch.setattr(ranker, "generate_json", lambda *a, **k: canned)
+    job = Job(title="Warehouse Lead", company="Y", location="Oakland",
+              description="forklift", url="http://y", source="test", dedup_hash="hash-wh")
+    out = ranker.score_dimensions(job, "unknown", "resume summary")
+    assert out["ai_intensity"] is None
+    assert out["ai_tools"] == []
+
+
 def test_archetype_yaml_valid_yaml():
     """Direct check the file is parseable — catches syntax regressions early."""
     path = Path(__file__).parent.parent / "config" / "archetypes.yaml"

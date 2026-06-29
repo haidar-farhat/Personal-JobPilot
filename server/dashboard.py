@@ -121,6 +121,9 @@ def _serialize_application(app_obj, job, score):
         "archetype_confidence": getattr(score, "archetype_confidence", None) if score else None,
         "dimensions": getattr(score, "dimensions", None) if score else None,
         "dimension_weights": getattr(score, "dimension_weights", None) if score else None,
+        # AI-forward signal (migration 004)
+        "ai_intensity": getattr(score, "ai_intensity", None) if score else None,
+        "ai_tools": getattr(score, "ai_tools", None) if score else [],
         "has_evaluation": bool(getattr(score, "evaluation_path", None)) if score else False,
         "status": status_key,
         "status_meta": STATUS_META.get(status_key, {"label": status_key.upper(), "tone": "neutral", "stage": 0}),

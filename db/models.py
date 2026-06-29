@@ -94,6 +94,10 @@ class JobScore(Base):
     dimension_weights = Column(JSON, nullable=True)          # {dim: weight} frozen at scoring time
     evaluation_path = Column(String(1000), nullable=True)    # path to the 6-block markdown file
 
+    # AI-forward signal (added in migration 004)
+    ai_intensity = Column(Integer, nullable=True)            # 0-100: how central is building-with / using AI tooling day-to-day
+    ai_tools = Column(JSON, nullable=True)                   # list of AI tools/tech the JD mentions, e.g. ["LLM APIs","RAG","Copilot"]
+
     # Relationships
     job = relationship("Job", back_populates="score")
 
