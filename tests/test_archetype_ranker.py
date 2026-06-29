@@ -168,3 +168,16 @@ def test_archetype_yaml_valid_yaml():
         data = yaml.safe_load(f)
     assert isinstance(data, dict)
     assert "archetypes" in data
+
+
+def test_new_ai_and_bt_archetypes_present():
+    """AI-track + BT-track archetypes added 2026-06-29 (see
+    docs/superpowers/specs/2026-06-29-ai-roles-indeed-ui-design.md).
+    The weight-sum / complete-weights / floor tests above validate them automatically.
+    """
+    cfg = _archetype_config()
+    arch = cfg["archetypes"]
+    for key in ["ai_engineer", "ai_solutions_engineer", "ai_analyst", "behavioral_technician"]:
+        assert key in arch, f"missing archetype: {key}"
+        assert arch[key].get("keywords"), f"{key} has no keywords"
+        assert isinstance(arch[key].get("auto_apply_min_score"), int), f"{key} missing auto_apply_min_score"

@@ -90,8 +90,8 @@ archetypes:
 
   ml_engineer:
     label: "ML Engineer"
-    description: "Production ML, MLOps, model serving, training pipelines. Lighter fit — score conservatively."
-    keywords: ["machine learning engineer", "ml engineer", "ai engineer", "mlops engineer", "applied ml engineer"]
+    description: "Production ML, MLOps, model serving, training pipelines. Distinct from ai_engineer (which is LLM/GenAI application work)."
+    keywords: ["machine learning engineer", "ml engineer", "mlops engineer", "ml platform engineer", "model deployment engineer", "ml ops engineer"]
     auto_apply_min_score: 80   # be picky — gap is bigger here
     weights:
       technical_fit:       0.22   # heavier weight, gap more visible
@@ -137,6 +137,74 @@ archetypes:
       growth_signal:       0.06
       company_reputation:  0.06
       ats_keyword_density: 0.06
+      gap_severity:        0.06
+
+  ai_engineer:
+    label: "AI Engineer"
+    description: "Builds LLM/GenAI/agentic applications — prompt engineering, RAG, tool-use/agents, model integration via Claude/OpenAI APIs or local LLMs. Matthew's headline strength."
+    keywords: ["ai engineer", "a.i. engineer", "llm engineer", "generative ai engineer", "genai engineer", "applied ai engineer", "applied ai", "prompt engineer", "agent engineer", "ai developer", "llm developer", "ai software engineer"]
+    auto_apply_min_score: 76
+    weights:
+      technical_fit:       0.18
+      level_match:         0.15
+      comp_range:          0.08
+      location_remote:     0.08
+      archetype_fit:       0.16
+      skills_overlap:      0.15
+      growth_signal:       0.06
+      company_reputation:  0.05
+      ats_keyword_density: 0.04
+      gap_severity:        0.05
+
+  ai_solutions_engineer:
+    label: "AI / Solutions Engineer"
+    description: "Customer-facing technical role deploying AI/software solutions — solutions engineering, forward-deployed engineering, sales/customer engineering, implementation. Blends coding with client communication."
+    keywords: ["solutions engineer", "forward deployed engineer", "forward-deployed", "fde", "ai solutions engineer", "ai solutions architect", "solutions architect", "sales engineer", "customer engineer", "implementation engineer", "deployment engineer", "field engineer"]
+    auto_apply_min_score: 74
+    weights:
+      technical_fit:       0.16
+      level_match:         0.14
+      comp_range:          0.08
+      location_remote:     0.08
+      archetype_fit:       0.16
+      skills_overlap:      0.14
+      growth_signal:       0.08
+      company_reputation:  0.06
+      ats_keyword_density: 0.05
+      gap_severity:        0.05
+
+  ai_analyst:
+    label: "AI Analyst"
+    description: "AI-augmented analytics — analyst/DS work centered on using AI/LLM tooling day-to-day (AI analyst, generative-AI analyst, AI operations/research analyst)."
+    keywords: ["ai analyst", "a.i. analyst", "ai data analyst", "generative ai analyst", "ai operations analyst", "ai research analyst", "ai/ml analyst"]
+    auto_apply_min_score: 72
+    weights:
+      technical_fit:       0.16
+      level_match:         0.17
+      comp_range:          0.09
+      location_remote:     0.09
+      archetype_fit:       0.13
+      skills_overlap:      0.13
+      growth_signal:       0.06
+      company_reputation:  0.05
+      ats_keyword_density: 0.06
+      gap_severity:        0.06
+
+  behavioral_technician:
+    label: "Behavioral Technician (ABA)"
+    description: "Part-time or full-time ABA behavioral technician / RBT / behavior interventionist — 1:1 client sessions, data collection, treatment-plan implementation. Hourly pay and location are the dominant fit drivers (target ≥ $30/hr, SF/Bay)."
+    keywords: ["behavioral technician", "behavior technician", "registered behavior technician", "rbt", "aba therapist", "behavior interventionist", "behavior therapist", "applied behavior analysis", "behavioral health technician", "1:1 aba", "behavior aide", "paraprofessional"]
+    auto_apply_min_score: 70
+    weights:
+      technical_fit:       0.06
+      level_match:         0.10
+      comp_range:          0.20
+      location_remote:     0.16
+      archetype_fit:       0.16
+      skills_overlap:      0.14
+      growth_signal:       0.04
+      company_reputation:  0.04
+      ats_keyword_density: 0.04
       gap_severity:        0.06
 
   unknown:
