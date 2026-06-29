@@ -110,23 +110,80 @@
   .stat span{color:var(--subtle);font-size:12px}
   .funnel{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 
+  /* Top nav (Indeed-style) */
+  .topnav{display:flex;gap:4px;margin-left:10px}
+  .topnav a{color:var(--text);font-weight:600;font-size:14px;padding:19px 12px;border-bottom:3px solid transparent;margin-bottom:-11px;cursor:pointer}
+  .topnav a.active{color:var(--blue);border-bottom-color:var(--blue)}
+  .topnav a:hover{color:var(--blue);text-decoration:none}
+  .topicons{display:flex;gap:16px;align-items:center;color:var(--muted)}
+  .topicons svg{cursor:pointer}
+  .topicons svg:hover{color:var(--blue)}
+  .topicons .sep{width:1px;height:22px;background:var(--border)}
+  .topicons .emp{color:var(--text);font-weight:600;font-size:14px;cursor:pointer}
+
+  /* Welcome band + preference chips */
+  .welcome{padding:18px 20px 2px;max-width:1500px}
+  .welcome h1{font-size:24px;margin:0 0 12px}
+  .chips-row{display:flex;flex-wrap:wrap;gap:10px}
+  .pref{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:7px 14px;font-weight:600;font-size:13px;box-shadow:var(--shadow)}
+  .pref svg{opacity:.75}
+  .feed-head{font-size:20px;font-weight:800;margin:2px}
+
+  /* Green check pills + badges */
+  .pill.ok{background:#e6f4ea;color:#137333;border-color:#bfe3c6}
+  .pill.ok::before{content:"\2713 ";font-weight:800}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  .badge{font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .badge.blue{background:#e8f0fe;color:#1a56c4}
+  .badge.hot{background:#fce8ee;color:#b3123f}
+  .badge.purple{background:var(--ai-tint);color:var(--ai)}
+
+  /* Card save / dismiss icons */
+  .card{position:relative}
+  .card-actions{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:10px}
+  .icon-btn{border:0;background:transparent;color:var(--subtle);padding:2px;border-radius:6px;line-height:0}
+  .icon-btn:hover{color:var(--blue);background:var(--panel)}
+
+  /* Detail banner + Job details */
+  .banner{background:#0b1b2b;color:#fff;border-radius:var(--radius) var(--radius) 0 0;padding:18px;position:relative;overflow:hidden}
+  .banner .tag{font-size:18px;font-weight:800;letter-spacing:.2px}
+  .banner .logo{width:44px;height:44px;border-radius:9px;background:#fff;color:#0b1b2b;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;margin-top:12px}
+  .banner .checker{position:absolute;top:0;right:0;width:120px;height:60px;background:
+    linear-gradient(45deg,transparent 46%,#fff 46% 54%,transparent 54%),
+    linear-gradient(-45deg,transparent 46%,#fff3 46% 54%,transparent 54%);opacity:.5}
+  .apply-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid var(--divider)}
+  .jd-chip{display:inline-flex;align-items:center;gap:6px;background:#e6f4ea;color:#137333;border:1px solid #bfe3c6;border-radius:6px;padding:5px 10px;font-weight:600;font-size:13px}
+  .jd-chip::before{content:"\2713";font-weight:800}
+
   @media(max-width:1100px){
     main{grid-template-columns:1fr}
     .rail,.detail{position:static;max-height:none}
     .detail{order:3}
+    .topnav,.topicons{display:none}
   }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">Job<span>Pilot</span></div>
+  <nav class="topnav">
+    <a class="active" data-view="jobs">Home</a>
+    <a data-view="insights" id="navInsights">Insights</a>
+    <a data-view="companies">Companies</a>
+  </nav>
+  <div class="header-spacer"></div>
   <div class="health" id="health">
     <span><span class="dot" id="dot-dash"></span>Dashboard</span>
     <span><span class="dot" id="dot-ollama"></span>Ollama</span>
     <span id="lastUpdate" class="muted"></span>
   </div>
-  <div class="header-spacer"></div>
-  <button class="ghost-btn" id="insightsBtn">Insights</button>
+  <div class="topicons">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Saved"><path d="M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z"/></svg>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Alerts"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Profile"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    <span class="sep"></span>
+    <span class="emp">Employers / Post Job</span>
+  </div>
 </header>
 
 <div class="searchbar">
@@ -139,7 +196,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.3-7-11a7 7 0 1114 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
       <input id="where" placeholder="City, state, or &quot;Remote&quot;" autocomplete="off" />
     </div>
-    <button class="find" id="findBtn">Find jobs</button>
+    <button class="find" id="findBtn">Search</button>
   </div>
   <div class="toolbar">
     <span id="resultCount"></span>
@@ -155,6 +212,8 @@
     </label>
   </div>
 </div>
+
+<div class="welcome" id="welcome"></div>
 
 <div class="insights" id="insights"></div>
 
@@ -298,15 +357,29 @@ function renderRail(){
     $("#what").value="";$("#where").value=""; render(); };
 }
 
+const EMP_LABELS={part_time:"Part-time",full_time:"Full-time",contract:"Contract",per_diem:"Per diem"};
+function empLabel(a){ return EMP_LABELS[a.employment_type]||null; }
+const SVG_SAVE=`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z"/></svg>`;
+const SVG_SKIP=`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15V5H6a2 2 0 00-2 2v5a2 2 0 002 2h2l4 6a2 2 0 002-3l-1-4h5a2 2 0 002-2l-1-5a2 2 0 00-2-1h-7"/></svg>`;
+
 function cardHTML(a){
-  const tier=fitTier(a.fit_score), pay=payLabel(a);
+  const tier=fitTier(a.fit_score), pay=payLabel(a), et=empLabel(a);
+  let badges="";
+  if(a.has_tailored_cv) badges+=`<span class="badge blue">Easily apply</span>`;
+  if(isAIForward(a)) badges+=`<span class="badge purple">⚡ AI-forward</span>`;
+  if(a.recommended_action==="apply") badges+=`<span class="badge hot">Strong match</span>`;
   let pills="";
+  if(pay) pills+=`<span class="pill ok">${esc(pay)}</span>`;
+  if(et) pills+=`<span class="pill ok">${esc(et)}</span>`;
   if(a.fit_score!=null) pills+=`<span class="pill fit-${tier}">Fit ${a.fit_score}</span>`;
   if(a.archetype_label) pills+=`<span class="pill arch">${esc(a.archetype_label)}</span>`;
-  if(isAIForward(a)) pills+=`<span class="pill ai">⚡ AI-forward</span>`;
-  if(pay) pills+=`<span class="pill pay">${esc(pay)}</span>`;
   if(a.status_meta&&a.status_meta.label) pills+=`<span class="pill status">${esc(a.status_meta.label)}</span>`;
   return `<div class="card ${a.id===state.selectedId?"sel":""}" data-id="${a.id}">
+    <div class="card-actions">
+      <button class="icon-btn" data-save="${a.id}" title="Save">${SVG_SAVE}</button>
+      <button class="icon-btn" data-skip="${a.id}" title="Not interested">${SVG_SKIP}</button>
+    </div>
+    ${badges?`<div class="badges">${badges}</div>`:""}
     <p class="title">${esc(a.title||"Untitled")}</p>
     <div class="co">${esc(a.company||"")}</div>
     <div class="loc">${esc(a.location||"—")}</div>
@@ -318,8 +391,10 @@ function renderList(){
   const list=sortApps(filterApps(null));
   $("#resultCount").textContent=`${list.length} of ${state.apps.length} jobs`;
   if(!list.length){ $("#results").innerHTML=`<div class="empty">No jobs match these filters.</div>`; return; }
-  $("#results").innerHTML=`<div class="countbar">${list.length} jobs</div>`+list.map(cardHTML).join("");
+  $("#results").innerHTML=`<div class="feed-head">Related to your search · ${list.length} jobs</div>`+list.map(cardHTML).join("");
   $("#results").querySelectorAll(".card").forEach(c=>c.onclick=()=>selectApp(+c.dataset.id));
+  $("#results").querySelectorAll("[data-save]").forEach(b=>b.onclick=e=>{e.stopPropagation(); changeStatus(+b.dataset.save,"approved");});
+  $("#results").querySelectorAll("[data-skip]").forEach(b=>b.onclick=e=>{e.stopPropagation(); changeStatus(+b.dataset.skip,"skipped");});
 }
 
 const STATUSES=["found","scored","materials_ready","queued","approved","applied","response_received","interview","rejected","no_response","skipped"];
@@ -328,20 +403,33 @@ function selectApp(id){
   const a=state.apps.find(x=>x.id===id); if(!a){ return; }
   renderList();
   const pay=payLabel(a);
-  let head=`<div class="d-head"><h2>${esc(a.title||"")}</h2>
-    <div class="co">${esc(a.company||"")} · ${esc(a.location||"—")}${pay?" · "+esc(pay):""}</div>
+  const initial=((a.company||"?").trim().charAt(0)||"?").toUpperCase();
+  const et=empLabel(a);
+  let head=`<div class="banner"><div class="checker"></div>
+      <div class="tag">Future-proof your career</div>
+      <div class="logo">${esc(initial)}</div></div>
+    <div class="d-head"><h2>${esc(a.title||"")}</h2>
+    <div class="co">${esc(a.company||"")} · ${esc(a.location||"—")}${pay?" · "+esc(pay):""}${et?" · "+esc(et):""}</div>
     <div class="row" style="margin-top:8px">
       ${a.fit_score!=null?`<span class="pill fit-${fitTier(a.fit_score)}">Fit ${a.fit_score}</span>`:""}
       ${a.archetype_label?`<span class="pill arch">${esc(a.archetype_label)}</span>`:""}
       ${isAIForward(a)?`<span class="pill ai">⚡ AI-forward ${a.ai_intensity}</span>`:""}
     </div></div>`;
-  let actions=`<div class="d-actions">
-    ${a.url?`<button class="btn" data-act="apply">Open / Apply ↗</button>`:""}
-    ${a.has_tailored_cv?`<button class="btn sec" data-act="cv">Open résumé</button><a class="btn sec" href="/api/file/resume/${a.id}">Download résumé</a>`:""}
+  let actions=`<div class="apply-row">
+    ${a.url?`<button class="btn" data-act="apply">Apply on company site ↗</button>`:""}
+    ${a.has_tailored_cv?`<a class="btn sec" href="/api/file/resume/${a.id}">Résumé</a>`:""}
     ${a.has_cover_letter?`<a class="btn sec" href="/api/file/cover/${a.id}">Cover letter</a>`:""}
+    <button class="icon-btn" data-act="save" title="Save">${SVG_SAVE}</button>
+    <button class="icon-btn" data-act="skip" title="Not interested">${SVG_SKIP}</button>
   </div>`;
   let body=`<div class="d-body">
-    <div class="statusctl"><strong>Status:</strong>
+    <h3>Job details</h3>
+    <div class="apply-row" style="padding:0;border:0;margin-bottom:2px">
+      ${pay?`<span class="jd-chip">${esc(pay)}</span>`:""}
+      ${et?`<span class="jd-chip">${esc(et)}</span>`:""}
+      ${(!pay&&!et)?`<span class="muted">Not specified</span>`:""}
+    </div>
+    <div class="statusctl" style="margin-top:10px"><strong>Status:</strong>
       <select id="statusSel">${STATUSES.map(s=>`<option value="${s}" ${a.status===s?"selected":""}>${s.replace(/_/g," ")}</option>`).join("")}</select></div>`;
   if(a.ai_tools&&a.ai_tools.length) body+=`<h3>AI tooling</h3><div class="chips">${a.ai_tools.map(t=>`<span class="chip">${esc(t)}</span>`).join("")}</div>`;
   if(a.dimensions){ body+=`<h3>Fit dimensions</h3>`;
@@ -373,6 +461,21 @@ async function changeStatus(id, status){
 async function doAction(act, id){
   if(act==="apply") fetch(`/api/application/${id}/open-link`,{method:"POST"});
   if(act==="cv") fetch(`/api/application/${id}/open-cv`,{method:"POST"});
+  if(act==="save") changeStatus(id,"approved");
+  if(act==="skip") changeStatus(id,"skipped");
+}
+
+function renderWelcome(){
+  const cats=new Set(state.apps.map(a=>a.archetype).filter(Boolean));
+  const ai=state.apps.filter(isAIForward).length;
+  const icon=p=>`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${p}</svg>`;
+  $("#welcome").innerHTML=`<h1>Welcome, Matthew</h1>
+    <div class="chips-row">
+      <span class="pref">${icon('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/>')} ${cats.size} role categories</span>
+      <span class="pref">${icon('<path d="M12 21s-7-6.3-7-11a7 7 0 1114 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>')} Bay Area + Remote</span>
+      <span class="pref">⚡ ${ai} AI-forward roles</span>
+      <span class="pref">${icon('<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5h4a1.5 1.5 0 010 3h-2a1.5 1.5 0 000 3h4"/>')} BT floor $30/hr</span>
+    </div>`;
 }
 
 function renderInsights(){
@@ -391,7 +494,7 @@ function renderInsights(){
   </div><div class="funnel">${order.map(([k,l])=>`<span class="pill">${l}: ${p[k]??0}</span>`).join("")}</div>`;
 }
 
-function render(){ renderRail(); renderList(); renderInsights(); }
+function render(){ renderWelcome(); renderRail(); renderList(); renderInsights(); }
 
 function setLastUpdate(){ $("#lastUpdate").textContent="updated "+new Date().toLocaleTimeString(); }
 
@@ -425,7 +528,11 @@ $("#findBtn").onclick=()=>{ state.filters.what=$("#what").value; state.filters.w
 $("#what").addEventListener("keyup",e=>{ if(e.key==="Enter"){ state.filters.what=$("#what").value; render(); } });
 $("#where").addEventListener("keyup",e=>{ if(e.key==="Enter"){ state.filters.where=$("#where").value; render(); } });
 $("#sort").onchange=e=>{ state.sort=e.target.value; renderList(); };
-$("#insightsBtn").onclick=()=>$("#insights").classList.toggle("open");
+document.querySelectorAll(".topnav a").forEach(el=>el.onclick=()=>{
+  document.querySelectorAll(".topnav a").forEach(x=>x.classList.remove("active"));
+  el.classList.add("active");
+  $("#insights").classList.toggle("open", el.dataset.view==="insights");
+});
 
 loadAll(); connectSSE();
 </script>
