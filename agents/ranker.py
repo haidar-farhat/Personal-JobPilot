@@ -198,6 +198,7 @@ DIMENSION_PROMPT_TEMPLATE = """Score this candidate against this job across 10 d
 Title: {job_title}
 Company: {company}
 Location: {location}
+Compensation: {compensation}
 Archetype: {archetype} ({archetype_label})
 
 Description:
@@ -260,11 +261,26 @@ def score_dimensions(job: Job, archetype: str, resume_summary: str) -> dict:
 
     description = (job.description or "No description")[:3000]
 
+    # Surface compensation to the LLM so comp_range isn't scored blind (matters
+    # most for the BT track, where pay is hourly and the whole point is >= $30/hr).
+    if getattr(job, "pay_period", None) == "hourly" and job.hourly_min is not None:
+        if job.hourly_max and job.hourly_max != job.hourly_min:
+            compensation = f"${job.hourly_min:.0f}-${job.hourly_max:.0f}/hr"
+        else:
+            compensation = f"${job.hourly_min:.0f}/hr"
+    elif job.salary_text:
+        compensation = job.salary_text
+    elif job.salary_min:
+        compensation = f"${job.salary_min:,.0f}+"
+    else:
+        compensation = "Not stated"
+
     prompt = DIMENSION_PROMPT_TEMPLATE.format(
         resume_summary=resume_summary,
         job_title=job.title,
         company=job.company,
         location=job.location or "Not specified",
+        compensation=compensation,
         archetype=archetype,
         archetype_label=arch.get("label", archetype),
         job_description=description,

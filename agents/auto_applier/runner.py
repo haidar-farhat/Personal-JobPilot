@@ -87,7 +87,22 @@ def _count_auto_applies_today(session) -> int:
 # Candidate selection
 # ============================================================
 
-def _candidates(session, profile: dict, max_candidates: int = 50) -> list[tuple[Application, Job, JobScore]]:
+def _passes_hourly_floor(archetype, hourly_min, hourly_max, min_hourly_map: dict | None) -> bool:
+    """True if a role clears its archetype's hourly floor (or has no floor).
+
+    Used to enforce the Behavioral Technician ≥ $30/hr rule: a BT role is only
+    auto-apply eligible when a known hourly rate meets the floor. Unknown pay
+    (None) for a floored archetype returns False — we never auto-submit a BT
+    role whose pay we can't confirm is at/above the floor.
+    """
+    floor = (min_hourly_map or {}).get(archetype)
+    if floor is None:
+        return True
+    rate = hourly_max if hourly_max is not None else hourly_min
+    return rate is not None and rate >= float(floor)
+
+
+def _candidates(session, profile: dict, config: dict | None = None, max_candidates: int = 50) -> list[tuple[Application, Job, JobScore]]:
     """Find applications eligible for auto-submit.
 
     Filters:
@@ -95,11 +110,14 @@ def _candidates(session, profile: dict, max_candidates: int = 50) -> list[tuple[
       * resume_path AND cover_letter_path both set + files exist on disk
       * job.source prefix in profile.guardrails.allowed_ats_platforms
       * score.fit_score >= per-ATS min_score (defaults to global guardrails.min_score)
+      * archetype hourly floor met (BT: >= $30/hr; settings.comp.min_hourly_by_archetype)
       * not already auto-applied
     """
     guardrails = profile.get("guardrails", {})
     fallback_min = guardrails.get("min_score", 75)
     allowed_ats = set(guardrails.get("allowed_ats_platforms", ["greenhouse", "ashby", "lever"]))
+    # BT track: per-archetype hourly floor (e.g. behavioral_technician: 30).
+    min_hourly_map = (config or {}).get("comp", {}).get("min_hourly_by_archetype", {}) or {}
 
     # Pull every plausibly-eligible row, then filter ATS + per-ATS threshold in Python
     # (SQL would need an enum over ATS prefixes; the dataset is small enough to filter in app code)
@@ -126,6 +144,15 @@ def _candidates(session, profile: dict, max_candidates: int = 50) -> list[tuple[
         if score.fit_score < per_ats_min:
             continue
         if not Path(app.resume_path).exists() or not Path(app.cover_letter_path).exists():
+            continue
+        if not _passes_hourly_floor(getattr(score, "archetype", None),
+                                    getattr(job, "hourly_min", None),
+                                    getattr(job, "hourly_max", None),
+                                    min_hourly_map):
+            logger.info(
+                f"[auto_apply] skip '{job.title}' @ {job.company} — "
+                f"below hourly floor for {getattr(score, 'archetype', None)} (or pay unconfirmed)"
+            )
             continue
         eligible.append((app, job, score))
         if len(eligible) >= max_candidates:
@@ -184,7 +211,7 @@ def run_auto_apply(config: dict | None = None) -> dict:
             logger.info(f"[auto_apply] daily cap of {daily_cap} already reached — skipping")
             return {"daily_cap_hit": True, "applied_today": applied_today}
 
-        candidates = _candidates(session, profile, max_candidates=remaining_quota * 2)
+        candidates = _candidates(session, profile, config=config, max_candidates=remaining_quota * 2)
         if not candidates:
             logger.info("[auto_apply] no eligible candidates this cycle")
             return {"total_attempted": 0, "submitted": 0}

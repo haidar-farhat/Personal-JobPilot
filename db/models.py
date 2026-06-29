@@ -59,6 +59,12 @@ class Job(Base):
     dedup_hash = Column(String(64), nullable=False, unique=True)
     extra_urls = Column(JSON, nullable=True)  # Additional URLs from other sources
 
+    # Hourly comp + employment type (added in migration 005) — Behavioral Technician track
+    pay_period = Column(String(20), nullable=True)       # hourly | annual | unknown
+    hourly_min = Column(Float, nullable=True)
+    hourly_max = Column(Float, nullable=True)
+    employment_type = Column(String(20), nullable=True)  # part_time | full_time | contract | per_diem | unknown
+
     # Relationships
     score = relationship("JobScore", back_populates="job", uselist=False)
     application = relationship("Application", back_populates="job", uselist=False)

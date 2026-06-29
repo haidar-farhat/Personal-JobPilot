@@ -13,6 +13,7 @@ import requests
 from db.database import get_session
 from db.models import Job, Application, ApplicationStatus, ScanLog
 from utils.dedup import generate_dedup_hash, is_duplicate, merge_duplicate
+from utils.comp import parse_hourly, parse_employment_type
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,18 @@ class BaseScanner(ABC):
         """Store a new job in the database."""
         session = get_session()
         try:
+            # Parse hourly comp + employment type (BT track). Look in the comp text
+            # first, then the start of the description.
+            comp_blob = f"{raw_job.salary_text or ''}  {(raw_job.description or '')[:800]}"
+            hourly = parse_hourly(comp_blob)
+            emp_type = parse_employment_type(raw_job.title, raw_job.description)
+            if hourly:
+                pay_period = "hourly"
+            elif raw_job.salary_min or raw_job.salary_max:
+                pay_period = "annual"
+            else:
+                pay_period = "unknown"
+
             job = Job(
                 title=raw_job.title,
                 company=raw_job.company,
@@ -192,6 +205,10 @@ class BaseScanner(ABC):
                 date_posted=raw_job.date_posted,
                 is_remote=raw_job.is_remote,
                 seniority_level=raw_job.seniority_level,
+                pay_period=pay_period,
+                hourly_min=hourly[0] if hourly else None,
+                hourly_max=hourly[1] if hourly else None,
+                employment_type=emp_type,
                 dedup_hash=generate_dedup_hash(raw_job.company, raw_job.title, raw_job.location),
             )
             session.add(job)
