@@ -65,6 +65,9 @@ Location: {location}
 ## KEY GAPS:
 {key_gaps}
 
+## ARCHETYPE GUIDANCE (overrides the default ordering/emphasis below where relevant):
+{archetype_guidance}
+
 ## ONE-PAGE CONSTRAINTS (strict — output will be truncated if you exceed):
 - Pick the TOP 3 most-relevant projects (no more, fewer is fine)
 - Pick the TOP 3 most-relevant experience entries (no more, fewer is fine)
@@ -148,12 +151,15 @@ Location: {location}
 ## CANDIDATE'S KEY MATCHING QUALIFICATIONS:
 {key_matches}
 
+## ARCHETYPE GUIDANCE (tailor the emphasis to this):
+{archetype_guidance}
+
 ## INSTRUCTIONS:
 Write a 3-4 paragraph cover letter that:
 1. Opens with specific interest in {company} and the {job_title} role (NOT generic "I am writing to express interest")
 2. Maps 2-3 of the candidate's strongest qualifications to specific job requirements
-3. Mentions relevant technical skills (Python, R, SQL, econometrics, Tableau) in context
-4. References the MS in Quantitative Economics and relevant project work
+3. Mentions the skills most relevant to THIS role per the ARCHETYPE GUIDANCE (e.g. behavioral/ABA + BCAT for BT roles; Claude/OpenAI APIs, agents, prompt engineering for AI roles; Python/SQL/econometrics/Tableau for analyst roles)
+4. References the most relevant background per the ARCHETYPE GUIDANCE (behavioral experience for BT; AI-engineering projects for AI roles; MS Quantitative Economics + modeling for analyst roles)
 5. Closes with enthusiasm and a clear call to action
 6. Keeps a professional but genuine tone — avoid corporate cliches
 7. Total length: 250-350 words
@@ -165,6 +171,38 @@ def _load_config():
     config_path = Path(__file__).parent.parent / "config" / "settings.yaml"
     with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _archetype_guidance(archetype: str | None) -> str:
+    """Archetype-specific tailoring guidance injected into the resume + cover prompts.
+
+    Behavioral Technician roles must lead with the BIA experience + BCAT (not the
+    software/AI projects); AI roles lead with AI-engineering work.
+    """
+    a = (archetype or "").lower()
+    if a == "behavioral_technician":
+        return (
+            "This is a Behavioral Technician / ABA role. LEAD with the Behavioral "
+            "Technician (BIA) work_experience and the BCAT certification. Put "
+            '"work_experience" BEFORE "project_experience" in section_order. Emphasize '
+            "1:1 client sessions, behavioral data collection, treatment-plan implementation, "
+            "reliability, and working with children/families. Include AT MOST one technical "
+            "project, and only if it shows reliability or data rigor — do NOT lead with "
+            "software/AI work for this role."
+        )
+    if a in ("ai_engineer", "ai_solutions_engineer", "ai_analyst"):
+        return (
+            "This is an AI-focused role. LEAD with the AI Engineering skills and the "
+            "LLM/agentic projects (Algorithmic Paper Trading System, JobPilot). Emphasize "
+            "Claude/OpenAI APIs, local LLMs, MCP, agents, prompt engineering, RAG, tool-use, "
+            "and full-stack delivery (FastAPI, Next.js). Keep project_experience and skills near the top."
+        )
+    if a == "ml_engineer":
+        return (
+            "This is a production-ML role. Emphasize Python, ML tooling, data pipelines, and "
+            "engineering rigor from the trading system; be honest about depth of production-ML experience."
+        )
+    return "Use the default ordering and emphasis; tailor bullets to the JD's keywords."
 
 
 def _load_resume_yaml() -> str:
@@ -608,6 +646,7 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
     config = _load_config()
     resume_yaml = _load_resume_yaml()
     user = config.get("user", {})
+    guidance = _archetype_guidance(getattr(job_score, "archetype", None))
 
     # Generate tailored resume
     logger.info(f"[tailor] Generating resume for: {job.title} at {job.company}")
@@ -620,6 +659,7 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
         ats_keywords=", ".join(job_score.ats_keywords or []),
         key_matches=", ".join(job_score.key_matches or []),
         key_gaps=", ".join(job_score.key_gaps or []),
+        archetype_guidance=guidance,
     )
 
     resume_data = generate_json(resume_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
@@ -636,6 +676,7 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
         location=job.location or "Not specified",
         job_description=(job.description or "No description")[:3000],
         key_matches="\n".join(f"- {m}" for m in (job_score.key_matches or [])),
+        archetype_guidance=guidance,
     )
 
     cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT)

@@ -53,9 +53,23 @@ def task_scan_career_pages():
         lever_result = LeverScanner(config).run()
         ashby_result = AshbyScanner(config).run()
 
-        total_new = gh_result["jobs_new"] + lever_result["jobs_new"] + ashby_result["jobs_new"]
+        # EdJoin (school-district BT roles) is Playwright-rendered + slower; isolate
+        # it so a failure there never aborts the lightweight API scans above.
+        try:
+            from agents.scanner.edjoin import EdJoinScanner
+            edjoin_result = EdJoinScanner(config).run()
+        except Exception as e:
+            logger.error(f"[edjoin] scanner crashed: {e}")
+            edjoin_result = {"jobs_new": 0}
+
+        total_new = (gh_result["jobs_new"] + lever_result["jobs_new"]
+                     + ashby_result["jobs_new"] + edjoin_result.get("jobs_new", 0))
         if total_new > 0:
-            logger.info(f"[career_pages] {total_new} new jobs (gh={gh_result['jobs_new']}, lever={lever_result['jobs_new']}, ashby={ashby_result['jobs_new']})")
+            logger.info(
+                f"[career_pages] {total_new} new jobs (gh={gh_result['jobs_new']}, "
+                f"lever={lever_result['jobs_new']}, ashby={ashby_result['jobs_new']}, "
+                f"edjoin={edjoin_result.get('jobs_new', 0)})"
+            )
     except Exception as e:
         logger.error(f"[career_pages] Scan failed: {e}")
 
