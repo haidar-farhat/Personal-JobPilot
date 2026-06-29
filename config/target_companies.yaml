@@ -276,3 +276,47 @@ companies:
     ats_platform: "ashby"
     location: "San Francisco, CA"
     priority: medium
+
+  # =========================================================================
+  # Behavioral Technician (ABA) track — added 2026-06-29.
+  # Most ABA providers use custom/Workday/Paycom ATS that the API scanners don't
+  # cover, so school-district BT roles come primarily from the EdJoin scanner
+  # (agents/scanner/edjoin.py). These provider entries are kept for when a
+  # verified Greenhouse/Lever/Ashby slug or a generic career-page scraper exists;
+  # mark ats_platform accordingly once verified.
+  # =========================================================================
+  - name: "Catalight / Easterseals Northern California"
+    career_url: "https://www.catalight.org/careers"
+    ats_platform: "custom"
+    location: "Bay Area, CA"
+    priority: high
+    search_params:
+      keywords: "behavior technician"
+      location: "San Francisco"
+
+  - name: "Autism Learning Partners"
+    career_url: "https://www.autismlearningpartners.com/careers/"
+    ats_platform: "custom"
+    location: "Bay Area, CA"
+    priority: high
+    search_params:
+      keywords: "behavior technician"
+      location: "San Francisco"
+
+  - name: "Centria Autism"
+    career_url: "https://www.centriahealthcare.com/careers/"
+    ats_platform: "custom"
+    location: "Bay Area, CA"
+    priority: medium
+    search_params:
+      keywords: "behavior technician"
+      location: "San Francisco"
+
+  - name: "Kadiant"
+    career_url: "https://kadiant.com/careers/"
+    ats_platform: "custom"
+    location: "Bay Area, CA"
+    priority: medium
+    search_params:
+      keywords: "behavior technician"
+      location: "San Francisco"

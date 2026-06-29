@@ -20,12 +20,6 @@ BAY_AREA_KEYWORDS = (
     "remote", "los gatos", "cupertino", "redwood city", "emeryville",
 )
 
-RELEVANT_TITLE_KEYWORDS = (
-    "data", "analyst", "scientist", "quantitative",
-    "analytics", "business analyst", "ml ", "machine learning",
-)
-
-
 class AshbyScanner(BaseScanner):
     """Scan Ashby-based career pages via their public posting API."""
 
@@ -79,7 +73,7 @@ class AshbyScanner(BaseScanner):
         for job_data in postings:
             title = job_data.get("title", "")
             title_lower = title.lower()
-            if not any(kw in title_lower for kw in RELEVANT_TITLE_KEYWORDS):
+            if not self._title_is_relevant(title):
                 continue
 
             location = job_data.get("location", "") or ""

@@ -72,8 +72,8 @@ class GreenhouseScanner(BaseScanner):
             title = job_data.get("title", "")
             title_lower = title.lower()
 
-            # Check if title matches any search keyword
-            if not any(kw in title_lower for kw in ["data", "analyst", "scientist", "quantitative", "analytics", "business analyst"]):
+            # Check if title matches any configured/legacy relevance term
+            if not self._title_is_relevant(title):
                 continue
 
             # Extract location
@@ -183,7 +183,7 @@ class LeverScanner(BaseScanner):
             title_lower = title.lower()
 
             # Check relevance
-            if not any(kw in title_lower for kw in ["data", "analyst", "scientist", "quantitative", "analytics"]):
+            if not self._title_is_relevant(title):
                 continue
 
             # Get URL

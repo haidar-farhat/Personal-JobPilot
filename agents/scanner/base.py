@@ -1,5 +1,6 @@
 """Base scanner interface for all job board scrapers."""
 
+import re
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -63,6 +64,41 @@ class BaseScanner(ABC):
             if keyword.lower() in title_lower:
                 return True
         return False
+
+    # Core role terms always treated as relevant (preserves legacy data/analyst
+    # recall) — unioned with the configured search keywords. Matched on word
+    # boundaries so short tokens (e.g. "rbt") don't hit inside unrelated words and
+    # "data" doesn't match "Database".
+    _LEGACY_RELEVANCE_TERMS = (
+        "data", "analyst", "scientist", "quantitative", "analytics",
+        "machine learning", "ml engineer",
+    )
+
+    def _relevance_pattern(self) -> "re.Pattern | None":
+        """Compile (once) a word-boundary alternation of all relevance terms."""
+        pat = getattr(self, "_rel_pat_cache", None)
+        if pat is None:
+            terms = set(self._LEGACY_RELEVANCE_TERMS)
+            for kw in self.keywords:
+                t = (kw or "").strip().lower()
+                if len(t) >= 3:           # skip 1-2 char noise
+                    terms.add(t)
+            escaped = sorted((re.escape(t) for t in terms if t), key=len, reverse=True)
+            pat = re.compile(r"\b(?:" + "|".join(escaped) + r")\b") if escaped else None
+            self._rel_pat_cache = pat
+        return pat
+
+    def _title_is_relevant(self, title: str) -> bool:
+        """True if the title matches any configured/legacy relevance term.
+
+        Used by ATS scanners as a coarse pre-filter before fetching/parsing
+        full job detail. Driven by config (settings.yaml search.keywords) so AI
+        and BT roles are picked up, not just data/analyst.
+        """
+        pat = self._relevance_pattern()
+        if pat is None:
+            return True
+        return bool(pat.search((title or "").lower()))
 
     def _rate_limit(self):
         """Sleep to respect rate limits."""

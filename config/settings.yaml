@@ -15,6 +15,28 @@ search:
     - "Data Analyst Intern"
     - "Entry Level Data Scientist"
     - "Entry Level Data Analyst"
+    # --- AI-engineering track (2026-06-29) ---
+    - "AI Engineer"
+    - "LLM Engineer"
+    - "Generative AI Engineer"
+    - "Applied AI Engineer"
+    - "Prompt Engineer"
+    - "Machine Learning Engineer"
+    - "ML Engineer"
+    - "Solutions Engineer"
+    - "Forward Deployed Engineer"
+    - "AI Solutions Engineer"
+    - "Sales Engineer"
+    - "AI Analyst"
+    - "Applied Scientist"
+    # --- Behavioral Technician track (2026-06-29) ---
+    - "Behavioral Technician"
+    - "Behavior Technician"
+    - "Registered Behavior Technician"
+    - "RBT"
+    - "ABA Therapist"
+    - "Behavior Interventionist"
+    - "Behavior Therapist"
 
   locations:
     - "San Francisco, CA"
@@ -44,6 +66,15 @@ scoring:
   auto_queue_threshold: 60    # Score >= 60 → auto-generate materials
   maybe_threshold: 40          # Score 40-59 → "maybe" list
   skip_threshold: 40           # Score < 40 → auto-skip
+
+# Compensation floors (hourly) — BT track scoring + auto-apply guardrail
+comp:
+  min_hourly_by_archetype:
+    behavioral_technician: 30   # never auto-apply a BT role known to pay < $30/hr
+
+# AI-forward signal — ranker emits ai_intensity (0-100) per job
+ai_intensity:
+  badge_threshold: 60           # jobs scoring >= this show the ⚡ AI-forward badge / filter
 
 # Schedule (24-hour format, local time)
 schedule:
