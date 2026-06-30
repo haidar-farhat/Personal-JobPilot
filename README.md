@@ -204,7 +204,15 @@ Both `applicant_profile.yaml` and `base_resume.yaml` are **gitignored** — your
 
 ### Run
 
-Two processes — scheduler (background scanning) and dashboard (web UI):
+**Recommended — let the watchdog run everything.** One process supervises Ollama, the dashboard, and the scheduler, restarting any that die:
+
+```bash
+python watchdog.py
+```
+
+On Windows, double-click `start_jobpilot.bat` (launches the watchdog and opens the dashboard), or run `register_autostart.bat` once to have it start automatically at every login — see [Reliability](#reliability--it-stays-up-on-its-own).
+
+**Manual — run the pieces yourself** (useful for development):
 
 ```bash
 # Terminal 1 — scheduler
@@ -214,8 +222,6 @@ python scheduler.py
 python -m uvicorn server.dashboard:app --host 127.0.0.1 --port 7777
 ```
 
-Or on Windows, just double-click `start_jobpilot.bat` — opens both in their own console windows and pops the dashboard in your browser.
-
 ### Use
 
 Open http://127.0.0.1:7777 and:
@@ -224,6 +230,36 @@ Open http://127.0.0.1:7777 and:
 2. **Review** each scored role — open the drawer to see the 10-dim breakdown + LLM-written evaluation
 3. **Approve** the high-fit ones — auto-applier submits via Playwright, low-fit ones get a tailored resume + cover letter ready for one-click manual submission
 4. **Track** status (Applied → Response → Interview) right from the dashboard
+
+---
+
+## Browser autofill extension
+
+`browser-extension/` is a separate **Manifest V3** Chrome/Edge extension that autofills
+job-application forms from your résumé — on any site you open yourself. It scans the page,
+asks the local JobPilot backend for a fill-plan (deterministic mapping for the standard
+fields, Gemma-drafted answers for essays, résumé **auto-routed** AI vs BT), and fills the
+fields. **It never clicks Apply** — you review the highlighted fields and submit yourself,
+so it stays within site ToS.
+
+**Install (load unpacked):**
+
+1. Make sure the JobPilot backend is running (it auto-starts at login) — the extension
+   talks to `http://127.0.0.1:7777`.
+2. Open `chrome://extensions` (or `edge://extensions`) and enable **Developer mode**.
+3. Click **Load unpacked** and select the `browser-extension/` folder.
+4. On any application page, click the **JobPilot Autofill** toolbar icon →
+   **Autofill this application**. Filled fields are outlined green; anything needing review
+   is amber, and a toast reports the count.
+
+If the backend is offline it still fills standard fields from a cached copy of your profile
+(no AI essays). Résumé file uploads are flagged for manual attach — browsers block scripted
+`<input type=file>` for security.
+
+Backed by `server/autofill.py` (`/api/autofill/profile|plan|health`) and the pure
+`agents/autofill_mapper.py`. Verify with `python -m pytest tests/test_autofill_mapper.py
+tests/test_autofill_api.py -q` and, with the dashboard up,
+`python -m pytest tests/e2e/test_extension_autofill.py -q -m live`.
 
 ---
 
@@ -248,15 +284,30 @@ Personal-JobPilot/
 │   └── migrations/              # Schema migrations
 ├── server/
 │   ├── dashboard.py             # FastAPI app + SSE
-│   └── static/index.html        # Single-file UI
+│   ├── static/index.html        # Single-file UI
+│   └── autofill.py              # Autofill API for the browser extension
+├── browser-extension/          # MV3 autofill extension (popup, service worker, scan/fill)
 ├── utils/
 │   ├── ollama_client.py         # Ollama wrapper with JSON-mode + retries
 │   ├── dedup.py                 # Fuzzy job dedup
 │   └── notifications.py         # Windows toast for high-fit jobs
 ├── tests/                       # pytest suite for deterministic surfaces
 ├── scheduler.py                 # Entry point — starts APScheduler
-└── start_jobpilot.bat           # Windows one-click launcher
+├── watchdog.py                  # Supervisor — keeps all 3 services alive
+├── start_jobpilot.bat           # Windows one-click launcher (runs the watchdog)
+└── register_autostart.bat       # Install/remove login auto-start (no admin)
 ```
+
+---
+
+## Reliability — it stays up on its own
+
+Running three long-lived processes on a laptop means they eventually die — a reboot, an OOM, a flaky scan. Babysitting them by hand is exactly the toil this project exists to kill, so the supervision is automated too:
+
+- **`watchdog.py`** is a single supervisor that starts Ollama, the dashboard, and the scheduler, then health-checks them on a 30-second loop. Ollama and the dashboard are checked over HTTP (so a wedged-but-alive process still gets recovered); the scheduler is checked by process liveness. Anything down gets restarted, with a boot grace window so a service that's merely starting up is never thrashed. Already-healthy services are left untouched — no duplicate processes.
+- **`register_autostart.bat`** drops a hidden launcher in the per-user Startup folder (no admin rights required) so the watchdog — and therefore the whole pipeline — comes back automatically on every login. After a reboot you do nothing; the dashboard is already live at `http://127.0.0.1:7777`.
+
+Net effect: the system is genuinely fire-and-forget. Reboot your machine and the job hunt picks itself back up.
 
 ---
 
