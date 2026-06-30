@@ -49,7 +49,17 @@ def _archetype_label(key: str | None) -> str | None:
     return arch.get("label") if arch else key
 
 app = FastAPI(title="JobPilot Dashboard", docs_url=None, redoc_url=None)
+
+# CORS — the server binds to 127.0.0.1 only; permissive origins let the
+# browser-extension service worker call the autofill API.
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Browser-extension autofill API (profile / plan / health)
+from server.autofill import router as autofill_router
+app.include_router(autofill_router)
 
 # Initialize DB
 init_db()
