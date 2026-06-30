@@ -61,6 +61,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 from server.autofill import router as autofill_router
 app.include_router(autofill_router)
 
+# Google Sheet application-tracker sync API (health / compare / sync)
+from server.sheets import router as sheets_router
+app.include_router(sheets_router)
+
 # Initialize DB
 init_db()
 

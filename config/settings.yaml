@@ -98,6 +98,15 @@ dashboard:
   host: "127.0.0.1"
   auto_open_browser: true
 
+# Google Sheets application tracker — sync applied jobs to your tracker sheet.
+# Auth: service account. Put the service-account JSON key at credentials_path
+# (gitignored) and share the sheet with the service account's email as Editor.
+google_sheets:
+  enabled: true
+  spreadsheet_id: "1ljhaUbcWmiPgejBcz43OdNy4vJCxtR5ZpE_manKd-80"
+  worksheet: ""                                  # "" = first worksheet/tab
+  credentials_path: "config/google_credentials.json"
+
 # Notifications
 notifications:
   enabled: true
