@@ -212,6 +212,51 @@
   .eval{white-space:pre-wrap;font-size:13.5px;background:var(--panel);border:1px solid var(--divider);border-radius:10px;padding:13px;max-height:340px;overflow:auto;line-height:1.6}
   .muted{color:var(--muted)}
 
+  /* Tracker button (in results toolbar) */
+  .bar-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .bar-right .sortlbl{margin-left:0}
+  .track-btn{display:inline-flex;align-items:center;gap:8px;background:var(--grad);color:#fff;border:0;border-radius:10px;
+    padding:9px 15px;font-weight:700;font-size:13px;box-shadow:0 8px 20px -10px rgba(99,40,217,.55);transition:transform .12s,filter .12s}
+  .track-btn:hover{filter:brightness(1.07);transform:translateY(-1px)}
+  .track-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
+    border-radius:999px;background:#fff;color:var(--violet);font-size:11px;font-weight:800;margin-left:2px}
+
+  /* Tracker / sync modal */
+  .modal-backdrop{position:fixed;inset:0;z-index:100;background:rgba(7,11,24,.55);backdrop-filter:blur(4px);
+    display:flex;align-items:center;justify-content:center;padding:24px}
+  .modal-backdrop[hidden]{display:none}
+  .modal{width:min(680px,100%);max-height:86vh;display:flex;flex-direction:column;background:#fff;border-radius:18px;
+    box-shadow:var(--shadow-lg);overflow:hidden;border:1px solid var(--border)}
+  .modal-head{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 16px;background:linear-gradient(135deg,#0b1220,#1a1147 70%);color:#fff}
+  .modal-title{font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:-.3px}
+  .modal-sub{color:#b9c2db;font-size:13px;margin-top:3px}
+  .modal-x{margin-left:auto;background:rgba(255,255,255,.1);border:0;color:#fff;width:30px;height:30px;border-radius:9px;font-size:14px;flex:none}
+  .modal-x:hover{background:rgba(255,255,255,.2)}
+  .modal-body{padding:18px 22px;overflow:auto}
+  .modal-foot{display:flex;gap:10px;align-items:center;padding:14px 22px;border-top:1px solid var(--divider);background:var(--panel)}
+  .sheet-status{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:14px}
+  .count-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+  .count-chip{background:var(--panel);border:1px solid var(--divider);border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600;color:var(--text)}
+  .count-chip b{color:var(--violet)}
+  .track-list{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+  .track-row{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:#fff}
+  .track-row input[type=checkbox]{accent-color:var(--violet);width:16px;height:16px;flex:none;cursor:pointer}
+  .track-row .tr-main{min-width:0;flex:1}
+  .track-row .tr-title{font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .track-row .tr-meta{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .track-row.in .tr-title{color:var(--muted);font-weight:600}
+  .selall{display:flex;align-items:center;gap:9px;font-weight:700;font-size:13px;margin:4px 2px 10px;color:var(--text)}
+  .selall input{accent-color:var(--violet);width:16px;height:16px}
+  .sec-h{font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--subtle);font-weight:700;margin:18px 0 8px}
+  .setup{font-size:13.5px;line-height:1.65;color:var(--text)}
+  .setup ol{margin:10px 0 0;padding-left:20px} .setup li{margin:7px 0}
+  .setup code{background:var(--panel);border:1px solid var(--divider);border-radius:6px;padding:1px 6px;font-size:12.5px}
+  .setup .reason{background:#fff4e5;border:1px solid #f0d49a;color:#7a5300;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+  .toast-line{font-size:13px;font-weight:600;margin-right:auto;color:var(--text)}
+  .btn.sm{padding:9px 16px;font-size:13px}
+  .btn.ghost{background:#fff;color:var(--muted);border:1px solid var(--border);box-shadow:none}
+  .btn.ghost:hover{background:var(--panel);filter:none}
+
   @media(max-width:1100px){
     main{grid-template-columns:1fr}
     .rail,.detail{position:static;max-height:none}
@@ -268,15 +313,21 @@
 
 <div class="resultsbar">
   <span id="resultCount"></span>
-  <label class="sortlbl">Sort by
-    <select id="sort">
-      <option value="relevance">Relevance</option>
-      <option value="fit">Fit score</option>
-      <option value="ai">AI-forward</option>
-      <option value="date">Date posted</option>
-      <option value="pay">Hourly pay</option>
-    </select>
-  </label>
+  <div class="bar-right">
+    <button class="track-btn" id="trackerBtn" title="Compare &amp; add your applied jobs to your Google Sheet">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+      Sync to Sheet<span class="track-badge" id="trackerBadge" hidden></span>
+    </button>
+    <label class="sortlbl">Sort by
+      <select id="sort">
+        <option value="relevance">Relevance</option>
+        <option value="fit">Fit score</option>
+        <option value="ai">AI-forward</option>
+        <option value="date">Date posted</option>
+        <option value="pay">Hourly pay</option>
+      </select>
+    </label>
+  </div>
 </div>
 
 <div class="insights" id="insights"></div>
@@ -286,6 +337,20 @@
   <section class="results" id="results"></section>
   <section class="detail" id="detail"><div class="empty">Select a job to see details.</div></section>
 </main>
+
+<div class="modal-backdrop" id="trackerModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Application tracker">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Application tracker</div>
+        <div class="modal-sub" id="trackerSub">Compare what you've applied to with your Google Sheet.</div>
+      </div>
+      <button class="modal-x" id="trackerClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="trackerBody"><div class="empty">Loading…</div></div>
+    <div class="modal-foot" id="trackerFoot"></div>
+  </div>
+</div>
 
 <script>
 const AI_THRESHOLD = 60;
@@ -606,7 +671,134 @@ document.querySelectorAll(".topnav a").forEach(el=>el.onclick=()=>{
   $("#insights").classList.toggle("open", el.dataset.view==="insights");
 });
 
-loadAll(); connectSSE();
+// ============================================================
+// Google Sheet application tracker (compare + add)
+// ============================================================
+const sheetState = { selected: new Set() };
+
+function openTracker(){
+  $("#trackerModal").hidden=false;
+  $("#trackerBody").innerHTML=`<div class="empty">Loading your sheet…</div>`;
+  $("#trackerFoot").innerHTML="";
+  fetchCompare();
+}
+function closeTracker(){ $("#trackerModal").hidden=true; }
+
+async function fetchCompare(){
+  try{
+    const d=await fetch("/api/sheet/compare").then(r=>r.json());
+    renderTracker(d);
+  }catch(e){
+    $("#trackerBody").innerHTML=`<div class="empty">Couldn't reach the sheet API: ${esc(e.message||e)}</div>`;
+  }
+}
+
+function setupHTML(d){
+  const url=d.spreadsheet_url;
+  return `<div class="setup">
+    <div class="reason">⚠ Not connected: ${esc(d.reason||"credentials missing")}</div>
+    <b>One-time setup (service account):</b>
+    <ol>
+      <li>In the <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, pick/create a project and enable the <b>Google Sheets API</b>.</li>
+      <li>Create a <b>Service account</b>, then <b>Keys → Add key → JSON</b>. Save it as <code>config/google_credentials.json</code> in the JobPilot folder.</li>
+      <li>Open that JSON, copy the <code>client_email</code>, and <b>Share</b> ${url?`<a href="${esc(url)}" target="_blank" rel="noopener">your sheet</a>`:"your sheet"} with that address as <b>Editor</b>.</li>
+      <li>Hit <b>Retry</b>.</li>
+    </ol>
+  </div>`;
+}
+
+function trackRow(a,isNew){
+  const meta=[a.status_label,a.location,a.date_applied].filter(Boolean).join(" · ");
+  const cb=isNew?`<input type="checkbox" data-aid="${a.id}" checked />`:`<input type="checkbox" checked disabled />`;
+  return `<div class="track-row ${isNew?"":"in"}">${cb}
+    <div class="tr-main"><div class="tr-title">${esc(a.title||"Untitled")} · ${esc(a.company||"")}</div>
+      <div class="tr-meta">${esc(meta)}</div></div>
+    ${isNew?`<span class="pill arch">New</span>`:`<span class="pill ok">In sheet</span>`}</div>`;
+}
+
+function renderTracker(d){
+  if(!d.connected){
+    $("#trackerSub").textContent="Connect your Google Sheet to start syncing.";
+    $("#trackerBody").innerHTML=setupHTML(d);
+    $("#trackerFoot").innerHTML=`${d.spreadsheet_url?`<a class="btn sec sm" href="${esc(d.spreadsheet_url)}" target="_blank" rel="noopener">Open sheet ↗</a>`:""}
+      <span class="toast-line"></span>
+      <button class="btn ghost sm" id="tkRetry">Retry</button>
+      <button class="btn sm" id="tkClose2">Close</button>`;
+    $("#tkRetry").onclick=fetchCompare;
+    $("#tkClose2").onclick=closeTracker;
+    return;
+  }
+  const c=d.counts||{};
+  const news=d.new||[];
+  sheetState.selected=new Set(news.map(a=>a.id));   // pre-select all new
+  $("#trackerSub").textContent=`Connected to “${d.worksheet||"your sheet"}”.`;
+
+  let body=`<div class="sheet-status"><span><span class="dot up"></span>Connected · ${esc(d.worksheet||"")}</span>
+      ${d.spreadsheet_url?`<a href="${esc(d.spreadsheet_url)}" target="_blank" rel="noopener">Open sheet ↗</a>`:""}</div>
+    <div class="count-chips">
+      <span class="count-chip"><b>${c.new||0}</b> new to add</span>
+      <span class="count-chip">${c.in_sheet||0} already tracked</span>
+      <span class="count-chip">${c.orphans||0} only in sheet</span>
+      <span class="count-chip">${c.applied_total||0} applied total</span>
+    </div>`;
+  if(!news.length){
+    body+=`<div class="empty">🎉 You're all caught up — every applied job is already in the sheet.</div>`;
+  }else{
+    body+=`<label class="selall"><input type="checkbox" id="tkAll" checked> Select all ${news.length} new</label>
+      <div class="track-list">`+news.map(a=>trackRow(a,true)).join("")+`</div>`;
+  }
+  if((d.in_sheet||[]).length){
+    body+=`<div class="sec-h">Already in your sheet (${d.in_sheet.length})</div>
+      <div class="track-list">`+d.in_sheet.slice(0,40).map(a=>trackRow(a,false)).join("")+`</div>`;
+  }
+  $("#trackerBody").innerHTML=body;
+
+  $("#trackerFoot").innerHTML=`<span class="toast-line" id="tkMsg"></span>
+    <button class="btn ghost sm" id="tkClose2">Close</button>
+    <button class="btn sm" id="tkAdd" ${news.length?"":"disabled"}>Add <span id="tkN">${news.length}</span> selected →</button>`;
+
+  const all=$("#tkAll");
+  if(all) all.onchange=()=>{ const on=all.checked;
+    $("#trackerBody").querySelectorAll("input[data-aid]").forEach(cb=>{ cb.checked=on; toggleSel(cb); }); updateAddN(); };
+  $("#trackerBody").querySelectorAll("input[data-aid]").forEach(cb=>cb.onchange=()=>{ toggleSel(cb); updateAddN(); });
+  $("#tkClose2").onclick=closeTracker;
+  const addBtn=$("#tkAdd"); if(addBtn) addBtn.onclick=doSync;
+  updateAddN();
+}
+
+function toggleSel(cb){ const id=+cb.dataset.aid; cb.checked?sheetState.selected.add(id):sheetState.selected.delete(id); }
+function updateAddN(){ const n=sheetState.selected.size; const el=$("#tkN"); if(el) el.textContent=n; const b=$("#tkAdd"); if(b) b.disabled=!n; }
+
+async function doSync(){
+  const ids=[...sheetState.selected]; if(!ids.length) return;
+  const btn=$("#tkAdd"); if(btn){ btn.disabled=true; btn.textContent="Adding…"; }
+  const msg=$("#tkMsg"); if(msg) msg.textContent="";
+  try{
+    const d=await fetch("/api/sheet/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({app_ids:ids})}).then(r=>r.json());
+    if(!d.connected){ if(msg) msg.textContent="Not connected: "+(d.reason||""); if(btn){btn.disabled=false;btn.textContent="Retry";} return; }
+    if(msg){ msg.textContent=(d.errors&&d.errors.length)
+        ? `Added ${d.added}; issue: ${d.errors.join("; ")}`
+        : `✓ Added ${d.added} to the sheet${d.skipped?`, skipped ${d.skipped} already there`:""}.`; }
+    refreshTrackerBadge();
+    setTimeout(fetchCompare, 700);    // refresh buckets — synced rows flip to "In sheet"
+  }catch(e){ if(msg) msg.textContent="Sync failed: "+(e.message||e); if(btn){btn.disabled=false;btn.textContent="Add selected →";} }
+}
+
+async function refreshTrackerBadge(){
+  try{
+    const d=await fetch("/api/sheet/compare").then(r=>r.json());
+    const b=$("#trackerBadge"); if(!b) return;
+    if(d.connected && d.counts && d.counts.new>0){ b.textContent=d.counts.new; b.hidden=false; }
+    else b.hidden=true;
+  }catch(e){ /* silent — never block the dashboard on the sheet */ }
+}
+
+$("#trackerBtn").onclick=openTracker;
+$("#trackerClose").onclick=closeTracker;
+$("#trackerModal").addEventListener("click",e=>{ if(e.target===$("#trackerModal")) closeTracker(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#trackerModal").hidden) closeTracker(); });
+
+loadAll(); connectSSE(); refreshTrackerBadge();
 </script>
 </body>
 </html>
