@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">Job<span>Pilot</span><em>Autofill</em></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Checking backend…</span></div>
+
+    <label class="row">Résumé
+      <select id="resume">
+        <option value="auto">Auto-detect</option>
+        <option value="ai">AI / Data</option>
+        <option value="bt">Behavioral Tech</option>
+      </select>
+    </label>
+
+    <button id="go" class="primary">Autofill this application</button>
+    <div id="result" class="result"></div>
+
+    <div class="foot">Fills fields only — you review &amp; click <b>Apply</b> yourself.
+      <a href="http://127.0.0.1:7777" target="_blank">Open dashboard</a></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
