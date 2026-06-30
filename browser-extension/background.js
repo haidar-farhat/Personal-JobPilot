@@ -42,7 +42,8 @@ function jSub(n, ...s) { return s.some((x) => n.includes(x)); }
 function jmap(field, p) {
   const type = (field.type || "text").toLowerCase();
   if (type === "file") return { value: null, source: "file", needs_review: true, confidence: 1 };
-  const n = jnorm((field.label || "") + " " + (field.name || ""));
+  const nl = jnorm(field.label || ""), nn = jnorm(field.name || "");
+  const n = (nl + " " + nn).trim();
   if (!n) return null;
   const id = p.identity || {}, ad = p.address || {}, li = p.links || {}, wa = p.work_authorization || {},
         ex = p.experience || {}, sa = p.salary || {}, rf = p.referral || {}, ee = p.eeoc || {};
@@ -61,7 +62,8 @@ function jmap(field, p) {
 
   if (jTok(n, "first", "given") && jTok(n, "name")) return T(id.first_name);
   if (jTok(n, "last", "surname", "family") && jTok(n, "name")) return T(id.last_name);
-  if (["name", "full name", "your name", "legal name"].includes(n)) return T(id.full_name);
+  if (["name", "full name", "your name", "legal name"].includes(nl) ||
+      ["name", "full name", "your name", "legal name"].includes(nn)) return T(id.full_name);
   if (jSub(n, "email")) return T(id.email);
   if (jSub(n, "phone", "mobile", "telephone")) return T(id.phone);
   if (jSub(n, "linkedin")) return T(li.linkedin);

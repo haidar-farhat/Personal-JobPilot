@@ -38,6 +38,16 @@ def test_map_last_name():
     assert map_standard_field(f, PROFILE)["value"] == "Cromaz"
 
 
+def test_map_full_name_label_with_name_attr():
+    f = {"id": "fn", "label": "Full name", "name": "name", "type": "text"}
+    assert map_standard_field(f, PROFILE)["value"] == "Matthew Cromaz"
+
+
+def test_company_name_is_not_full_name():
+    f = {"id": "cn", "label": "Company name", "name": "company", "type": "text"}
+    assert map_standard_field(f, PROFILE) is None
+
+
 def test_map_linkedin():
     f = {"id": "f3", "label": "LinkedIn Profile", "name": "linkedin", "type": "url"}
     assert map_standard_field(f, PROFILE)["value"] == "https://li/in/x"

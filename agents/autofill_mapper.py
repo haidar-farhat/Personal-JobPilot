@@ -77,7 +77,9 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     if ftype == "file":
         return {"value": None, "source": "file", "confidence": 1.0, "needs_review": True}
 
-    norm = normalize((field.get("label") or "") + " " + (field.get("name") or ""))
+    nlabel = normalize(field.get("label") or "")
+    nname = normalize(field.get("name") or "")
+    norm = (nlabel + " " + nname).strip()
     if not norm:
         return None
 
@@ -115,7 +117,7 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return text(ident.get("first_name"))
     if (_has_tok(norm, "last", "surname", "family", "lname")) and _has_tok(norm, "name"):
         return text(ident.get("last_name"))
-    if norm in name_set:
+    if nlabel in name_set or nname in name_set:
         return text(ident.get("full_name"))
     if _has_sub(norm, "email"):
         return text(ident.get("email"))
