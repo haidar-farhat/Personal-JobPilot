@@ -105,6 +105,27 @@ async function offlinePlan(fields) {
            archetype_label: "offline (cached profile)", resume_used: "cached", _offline: true };
 }
 
+// Get a fill-plan from the backend, falling back to the offline mapper.
+// Shared by the toolbar popup (runAutofill) and the in-page widget (cmd:"plan").
+async function fetchPlan(fields, ctx, resumePref) {
+  ctx = ctx || {};
+  try {
+    const r = await fetch(`${BACKEND}/api/autofill/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: ctx.url || "", job_title: ctx.h1 || ctx.title || "", company: "",
+        page_text: ctx.text || "", resume_pref: resumePref || "auto", fields,
+      }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } catch (e) {
+    const off = await offlinePlan(fields);
+    return off || { error: "JobPilot backend offline and no cached profile. Start JobPilot, then retry." };
+  }
+}
+
 async function runAutofill(resumePref) {
   const tab = await getActiveTab();
   if (!tab || !tab.id) return { error: "No active tab." };
@@ -138,22 +159,8 @@ async function runAutofill(resumePref) {
   } catch (e) { /* non-fatal */ }
 
   // 3. ask the backend for a plan; fall back to offline standard-fill
-  let plan;
-  try {
-    const r = await fetch(`${BACKEND}/api/autofill/plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: ctx.url, job_title: ctx.h1 || ctx.title, company: "",
-        page_text: ctx.text, resume_pref: resumePref || "auto", fields,
-      }),
-    });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    plan = await r.json();
-  } catch (e) {
-    plan = await offlinePlan(fields);
-    if (!plan) return { error: "JobPilot backend offline and no cached profile. Start JobPilot, then retry." };
-  }
+  const plan = await fetchPlan(fields, ctx, resumePref);
+  if (plan.error) return { error: plan.error };
 
   // 4. apply the plan (fill.js defines window.__jpafApply)
   try {
@@ -174,6 +181,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     if (msg.cmd === "health") sendResponse(await health());
     else if (msg.cmd === "autofill") sendResponse(await runAutofill(msg.resumePref));
+    else if (msg.cmd === "plan") { await cacheProfile(); sendResponse(await fetchPlan(msg.fields, msg.ctx, msg.resumePref)); }
     else sendResponse({ error: "unknown cmd" });
   })();
   return true; // keep the message channel open for the async response
