@@ -462,6 +462,10 @@ function renderList(){
 }
 
 const STATUSES=["found","scored","materials_ready","queued","approved","applied","response_received","interview","rejected","no_response","skipped"];
+// Mirror server STATUS_META labels so cards reflect status changes immediately (server is source of truth on reload).
+const STATUS_META={found:{label:"FOUND"},scored:{label:"SCORED"},queued:{label:"QUEUED"},materials_ready:{label:"MATERIALS READY"},
+  approved:{label:"APPROVED"},applied:{label:"APPLIED"},response_received:{label:"RESPONSE"},interview:{label:"INTERVIEW"},
+  rejected:{label:"REJECTED"},no_response:{label:"NO RESPONSE"},skipped:{label:"SKIPPED"}};
 function selectApp(id){
   state.selectedId=id;
   const a=state.apps.find(x=>x.id===id); if(!a){ return; }
@@ -518,9 +522,14 @@ async function loadEval(id){
   }catch(e){ const box=$("#evalBox"); if(box){ box.className="muted"; box.textContent="Evaluation unavailable."; } }
 }
 async function changeStatus(id, status){
-  try{ await fetch(`/api/application/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
-    const a=state.apps.find(x=>x.id===id); if(a){ a.status=status; } renderList();
-  }catch(e){}
+  try{
+    const r=await fetch(`/api/application/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const a=state.apps.find(x=>x.id===id);
+    if(a){ a.status=status; a.status_meta=STATUS_META[status]||{label:status.toUpperCase()}; }
+    render();                                   // refresh cards + rail facet counts
+    if(state.selectedId===id) selectApp(id);    // keep detail (status select) in sync
+  }catch(e){ console.error("status update failed:", e); }
 }
 async function doAction(act, id){
   if(act==="apply") fetch(`/api/application/${id}/open-link`,{method:"POST"});
