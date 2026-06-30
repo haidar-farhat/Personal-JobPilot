@@ -248,9 +248,15 @@ so it stays within site ToS.
    talks to `http://127.0.0.1:7777`.
 2. Open `chrome://extensions` (or `edge://extensions`) and enable **Developer mode**.
 3. Click **Load unpacked** and select the `browser-extension/` folder.
-4. On any application page, click the **JobPilot Autofill** toolbar icon →
-   **Autofill this application**. Filled fields are outlined green; anything needing review
-   is amber, and a toast reports the count.
+4. On any application page a floating **⚡ Autofill** button appears bottom-right —
+   it auto-detects application forms (Simplify / JobWright style; the **⌄** opens the
+   résumé selector + status). Click it to fill. You can also use the **JobPilot Autofill**
+   toolbar icon → **Autofill this application**. Filled fields are outlined green; anything
+   needing review is amber, and a toast reports the count.
+
+The in-page button is a content script (`content/widget.js`) injected on all sites but
+only shown when the page looks like a job application; it reuses the same scan → plan →
+fill pipeline as the popup via the service worker.
 
 If the backend is offline it still fills standard fields from a cached copy of your profile
 (no AI essays). Résumé file uploads are flagged for manual attach — browsers block scripted
