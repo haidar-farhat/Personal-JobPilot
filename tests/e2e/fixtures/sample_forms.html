@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sample Application Forms</title></head>
+<body>
+<h1>Senior AI Engineer — Application</h1>
+
+<!-- Greenhouse-like form -->
+<form id="gh" onsubmit="window.__submitted=true;return false;">
+  <label for="gh_first">First Name</label><input id="gh_first" name="first_name" type="text">
+  <label for="gh_last">Last Name</label><input id="gh_last" name="last_name" type="text">
+  <label for="gh_email">Email</label><input id="gh_email" name="email" type="email">
+  <label for="gh_phone">Phone</label><input id="gh_phone" name="phone" type="tel">
+  <label for="gh_linkedin">LinkedIn Profile</label><input id="gh_linkedin" name="linkedin" type="url">
+  <label for="gh_github">GitHub</label><input id="gh_github" name="github" type="url">
+  <label for="gh_auth">Are you authorized to work in the United States?</label>
+  <select id="gh_auth" name="work_auth"><option value="">--</option><option>Yes</option><option>No</option></select>
+  <label for="gh_sponsor">Will you now or in the future require sponsorship?</label>
+  <select id="gh_sponsor" name="sponsorship"><option value="">--</option><option>Yes</option><option>No</option></select>
+  <label for="gh_why">Why do you want to work here?</label>
+  <textarea id="gh_why" name="why_company"></textarea>
+  <label for="gh_resume">Upload your resume</label><input id="gh_resume" name="resume" type="file">
+  <button type="submit">Submit Application</button>
+</form>
+
+<!-- Lever-like form -->
+<form id="lever" onsubmit="window.__submitted=true;return false;">
+  <label for="lever_name">Full name</label><input id="lever_name" name="name" type="text">
+  <label for="lever_email">Email</label><input id="lever_email" name="email" type="email">
+  <label for="lever_city">City</label><input id="lever_city" name="city" type="text">
+  <label for="lever_gender">Gender</label>
+  <select id="lever_gender" name="gender">
+    <option value="">--</option><option>Male</option><option>Female</option><option>Decline to answer</option>
+  </select>
+  <button type="submit">Apply</button>
+</form>
+
+<!-- Generic custom form -->
+<form id="generic" onsubmit="window.__submitted=true;return false;">
+  <label for="g_state">State</label>
+  <select id="g_state" name="state">
+    <option value="">--</option><option>California</option><option>Nevada</option><option>Oregon</option>
+  </select>
+  <label for="g_salary">Desired salary</label><input id="g_salary" name="salary" type="text">
+  <label for="g_source">How did you hear about us?</label>
+  <select id="g_source" name="source">
+    <option value="">--</option><option>LinkedIn</option><option>Indeed</option><option>Company website</option>
+  </select>
+  <button type="submit">Send</button>
+</form>
+</body>
+</html>
