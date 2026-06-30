@@ -263,6 +263,37 @@ tests/test_autofill_api.py -q` and, with the dashboard up,
 
 ---
 
+## Google Sheet tracker sync
+
+The dashboard can sync the jobs you've applied to into your own Google Sheet —
+**compare** what's already logged, then **add** the rest, never duplicating. Click
+**Sync to Sheet** in the results toolbar: it reads your sheet, tags each applied job
+**✓ In sheet** or **+ New** (new pre-selected), and appends only the ones you pick. It
+only ever appends — existing rows are never edited or deleted.
+
+It adapts to *your* sheet's columns: JobPilot maps its fields (Company, Role/Title, Date
+Applied, Status, Link, Location, Pay, Source, Fit, Notes) onto whatever headers you
+already have; an empty sheet gets a clean header row written for it. Matching is by job
+URL first, then company + title, so re-syncing is idempotent.
+
+**One-time setup (service account):**
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), pick/create a
+   project and enable the **Google Sheets API**.
+2. Create a **Service account**, then **Keys → Add key → JSON**, and save the file as
+   `config/google_credentials.json` (gitignored).
+3. Open that JSON, copy the `client_email`, and **share your sheet with that address as
+   Editor**.
+4. Point `config/settings.yaml` `google_sheets:` at your sheet (`spreadsheet_id`,
+   optional `worksheet`), then reopen the Tracker modal.
+
+Until creds are present the feature degrades gracefully — the modal shows these exact
+steps instead of erroring. Backed by `server/sheets.py`
+(`/api/sheet/health|compare|sync`) and the pure `agents/sheet_sync.py`. Verify with
+`python -m pytest tests/test_sheet_sync.py tests/test_sheets_api.py -q`.
+
+---
+
 ## Project structure
 
 ```
@@ -271,7 +302,8 @@ Personal-JobPilot/
 │   ├── scanner/                 # One file per source (Greenhouse, Lever, Ashby, ...)
 │   ├── ranker.py                # 3-stage LLM scoring pipeline
 │   ├── tailor.py                # Resume + cover letter .docx generation
-│   └── auto_applier/            # Playwright submission bot
+│   ├── auto_applier/            # Playwright submission bot
+│   └── sheet_sync.py            # Pure match/row logic for the Google Sheet tracker
 ├── config/
 │   ├── settings.yaml            # Search keywords, schedule, thresholds
 │   ├── archetypes.yaml          # 6 archetypes × 10 dimensions × weights + thresholds
@@ -285,7 +317,8 @@ Personal-JobPilot/
 ├── server/
 │   ├── dashboard.py             # FastAPI app + SSE
 │   ├── static/index.html        # Single-file UI
-│   └── autofill.py              # Autofill API for the browser extension
+│   ├── autofill.py              # Autofill API for the browser extension
+│   └── sheets.py                # Google Sheet tracker-sync API
 ├── browser-extension/          # MV3 autofill extension (popup, service worker, scan/fill)
 ├── utils/
 │   ├── ollama_client.py         # Ollama wrapper with JSON-mode + retries
