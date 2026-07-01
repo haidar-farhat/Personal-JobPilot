@@ -228,3 +228,162 @@ def test_new_ai_and_bt_archetypes_present():
         assert key in arch, f"missing archetype: {key}"
         assert arch[key].get("keywords"), f"{key} has no keywords"
         assert isinstance(arch[key].get("auto_apply_min_score"), int), f"{key} missing auto_apply_min_score"
+
+
+# ----------------------------------------------------------------------
+# Stage 1: archetype classification routing (keyword-rescue fix)
+#
+# classify_archetype touches Ollama, but generate_json is monkeypatched so these
+# stay deterministic. They lock in the routing logic, not the model.
+# ----------------------------------------------------------------------
+
+
+def _classify(monkeypatch, llm_result, *, title, description="A role."):
+    """Run classify_archetype with a canned LLM response (no Ollama)."""
+    from agents import ranker
+    from db.models import Job
+
+    monkeypatch.setattr(ranker, "generate_json", lambda *a, **k: llm_result)
+    job = Job(
+        title=title, company="ACME", location="San Francisco",
+        description=description, url="http://x", source="test",
+        dedup_hash="hash-classify",
+    )
+    return ranker.classify_archetype(job)
+
+
+def test_unknown_with_title_keyword_is_rescued(monkeypatch):
+    """BUG: LLM returns 'unknown' but the title clearly names an archetype.
+    The title keyword-fallback must run BEFORE accepting 'unknown'."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "unknown", "confidence": 0.9, "reasoning": "punted"},
+        title="Senior Data Analyst",
+    )
+    assert result["archetype"] == "data_analyst"
+
+
+def test_unknown_without_title_keyword_stays_unknown(monkeypatch):
+    """No keyword in the title → 'unknown' is the honest answer."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "unknown", "confidence": 0.9, "reasoning": "no fit"},
+        title="Underwater Basket Weaver",
+    )
+    assert result["archetype"] == "unknown"
+
+
+def test_valid_high_confidence_archetype_is_kept(monkeypatch):
+    """No regression: a confident, valid LLM answer is used as-is even when the
+    title carries no archetype keyword."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "ml_engineer", "confidence": 0.95, "reasoning": "MLOps"},
+        title="Software Engineer, Platform",
+    )
+    assert result["archetype"] == "ml_engineer"
+    assert result["confidence"] == pytest.approx(0.95)
+
+
+def test_invalid_key_with_title_keyword_uses_keyword(monkeypatch):
+    """Existing behavior preserved: an out-of-set key falls back to title keywords."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "software_developer", "confidence": 0.8, "reasoning": "x"},
+        title="Registered Behavior Technician (RBT)",
+    )
+    assert result["archetype"] == "behavioral_technician"
+
+
+def test_invalid_key_without_title_keyword_is_unknown(monkeypatch):
+    """Out-of-set key AND no title keyword → unknown."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "wizard", "confidence": 0.8, "reasoning": "x"},
+        title="Chief Happiness Officer",
+    )
+    assert result["archetype"] == "unknown"
+
+
+def test_low_confidence_real_archetype_overridden_by_title_keyword(monkeypatch):
+    """confidence < 0.5 → trust a verbatim title keyword over the shaky LLM label."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "data_scientist", "confidence": 0.2, "reasoning": "unsure"},
+        title="Registered Behavior Technician",
+    )
+    assert result["archetype"] == "behavioral_technician"
+    assert result["confidence"] >= 0.6
+
+
+def test_low_confidence_real_archetype_kept_when_no_keyword(monkeypatch):
+    """confidence < 0.5 but no title keyword → keep the LLM's real archetype,
+    do NOT downgrade a genuine guess to 'unknown'."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "data_scientist", "confidence": 0.2, "reasoning": "unsure"},
+        title="Insights Wrangler",
+    )
+    assert result["archetype"] == "data_scientist"
+
+
+def test_keyword_rescue_raises_confidence_floor(monkeypatch):
+    """A title-keyword rescue should not report near-zero confidence."""
+    result = _classify(
+        monkeypatch,
+        {"archetype": "unknown", "confidence": 0.0, "reasoning": "punted"},
+        title="Machine Learning Engineer",
+    )
+    assert result["archetype"] == "ml_engineer"
+    assert result["confidence"] >= 0.6
+
+
+# ----------------------------------------------------------------------
+# Title keyword matcher (helper used by the rescue path)
+# ----------------------------------------------------------------------
+
+
+def test_match_archetype_by_title_finds_keyword():
+    from agents.ranker import _archetype_config, _match_archetype_by_title
+
+    archetypes = _archetype_config()["archetypes"]
+    assert _match_archetype_by_title("Senior Data Analyst", archetypes) == "data_analyst"
+    assert _match_archetype_by_title("RBT - Behavior Technician", archetypes) == "behavioral_technician"
+
+
+def test_match_archetype_by_title_no_match_returns_none():
+    from agents.ranker import _archetype_config, _match_archetype_by_title
+
+    archetypes = _archetype_config()["archetypes"]
+    assert _match_archetype_by_title("Underwater Basket Weaver", archetypes) is None
+
+
+def test_match_archetype_by_title_empty_returns_none():
+    from agents.ranker import _archetype_config, _match_archetype_by_title
+
+    archetypes = _archetype_config()["archetypes"]
+    assert _match_archetype_by_title("", archetypes) is None
+    assert _match_archetype_by_title(None, archetypes) is None
+
+
+def test_match_archetype_by_title_never_returns_unknown():
+    """'unknown' has no keywords, so the matcher must never select it."""
+    from agents.ranker import _archetype_config, _match_archetype_by_title
+
+    archetypes = _archetype_config()["archetypes"]
+    assert _match_archetype_by_title("Unknown Mystery Role", archetypes) is None
+
+
+# ----------------------------------------------------------------------
+# Prompt tightening — discourage over-use of "unknown"
+# ----------------------------------------------------------------------
+
+
+def test_archetype_prompt_discourages_unknown():
+    """The prompt should frame 'unknown' as a last resort to curb over-use,
+    while still permitting it as an answer."""
+    from agents.ranker import ARCHETYPE_PROMPT_TEMPLATE
+
+    text = ARCHETYPE_PROMPT_TEMPLATE.lower()
+    assert "last resort" in text
+    assert "unknown" in text
