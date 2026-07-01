@@ -16,6 +16,8 @@ env/
 *.sqlite
 *.sqlite3
 jobpilot.db
+jobpilot.db.bak-*
+*.db.bak-*
 logs/
 
 # ─── Generated artifacts ────────────────────────────────
