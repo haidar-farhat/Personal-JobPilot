@@ -1,6 +1,6 @@
 # Personal JobPilot
 
-> A fully local, autonomous job-search agent. Scrapes ATS boards every 30 minutes, classifies each role into one of 6 career archetypes, scores it across 10 weighted dimensions with a local LLM, generates an ATS-clean tailored resume + cover letter, and queues high-fit roles for one-click submission — all on a single laptop, $0/month.
+> A fully local, autonomous job-search agent. Scrapes ATS boards every 30 minutes, classifies each role into one of 10 career archetypes across three tracks (data/quant, AI-engineering, and hourly behavioral-technician work), scores it across 10 weighted dimensions with a local LLM, generates an ATS-clean tailored resume + cover letter, drafts interview-prep and networking outreach on demand, and queues high-fit roles for one-click submission — all on a single laptop, $0/month.
 
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -13,16 +13,18 @@
 
 ## Why I built this
 
-I'm a Bay Area data scientist looking for my next role. Applying to jobs is a slow, manual, soul-crushing loop: scroll boards, read JDs, decide if it's worth the effort, hand-tailor a resume, paste 30 form fields, repeat. It scales like O(n) human-hours.
+I'm a Bay Area data scientist (MS Quantitative Economics) pivoting toward AI-engineering roles. Applying to jobs is a slow, manual, soul-crushing loop: scroll boards, read JDs, decide if it's worth the effort, hand-tailor a resume, paste 30 form fields, repeat. It scales like O(n) human-hours.
 
 So I built the system I wished existed — one that runs on my own hardware, uses no paid APIs, respects my data, and turns the job hunt into a `cron`-scheduled background process I can supervise from a single dashboard. The same engineering patterns I'd use to ship a production ML pipeline at work, applied to my own problem.
 
-This repo is the result. It's been running 24/7 for several weeks and has:
+This repo is the result. It's been running 24/7 for weeks and now:
 
-- Scanned **130+ jobs** across Greenhouse, Lever, Ashby, and 40+ company career pages
-- Scored every one on a **10-dimension archetype-weighted rubric** via local Gemma-4 27B
-- Generated **48 ATS-clean tailored resumes + cover letters** as ready-to-send `.docx` files
-- Auto-submitted **3 applications** via Playwright (with strict guardrails — never CAPTCHAs, never paid jobs)
+- Scans **Greenhouse, Lever, Ashby, EdJoin, and 40+ company career pages** every 30 minutes (ATS-API-first, zero-ToS-risk — the old Indeed/Google scrapers were retired)
+- Classifies each role into **10 archetypes across three tracks** — data/quant, AI-engineering (AI Engineer / Solutions Engineer / AI Analyst), and hourly Behavioral-Technician (ABA/RBT) work
+- Scores every one on a **10-dimension archetype-weighted rubric** via local Gemma-4 27B, with AI-intensity and hourly-pay signals baked in
+- Generates **ATS-clean tailored resumes + cover letters** as ready-to-send `.docx` files (résumé auto-routed by track)
+- Drafts a **role-specific interview-prep pack** and **networking outreach** for any job, locally, on demand
+- Auto-submits high-fit applications via Playwright behind strict guardrails — never CAPTCHAs, never paid jobs
 
 ---
 
@@ -35,7 +37,7 @@ This repo is the result. It's been running 24/7 for several weeks and has:
                                         │
             ┌───────────────┬───────────┼───────────┬───────────────┐
             ▼               ▼           ▼           ▼               ▼
-        Greenhouse        Lever       Ashby     Indeed RSS    Career pages
+        Greenhouse        Lever       Ashby       EdJoin      Career pages
             │               │           │           │               │
             └───────────────┴─────┬─────┴───────────┴───────────────┘
                                   │ dedup hash
@@ -59,6 +61,8 @@ This repo is the result. It's been running 24/7 for several weeks and has:
               ┌─────────────────────┐
               │  Resume Tailor      │  ──►  output/resumes/*.docx
               │  Cover Letter Gen   │  ──►  output/cover_letters/*.docx
+              │  Interview Prep     │  ──►  output/interview_prep/*.json
+              │  Outreach Drafter   │  ──►  output/outreach/*.json
               └─────────┬───────────┘
                         ▼
               ┌────────────────────┐         ┌──────────────────┐
@@ -68,7 +72,7 @@ This repo is the result. It's been running 24/7 for several weeks and has:
                 http://127.0.0.1:7777
 ```
 
-**Single SQLite database** is the source of truth. Every component reads/writes it independently — scanner, ranker, tailor, dashboard, auto-applier — so nothing is coupled and any one piece can be restarted in isolation.
+**Single SQLite database** is the source of truth. Every component reads/writes it independently — scanner, ranker, tailor, dashboard, auto-applier, and the interview-prep/outreach copilots — so nothing is coupled and any one piece can be restarted in isolation.
 
 ---
 
@@ -83,30 +87,45 @@ I broke it into three focused LLM calls, each with a narrow contract:
 | Stage | Input | Output | Why split |
 |---|---|---|---|
 | **1. Classify** | Title + JD | `{archetype, confidence, reasoning}` | One decision. Model isn't distracted. Lets us route to a tailored scoring rubric. |
-| **2. Score dimensions** | JD + archetype + resume summary | `{10 dim scores, matches, gaps, ats_keywords}` | Constrained 10-dim schema. Each dim gets full attention. |
+| **2. Score dimensions** | JD + archetype + resume summary | `{10 dim scores, matches, gaps, ats_keywords, ai_intensity, ai_tools}` | Constrained schema. Each dim gets full attention. |
 | **3. Write evaluation** | All of the above | 6-block markdown audit | Generates a human-readable report stored on disk — full audit trail. |
 
 The weighted overall score is computed **in deterministic Python** from the dim scores, not by the LLM. This makes scoring reproducible, auditable, and instantly tunable by editing one yaml file.
 
 ### Archetype-routed scoring (one rubric per role type)
 
-`config/archetypes.yaml` defines 6 archetypes — `data_analyst`, `data_scientist`, `quantitative_analyst`, `ml_engineer`, `business_analyst`, `product_analyst` — plus an `unknown` fallback. Each one ships with:
+`config/archetypes.yaml` defines **10 archetypes** — plus an `unknown` fallback — grouped into three tracks:
 
-- A **dimension-weight vector** (10 weights summing to 1.0) so the same dim scores produce different overall fit depending on role type. A "comp_range" miss matters more for a Quant Analyst than a Business Analyst.
-- An **auto-apply threshold** (`auto_apply_min_score`) — e.g. ML Engineer roles need 80+ before the bot will auto-submit; Data Analyst is 72+. Tuned per archetype because the cost of a bad ML Eng application is higher.
+- **Data / quant:** `data_analyst`, `data_scientist`, `quantitative_analyst`, `ml_engineer`, `business_analyst`, `product_analyst`
+- **AI-engineering:** `ai_engineer` (LLM/GenAI/agentic apps), `ai_solutions_engineer` (forward-deployed / solutions / sales engineering), `ai_analyst` (AI-augmented analytics)
+- **Hourly:** `behavioral_technician` (ABA/RBT — 1:1 sessions, hourly pay, part-time)
+
+Each archetype ships with:
+
+- A **dimension-weight vector** (10 weights summing to 1.0) so the same dim scores produce different overall fit depending on role type. A `comp_range` miss matters far more for a Behavioral Technician (weight `0.20`, an hourly-rate floor) than for a Quant Analyst.
+- An **auto-apply threshold** (`auto_apply_min_score`) — e.g. ML Engineer roles need 80+ before the bot will auto-submit; AI Engineer is 76+, Data Analyst 72+. Tuned per archetype because the cost of a bad application differs by role.
 
 ```yaml
-quantitative_analyst:
+behavioral_technician:
+  label: "Behavioral Technician (ABA)"
   weights:
-    technical_fit: 0.16
-    archetype_fit: 0.18   # highest — quant work demands the niche
-    comp_range:    0.10
-    skills_overlap:0.14
+    comp_range:      0.20   # highest — hourly rate is the dominant driver
+    location_remote: 0.16   # must be SF/Bay, on-site
+    archetype_fit:   0.16
+    skills_overlap:  0.14
+    technical_fit:   0.06   # de-emphasized — this isn't a coding role
     ...
-  auto_apply_min_score: 73
+  auto_apply_min_score: 70
 ```
 
 Adding a new archetype means editing one yaml file. No code change, no migration, no model retraining.
+
+### AI-forward and hourly-pay signals
+
+Two role-shape signals extend the rubric beyond a single fit number:
+
+- **AI intensity** (`migration 004`) — every `JobScore` now carries `ai_intensity` (how central AI/LLM work is to the role) and `ai_tools` (the concrete AI stack named in the JD). The dashboard exposes an **AI-forward filter** so I can surface the roles that actually match the pivot, not just anything with "AI" in the title.
+- **Hourly compensation** (`migration 005`) — the scanner parses `$/hr` pay at scan time, comp-aware scoring folds it into `comp_range`, and hourly roles get a **$/hr auto-apply floor** so a sub-threshold rate is filtered before it ever reaches the queue. This is what makes the Behavioral-Technician track work alongside salaried tech roles in the same pipeline.
 
 ### ATS-clean .docx generation that actually passes the parser
 
@@ -118,23 +137,32 @@ The resume is generated with `python-docx` using design choices borrowed from Ja
 - Garamond at 10pt body, 1.08 line spacing — hits one page for any reasonable amount of experience
 - Hanging indents on bullets so wrapped lines don't break visual hierarchy
 
-The same module renders a matching cover letter from a tailored prompt — same fonts, same margins, same brand.
+The tailor is **track-aware**: tech/AI roles pull from the primary résumé, while behavioral-technician roles are routed to a separate ABA-focused résumé (`config/base_resume_bt.yaml`, gitignored) — so the same job feed produces the right document for each track. The same module renders a matching cover letter from a tailored prompt — same fonts, same margins, same brand.
 
-### Live dashboard with server-sent events
+### Live dashboard — Indeed-style, dark mode, Kanban board
 
-The dashboard at `http://127.0.0.1:7777` is a single-file static HTML + vanilla JS app served by FastAPI. No build step, no React, no bundle — but it gets live updates via SSE: scan completions, new scores, application status changes all stream into the UI in real time.
+The dashboard at `http://127.0.0.1:7777` is a single-file static HTML + vanilla JS app served by FastAPI. No build step, no React, no bundle — but it gets live updates via SSE: scan completions, new scores, and application-status changes all stream into the UI in real time.
 
-Each application row opens into a drawer that shows:
+The UI is an **Indeed-reference rebuild**: a two-field search, a faceted filter rail (archetype, source, AI-forward, hourly pay), and a list + detail pane so I can triage the feed fast. It ships with a **persisted dark mode** (respects `prefers-color-scheme` on first load, toggle to override) and a **Kanban pipeline board** where dragging a card between stages (Queued → Applied → Response → Interview) saves the status instantly.
+
+Each job's detail pane shows:
 - The full 10-dimension score grid with color-coded bars
-- An archetype badge + threshold banner ("Below 73 — won't auto-apply")
+- An archetype badge + threshold banner ("Below 73 — won't auto-apply") and AI-intensity / hourly-pay chips
 - Collapsible evaluation report rendered from the markdown the LLM wrote
-- One-click links to the tailored resume `.docx`, cover letter, and apply URL
+- One-click links to the tailored resume `.docx`, cover letter, and apply URL — plus on-demand **Tailor**, **Interview Prep**, and **Outreach** actions
+
+### Per-job AI copilots — interview prep & outreach
+
+Two local-only copilots turn a scored job into next actions, each one Ollama call, cached to disk so re-opening a job is instant:
+
+- **Interview-prep simulator** (`agents/interview_prep.py`, `GET /api/application/{id}/interview`) — generates a role-specific mock-interview pack: likely questions (behavioral / technical / role-specific), how *this* candidate should answer each using their real background, points to lead with, gaps to reframe, and smart questions to ask the interviewer. Cached to `output/interview_prep/`.
+- **Networking outreach drafter** (`agents/outreach.py`, `GET /api/application/{id}/outreach`) — drafts a LinkedIn connection note (hard-capped at 300 chars in code), a recruiter email, a hiring-manager email, résumé-grounded talking points, and generic role titles worth contacting. **It drafts text only** — it never sends anything, never looks up real people, and never invents names or contact details. Cached to `output/outreach/`.
 
 ### Auto-applier with hard guardrails
 
 The Playwright bot will *only* submit applications when **all** of these hold:
 
-1. Overall fit score ≥ the archetype's `auto_apply_min_score`
+1. Overall fit score ≥ the archetype's `auto_apply_min_score` (and, for hourly roles, `$/hr` ≥ the comp floor)
 2. ATS is on the allowlist (Greenhouse, Lever, Ashby — never Workday)
 3. No CAPTCHA detected on the page
 4. No "salary requirements" or "cover letter (required)" fields the LLM hasn't already filled
@@ -153,10 +181,10 @@ Every action is logged to `auto_apply_log` (JSON) on the Application row so I ca
 | **LLM** | Gemma-4 27B via [Ollama](https://ollama.com) | Local, free, no rate limits, ~50 tok/s on consumer GPU |
 | **Scheduler** | APScheduler (BlockingScheduler) | Cron-like jobs in pure Python |
 | **Web framework** | FastAPI + Uvicorn | Async, SSE-friendly, OpenAPI for free |
-| **Scraping** | requests + BeautifulSoup4 (Greenhouse/Lever/Ashby JSON APIs) + Playwright (JS-rendered pages) | Right tool per source |
+| **Scraping** | requests + BeautifulSoup4 (Greenhouse/Lever/Ashby JSON APIs) + Playwright (EdJoin + JS-rendered pages) | Right tool per source |
 | **Document gen** | python-docx | Direct XML access for ATS-clean output |
 | **Auto-apply** | Playwright (Chromium) | Stable selectors, native form-fill, screenshot on failure |
-| **Frontend** | Vanilla HTML/JS + SSE | No build step, ships instantly |
+| **Frontend** | Vanilla HTML/JS + SSE | No build step, ships instantly; dark mode + Kanban with zero dependencies |
 | **Tests** | pytest | Deterministic surfaces (math, config, persistence) — LLM calls covered by integration |
 
 Total monthly infra cost: **$0**.
@@ -185,22 +213,24 @@ python -m venv venv
 source venv/bin/activate           # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Install Playwright browsers (for auto-applier)
+# Install Playwright browsers (for the auto-applier + EdJoin scanner)
 playwright install chromium
 ```
 
 ### Configure
 
-Copy the two example files and fill in your details:
+Copy the example files and fill in your details:
 
 ```bash
 cp config/applicant_profile.example.yaml config/applicant_profile.yaml
 cp config/base_resume.example.yaml       config/base_resume.yaml
+# optional — the hourly Behavioral-Technician track uses a second résumé:
+cp config/base_resume.example.yaml       config/base_resume_bt.yaml
 ```
 
-Then tune `config/settings.yaml` for the roles you want — search keywords, target locations, excluded keywords, scoring thresholds.
+Then tune `config/settings.yaml` for the roles you want — search keywords, target locations, excluded keywords, scoring thresholds, and the hourly-pay floor.
 
-Both `applicant_profile.yaml` and `base_resume.yaml` are **gitignored** — your personal data stays on your machine.
+`applicant_profile.yaml`, `base_resume.yaml`, and `base_resume_bt.yaml` are all **gitignored** — your personal data stays on your machine.
 
 ### Run
 
@@ -227,9 +257,9 @@ python -m uvicorn server.dashboard:app --host 127.0.0.1 --port 7777
 Open http://127.0.0.1:7777 and:
 
 1. **Watch** new jobs appear as scanners find them
-2. **Review** each scored role — open the drawer to see the 10-dim breakdown + LLM-written evaluation
-3. **Approve** the high-fit ones — auto-applier submits via Playwright, low-fit ones get a tailored resume + cover letter ready for one-click manual submission
-4. **Track** status (Applied → Response → Interview) right from the dashboard
+2. **Filter** the feed — by archetype, source, AI-forward, or hourly pay — and open a role to see the 10-dim breakdown + LLM-written evaluation
+3. **Act** on the high-fit ones — auto-applier submits via Playwright; for the rest, generate a tailored resume + cover letter, an interview-prep pack, or networking outreach in one click
+4. **Track** status by dragging cards across the Kanban board (Queued → Applied → Response → Interview) — changes save instantly
 
 ---
 
@@ -305,24 +335,30 @@ steps instead of erroring. Backed by `server/sheets.py`
 ```
 Personal-JobPilot/
 ├── agents/
-│   ├── scanner/                 # One file per source (Greenhouse, Lever, Ashby, ...)
-│   ├── ranker.py                # 3-stage LLM scoring pipeline
-│   ├── tailor.py                # Resume + cover letter .docx generation
+│   ├── scanner/                 # One file per source
+│   │   ├── career_pages.py      #   Greenhouse + Lever board scanners
+│   │   ├── ashby.py             #   Ashby board scanner
+│   │   └── edjoin.py            #   EdJoin (Playwright, Bay-Area school-district BT roles)
+│   ├── ranker.py                # 3-stage LLM scoring pipeline (+ AI-intensity, hourly comp)
+│   ├── tailor.py                # Resume + cover letter .docx generation (track-aware)
+│   ├── interview_prep.py        # Local mock-interview prep-pack generator
+│   ├── outreach.py              # Local networking-outreach drafter (drafts only)
+│   ├── autofill_mapper.py       # Deterministic form-field mapper for the extension
 │   ├── auto_applier/            # Playwright submission bot
 │   └── sheet_sync.py            # Pure match/row logic for the Google Sheet tracker
 ├── config/
-│   ├── settings.yaml            # Search keywords, schedule, thresholds
-│   ├── archetypes.yaml          # 6 archetypes × 10 dimensions × weights + thresholds
+│   ├── settings.yaml            # Search keywords, schedule, thresholds, hourly floor
+│   ├── archetypes.yaml          # 10 archetypes × 10 dimensions × weights + thresholds
 │   ├── target_companies.yaml    # Career pages to monitor
-│   ├── base_resume.example.yaml         # ← copy to base_resume.yaml
+│   ├── base_resume.example.yaml         # ← copy to base_resume.yaml (+ base_resume_bt.yaml)
 │   └── applicant_profile.example.yaml   # ← copy to applicant_profile.yaml
 ├── db/
 │   ├── models.py                # SQLAlchemy models
 │   ├── database.py              # Session management
-│   └── migrations/              # Schema migrations
+│   └── migrations/              # Schema migrations (004 ai-intensity, 005 hourly comp)
 ├── server/
-│   ├── dashboard.py             # FastAPI app + SSE
-│   ├── static/index.html        # Single-file UI
+│   ├── dashboard.py             # FastAPI app + SSE + interview/outreach/tailor routes
+│   ├── static/index.html        # Single-file UI (Indeed-style, dark mode, Kanban board)
 │   ├── autofill.py              # Autofill API for the browser extension
 │   └── sheets.py                # Google Sheet tracker-sync API
 ├── browser-extension/          # MV3 autofill extension (popup, service worker, scan/fill)
@@ -352,9 +388,9 @@ Net effect: the system is genuinely fire-and-forget. Reboot your machine and the
 
 ## What's next
 
-- [ ] LinkedIn email-alert ingestion (Gmail API → IMAP parser already drafted)
+- [x] ~~Browser extension for one-click autofill from any application page~~ — **shipped** (see above)
+- [ ] Email auto-tracking — parse LinkedIn / ATS "application received / interview" emails via the Gmail API and auto-advance the Kanban board (design spec'd in `docs/`)
 - [ ] Bayesian fit-score calibration — re-weight dims based on which past applications got responses
-- [ ] Browser extension for one-click "save this job" from any page
 - [ ] Anonymized weekly digest export for accountability buddies
 - [ ] Multi-applicant mode (turn it into a service for friends who are job searching)
 
@@ -362,7 +398,7 @@ Net effect: the system is genuinely fire-and-forget. Reboot your machine and the
 
 ## About me
 
-I'm **Matthew Cromaz** — MS Quantitative Economics, Cal Poly SLO. Currently looking for **Data Scientist / Data Analyst / Quantitative Analyst** roles in the Bay Area.
+I'm **Matthew Cromaz** — MS Quantitative Economics, Cal Poly SLO. Currently looking for **AI Engineer / Data Scientist / Data Analyst / Quantitative Analyst** roles in the Bay Area.
 
 - 🌐 [LinkedIn](https://www.linkedin.com/in/matthew-cromaz)
 - 💻 [GitHub](https://github.com/TheCromazone)
