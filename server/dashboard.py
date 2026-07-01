@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import webbrowser
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -525,6 +526,166 @@ async def api_evaluation(app_id: int):
         )
     finally:
         session.close()
+
+
+@app.get("/api/application/{app_id}/interview")
+async def api_interview_prep(app_id: int, refresh: bool = False):
+    """Generate (or return cached) a role-specific interview-prep pack for this job.
+
+    The LLM call runs in a threadpool so it never blocks the event loop / SSE.
+    Degrades gracefully (ok:false) when Ollama is offline instead of 500-ing.
+    """
+    session = get_session()
+    try:
+        result = (
+            session.query(Application, Job, JobScore)
+            .join(Job, Application.job_id == Job.id)
+            .outerjoin(JobScore, JobScore.job_id == Job.id)
+            .filter(Application.id == app_id)
+            .first()
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job, score = result
+        job_id = job.id
+        ctx = {
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "description": job.description or "",
+            "archetype": getattr(score, "archetype", None) if score else None,
+            "fit_score": getattr(score, "fit_score", None) if score else None,
+            "key_matches": (getattr(score, "key_matches", None) or []) if score else [],
+            "key_gaps": (getattr(score, "key_gaps", None) or []) if score else [],
+        }
+    finally:
+        session.close()
+
+    try:
+        from agents.interview_prep import get_or_create_prep
+        prep = await asyncio.to_thread(get_or_create_prep, job_id, ctx, refresh)
+        prep["ok"] = True
+        return JSONResponse(content=prep)
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=200)
+
+
+@app.get("/api/application/{app_id}/outreach")
+async def api_outreach(app_id: int, refresh: bool = False):
+    """Generate (or return cached) networking/outreach DRAFTS for this job.
+
+    Drafts a LinkedIn note + recruiter/hiring-manager emails + talking points that
+    the user copies and sends themselves — it NEVER sends anything and does no
+    people/contact lookup. LLM runs in a threadpool; degrades gracefully (ok:false)
+    when Ollama is offline instead of 500-ing.
+    """
+    session = get_session()
+    try:
+        result = (
+            session.query(Application, Job, JobScore)
+            .join(Job, Application.job_id == Job.id)
+            .outerjoin(JobScore, JobScore.job_id == Job.id)
+            .filter(Application.id == app_id)
+            .first()
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job, score = result
+        job_id = job.id
+        ctx = {
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "description": job.description or "",
+            "archetype": getattr(score, "archetype", None) if score else None,
+            "fit_score": getattr(score, "fit_score", None) if score else None,
+            "key_matches": (getattr(score, "key_matches", None) or []) if score else [],
+            "key_gaps": (getattr(score, "key_gaps", None) or []) if score else [],
+        }
+    finally:
+        session.close()
+
+    try:
+        from agents.outreach import get_or_create_outreach
+        pack = await asyncio.to_thread(get_or_create_outreach, job_id, ctx, refresh)
+        pack["ok"] = True
+        return JSONResponse(content=pack)
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=200)
+
+
+_TAILOR_LOCKS_GUARD = threading.Lock()
+_TAILOR_LOCKS: dict = {}
+
+
+def _tailor_lock(job_id):
+    """One lock per job so concurrent tailor requests (two tabs, double-POST) don't
+    double-run the LLM or race on the shared, deterministic .docx filename."""
+    with _TAILOR_LOCKS_GUARD:
+        lk = _TAILOR_LOCKS.get(job_id)
+        if lk is None:
+            lk = threading.Lock()
+            _TAILOR_LOCKS[job_id] = lk
+        return lk
+
+
+@app.post("/api/application/{app_id}/tailor")
+async def api_tailor_resume(app_id: int):
+    """On-demand: generate a tailored one-page résumé + cover letter for this job.
+
+    Runs the LLM in a threadpool; degrades gracefully (ok:false) on failure.
+    Persists the file paths + bumps status to MATERIALS_READY from pre-materials states.
+    """
+    session = get_session()
+    try:
+        result = (
+            session.query(Application, Job, JobScore)
+            .join(Job, Application.job_id == Job.id)
+            .outerjoin(JobScore, JobScore.job_id == Job.id)
+            .filter(Application.id == app_id)
+            .first()
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job, score = result
+    finally:
+        session.close()
+
+    if score is None:
+        return JSONResponse(
+            content={"ok": False, "error": "Score this job first — tailoring needs the match analysis."},
+            status_code=200,
+        )
+
+    try:
+        from agents.tailor import tailor_for_job
+        def _run_tailor():
+            with _tailor_lock(job.id):   # serialize same-job tailoring (no dup LLM, no racing save)
+                return tailor_for_job(job, score)
+        paths = await asyncio.to_thread(_run_tailor)
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": f"Tailoring failed: {e}"}, status_code=200)
+
+    session = get_session()
+    try:
+        app_obj = session.query(Application).get(app_id)
+        if not app_obj:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj.resume_path = paths["resume_docx"]
+        app_obj.cover_letter_path = paths["cover_letter_docx"]
+        if app_obj.status in (ApplicationStatus.FOUND, ApplicationStatus.SCORED, ApplicationStatus.QUEUED):
+            app_obj.status = ApplicationStatus.MATERIALS_READY
+        session.commit()
+        new_status = app_obj.status.value
+    finally:
+        session.close()
+
+    return JSONResponse(content={
+        "ok": True,
+        "resume_filename": Path(paths["resume_docx"]).name,
+        "cover_filename": Path(paths["cover_letter_docx"]).name,
+        "status": new_status,
+    })
 
 
 @app.get("/api/archetypes")

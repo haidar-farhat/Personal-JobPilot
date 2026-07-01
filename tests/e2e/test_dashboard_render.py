@@ -25,7 +25,7 @@ def test_filter_rail_renders(page, base_url):
     # AI-forward toggle + the core facet headings
     assert page.locator("#f-ai").count() == 1
     text = rail.inner_text().lower()
-    for heading in ["role category", "fit tier", "job type", "date posted", "source", "status"]:
+    for heading in ["role category", "match tier", "job type", "date posted", "source", "status"]:
         assert heading in text, f"missing facet: {heading}"
 
 

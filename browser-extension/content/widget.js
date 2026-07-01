@@ -61,7 +61,7 @@
     hostEl.id = "__jpaf_host";
     // all:initial first, then our positioning overrides it (last wins in one declaration)
     hostEl.style.cssText =
-      "all:initial;position:fixed;z-index:2147483647;right:20px;bottom:20px;";
+      "all:initial;position:fixed;z-index:2147483647;right:14px;top:50%;transform:translateY(-50%);";
     root = hostEl.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
