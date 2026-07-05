@@ -89,7 +89,11 @@ schedule:
 # Ollama configuration
 ollama:
   base_url: "http://localhost:11434"
-  model: "gemma4:31b"
+  # gemma4:e4b — efficiency variant, ~25 tok/s on M4 24GB (2.2x faster than 12b).
+  # gemma4:12b is also pulled — swap it in for max quality at ~11 tok/s.
+  # 26b/31b do NOT fit 24GB unified memory (18-20GB weights alone).
+  model: "gemma4:e4b"
+  num_ctx: 16384        # long JDs + resume summary would truncate at ollama's 4096 default
   timeout: 120  # seconds
 
 # Dashboard configuration
@@ -106,6 +110,13 @@ google_sheets:
   spreadsheet_id: "1ljhaUbcWmiPgejBcz43OdNy4vJCxtR5ZpE_manKd-80"
   worksheet: ""                                  # "" = first worksheet/tab
   credentials_path: "config/google_credentials.json"
+
+# Tailor / resume-optimizer (hiring-agent-style JD-relative audit)
+tailor:
+  optimizer:
+    enabled: true
+    min_score: 75      # regenerate once with feedback when the audit scores below this
+    max_retries: 1
 
 # Notifications
 notifications:

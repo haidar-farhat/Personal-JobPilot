@@ -501,6 +501,23 @@ def _render_skills(doc, skills):
         _set_run_font(text_run, _BODY_SIZE_PT)
 
 
+def _bullet_text(bullet) -> str:
+    """Extract bullet text from a string or a dict of any common shape.
+
+    The LLM is asked for plain strings but smaller models sometimes echo
+    dicts like {"text": ...} / {"bullet": ...} — accept them all.
+    """
+    if isinstance(bullet, dict):
+        for key in ("text", "bullet", "content", "value", "description"):
+            if bullet.get(key):
+                return str(bullet[key])
+        for v in bullet.values():
+            if isinstance(v, str) and v.strip():
+                return v
+        return ""
+    return str(bullet) if bullet else ""
+
+
 def _render_projects(doc, items):
     if not items:
         return
@@ -520,7 +537,7 @@ def _render_projects(doc, items):
             _set_run_font(stack_run, _BODY_SIZE_PT, italic=True)
         # Bullets — accept either list of strings or list of {text, keywords} dicts
         for bullet in proj.get("bullets", [])[:MAX_BULLETS_PER_ENTRY]:
-            text = bullet["text"] if isinstance(bullet, dict) else bullet
+            text = _bullet_text(bullet)
             if text:
                 _bullet(doc, text)
 
@@ -542,7 +559,7 @@ def _render_experience(doc, items):
         _two_col(doc, title, dates, italic=True)
         # Bullets — accept either list of strings or list of {text, keywords} dicts
         for bullet in exp.get("bullets", [])[:MAX_BULLETS_PER_ENTRY]:
-            text = bullet["text"] if isinstance(bullet, dict) else bullet
+            text = _bullet_text(bullet)
             if text:
                 _bullet(doc, text)
 
@@ -688,17 +705,47 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
 
     cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT)
 
+    # Clean filename
+    safe_company = "".join(c if c.isalnum() or c in "- " else "" for c in job.company).strip().replace(" ", "_")
+    safe_title = "".join(c if c.isalnum() or c in "- " else "" for c in job.title).strip().replace(" ", "_")
+    filename_base = f"{safe_company}_{safe_title}"[:80]
+
+    # --- Optimizer pass (hiring-agent style, JD-relative) -------------------
+    # Score the tailored materials; if below threshold, regenerate ONCE with
+    # the optimizer's concrete feedback and keep whichever scored higher.
+    opt_cfg = (config.get("tailor", {}) or {}).get("optimizer", {}) or {}
+    optimizer_report = None
+    if opt_cfg.get("enabled", True):
+        try:
+            from agents.resume_optimizer import (
+                score_materials, render_resume_text, feedback_block, save_report,
+            )
+            optimizer_report = score_materials(
+                job, job_score, render_resume_text(resume_data), cover_text)
+            logger.info(f"[tailor] optimizer score: {optimizer_report['overall']}/100 "
+                        f"(missing keywords: {len(optimizer_report['keywords_missing'])})")
+
+            min_score = opt_cfg.get("min_score", 75)
+            if optimizer_report["overall"] < min_score and opt_cfg.get("max_retries", 1) > 0:
+                logger.info(f"[tailor] below optimizer threshold {min_score} — regenerating with feedback")
+                retry_prompt = resume_prompt + "\n\n" + feedback_block(optimizer_report)
+                retry_data = generate_json(retry_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
+                retry_report = score_materials(
+                    job, job_score, render_resume_text(retry_data), cover_text)
+                logger.info(f"[tailor] retry optimizer score: {retry_report['overall']}/100")
+                if retry_report["overall"] > optimizer_report["overall"]:
+                    resume_data, optimizer_report = retry_data, retry_report
+
+            optimizer_report["_saved_to"] = save_report(optimizer_report, filename_base, config)
+        except Exception as e:
+            logger.warning(f"[tailor] optimizer pass failed (materials still generated): {e}")
+
     # Create output directory
     base_dir = Path(__file__).parent.parent
     resumes_dir = base_dir / config.get("output", {}).get("resumes_dir", "output/resumes")
     covers_dir = base_dir / config.get("output", {}).get("cover_letters_dir", "output/cover_letters")
     resumes_dir.mkdir(parents=True, exist_ok=True)
     covers_dir.mkdir(parents=True, exist_ok=True)
-
-    # Clean filename
-    safe_company = "".join(c if c.isalnum() or c in "- " else "" for c in job.company).strip().replace(" ", "_")
-    safe_title = "".join(c if c.isalnum() or c in "- " else "" for c in job.title).strip().replace(" ", "_")
-    filename_base = f"{safe_company}_{safe_title}"[:80]
 
     # Save resume .docx
     resume_doc = _create_resume_docx(resume_data, config)
@@ -715,6 +762,8 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
     return {
         "resume_docx": str(resume_path),
         "cover_letter_docx": str(cover_path),
+        "optimizer_score": optimizer_report["overall"] if optimizer_report else None,
+        "optimizer_report": optimizer_report.get("_saved_to") if optimizer_report else None,
     }
 
 

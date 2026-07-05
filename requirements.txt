@@ -1,4 +1,6 @@
 # Core
+fastapi>=0.110
+uvicorn>=0.27
 sqlalchemy>=2.0
 apscheduler>=3.10
 pyyaml>=6.0
@@ -29,8 +31,8 @@ streamlit>=1.30
 thefuzz>=0.22
 python-Levenshtein>=0.25
 
-# Notifications
-win10toast-reborn>=1.0
+# Notifications (Windows only — macOS uses osascript, no package needed)
+win10toast-reborn>=1.0; sys_platform == 'win32'
 
 # Utilities
 rich>=13.0

@@ -22,6 +22,7 @@ Design notes:
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -30,7 +31,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
-VENV_PY = ROOT / "venv" / "Scripts" / "python.exe"
+if sys.platform == "win32":
+    VENV_PY = ROOT / "venv" / "Scripts" / "python.exe"
+else:
+    VENV_PY = ROOT / "venv" / "bin" / "python"
 LOGS = ROOT / "logs"
 LOGS.mkdir(exist_ok=True)
 
@@ -45,10 +49,27 @@ else:
 
 _PY = str(VENV_PY) if VENV_PY.exists() else sys.executable
 
+
+def _find_ollama() -> str:
+    """Resolve the ollama binary — launchd/Task Scheduler PATHs often miss it."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    for candidate in (
+        "/opt/homebrew/bin/ollama",                              # macOS arm64 Homebrew
+        "/usr/local/bin/ollama",                                 # macOS intel / Linux
+        "/Applications/Ollama.app/Contents/Resources/ollama",    # macOS app bundle
+        str(Path.home() / "AppData/Local/Programs/Ollama/ollama.exe"),  # Windows
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return "ollama"  # last resort — hope PATH has it
+
+
 # name -> config
 SERVICES = {
     "ollama": {
-        "cmd": ["ollama", "serve"],
+        "cmd": [_find_ollama(), "serve"],
         "health": "http://127.0.0.1:11434/api/tags",
     },
     "dashboard": {

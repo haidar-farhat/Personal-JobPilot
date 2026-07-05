@@ -1,0 +1,250 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QA fixture — Workday "My Experience" step</title>
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#111}
+  h2{font-size:17px;margin:26px 0 10px}
+  .panel{border:1px solid #cbd5e1;border-radius:8px;padding:14px;margin:10px 0}
+  label{display:block;font-size:12px;font-weight:600;color:#334155;margin:10px 0 3px}
+  input[type=text],textarea{width:100%;padding:7px 9px;border:1px solid #94a3b8;border-radius:6px;font:inherit}
+  textarea{min-height:70px}
+  button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid #64748b;background:#f1f5f9;cursor:pointer}
+  .dates{display:flex;gap:8px;align-items:center}
+  .dates input{width:70px}
+  .portal{position:absolute;background:#fff;border:1px solid #94a3b8;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:50;min-width:220px}
+  .portal [role=option]{padding:7px 12px;cursor:pointer}
+  .portal [role=option]:hover{background:#e2e8f0}
+  .pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .pills [data-automation-id=selectedItem]{background:#dbeafe;border:1px solid #93c5fd;border-radius:999px;padding:3px 11px;font-size:12.5px}
+  .filelist div{margin-top:6px;font-size:13px;color:#166534}
+</style>
+</head>
+<body>
+<h1>My Experience (fixture)</h1>
+
+<div data-automation-id="workExperienceSection">
+  <h2>Work Experience</h2>
+  <div id="workPanels"></div>
+  <button data-automation-id="add-button" id="workAdd">Add</button>
+</div>
+
+<div data-automation-id="educationSection">
+  <h2>Education</h2>
+  <div id="eduPanels"></div>
+  <button data-automation-id="add-button" id="eduAdd">Add</button>
+</div>
+
+<div data-automation-id="skillsSection">
+  <h2>Skills</h2>
+  <label>Type to Add Skills</label>
+  <input type="text" id="skillsInput" data-automation-id="searchBox" placeholder="Search">
+  <div class="pills" id="skillPills"></div>
+</div>
+
+<div data-automation-id="resumeSection">
+  <h2>Resume/CV</h2>
+  <input type="file" data-automation-id="file-upload-input-ref" id="fileIn">
+  <div class="filelist" id="fileList"></div>
+</div>
+
+<div data-automation-id="websiteSection">
+  <h2>Websites</h2>
+  <div id="webPanels"></div>
+  <button data-automation-id="add-button" id="webAdd">Add</button>
+</div>
+
+<div data-automation-id="linkedinQuestion">
+  <label>Please provide a link to your LinkedIn profile:</label>
+  <input type="text">
+</div>
+
+<h1 style="margin-top:36px">Voluntary Disclosures</h1>
+<div class="panel" data-automation-id="formField-gender">
+  <label>Gender</label>
+  <button aria-haspopup="listbox" data-automation-id="gender">Select One</button>
+</div>
+<div class="panel" data-automation-id="formField-ethnicity">
+  <label>Race/Ethnicity</label>
+  <button aria-haspopup="listbox" data-automation-id="ethnicity">Select One</button>
+</div>
+<div class="panel" data-automation-id="formField-veteranStatus">
+  <label>Veteran Status</label>
+  <button aria-haspopup="listbox" data-automation-id="veteranStatus">Select One</button>
+</div>
+<div class="panel" data-automation-id="formField-hispanic">
+  <fieldset><legend>Are you Hispanic or Latino?</legend>
+    <label><input type="radio" name="hispanic" value="Hispanic or Latino"> Hispanic or Latino</label>
+    <label><input type="radio" name="hispanic" value="Not Hispanic or Latino"> Not Hispanic or Latino</label>
+    <label><input type="radio" name="hispanic" value="Decline"> Decline to answer</label>
+  </fieldset>
+</div>
+<div class="panel" data-automation-id="formField-terms">
+  <label><input type="checkbox" data-automation-id="termsCheckbox"> I have read and understand the terms above and consent to the disclosure.</label>
+</div>
+
+<h1 style="margin-top:36px">Self Identify</h1>
+<div class="panel" data-automation-id="formField-disability">
+  <fieldset><legend>Please check one of the boxes below regarding your disability status:</legend>
+    <label><input type="radio" name="disability" value="Yes"> Yes, I have a disability, or have had one in the past</label>
+    <label><input type="radio" name="disability" value="No"> No, I do not have a disability and have not had one in the past</label>
+    <label><input type="radio" name="disability" value="Decline"> I do not want to answer</label>
+  </fieldset>
+</div>
+<div class="panel" data-automation-id="formField-selfIdentifyName">
+  <label>Your Name</label>
+  <input type="text" data-automation-id="name">
+</div>
+<div class="panel" data-automation-id="formField-dateSignedOn">
+  <label>Today's Date</label>
+  <div class="dates">
+    <input type="text" data-automation-id="dateSectionMonth-input" placeholder="MM" aria-label="Month">
+    <input type="text" data-automation-id="dateSectionDay-input" placeholder="DD" aria-label="Day">
+    <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
+  </div>
+</div>
+
+<script>
+// ---------- shared type-ahead portal (Workday renders options at body level) ----------
+let portal = null;
+function closePortal(){ if(portal){ portal.remove(); portal=null; } }
+function openPortal(anchor, items, onPick){
+  closePortal();
+  portal = document.createElement("div");
+  portal.className = "portal";
+  const r = anchor.getBoundingClientRect();
+  portal.style.left = (r.left + scrollX) + "px";
+  portal.style.top = (r.bottom + scrollY + 4) + "px";
+  items.forEach(t => {
+    const o = document.createElement("div");
+    o.setAttribute("role","option");
+    o.textContent = t;
+    o.onclick = () => { onPick(t); closePortal(); };
+    portal.appendChild(o);
+  });
+  document.body.appendChild(portal);
+}
+document.addEventListener("keydown", e => { if(e.key === "Escape") closePortal(); });
+
+// ---------- work experience: Add creates workExperience-N panels ----------
+let workN = 0;
+document.getElementById("workAdd").onclick = () => {
+  workN++;
+  const d = document.createElement("div");
+  d.className = "panel";
+  d.setAttribute("data-automation-id", "workExperience-" + workN);
+  d.innerHTML = `
+    <strong>Work Experience ${workN}</strong>
+    <label>Job Title*</label><input type="text" data-automation-id="jobTitle">
+    <label>Company*</label><input type="text" data-automation-id="company">
+    <label>Location</label><input type="text" data-automation-id="location">
+    <label><input type="checkbox" data-automation-id="currentlyWorkHere"> I currently work here</label>
+    <label>From*</label>
+    <div class="dates" data-automation-id="formField-startDate">
+      <input type="text" data-automation-id="dateSectionMonth-input" placeholder="MM" aria-label="Month">
+      <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
+    </div>
+    <label>To</label>
+    <div class="dates" data-automation-id="formField-endDate">
+      <input type="text" data-automation-id="dateSectionMonth-input" placeholder="MM" aria-label="Month">
+      <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
+    </div>
+    <label>Role Description</label><textarea data-automation-id="description"></textarea>`;
+  document.getElementById("workPanels").appendChild(d);
+  document.getElementById("workAdd").textContent = "Add Another";
+};
+
+// ---------- education: degree is a listbox button, field of study a type-ahead ----------
+const FIELDS = ["Economics","Quantitative Economics","Econometrics","Computer Science","Data Science","Mathematics"];
+const DEGREES = ["High School Diploma","Associate of Arts","Bachelor of Arts","Bachelor of Science","Master of Arts","Master of Science","Doctorate"];
+let eduN = 0;
+document.getElementById("eduAdd").onclick = () => {
+  eduN++;
+  const d = document.createElement("div");
+  d.className = "panel";
+  d.setAttribute("data-automation-id", "education-" + eduN);
+  d.innerHTML = `
+    <strong>Education ${eduN}</strong>
+    <label>School or University*</label><input type="text" data-automation-id="school">
+    <label>Degree</label>
+    <div data-automation-id="formField-degree">
+      <button aria-haspopup="listbox" data-automation-id="degree">Select One</button>
+    </div>
+    <label>Field of Study</label>
+    <input type="text" data-automation-id="field-of-study" placeholder="Search">
+    <label>GPA</label><input type="text" data-automation-id="gpa">
+    <label>To (Actual or Expected)</label>
+    <div class="dates" data-automation-id="formField-endDate">
+      <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
+    </div>`;
+  document.getElementById("eduPanels").appendChild(d);
+  const degBtn = d.querySelector("[data-automation-id=degree]");
+  degBtn.onclick = () => openPortal(degBtn, DEGREES, t => { degBtn.textContent = t; });
+  const fos = d.querySelector("[data-automation-id=field-of-study]");
+  fos.addEventListener("input", () => {
+    const q = fos.value.toLowerCase();
+    const hits = FIELDS.filter(f => f.toLowerCase().includes(q));
+    if (q && hits.length) openPortal(fos, hits, t => { fos.value = t; });
+    else closePortal();
+  });
+};
+
+// ---------- skills: type-ahead multiselect with pills ----------
+const SKILL_VOCAB = ["Python","Python (Programming Language)","SQL","R","JavaScript","TypeScript","HTML/CSS","C++",
+  "Pandas","NumPy","scikit-learn","Statsmodels","Matplotlib","Tableau","Stata","Machine Learning",
+  "Claude API","OpenAI API","FastAPI","Next.js","PostgreSQL","Docker","Git","AWS","Vercel","LLMs","Prompt Engineering"];
+const skillsInput = document.getElementById("skillsInput");
+skillsInput.addEventListener("input", () => {
+  const q = skillsInput.value.toLowerCase().trim();
+  if (!q) { closePortal(); return; }
+  const hits = SKILL_VOCAB.filter(s => s.toLowerCase().includes(q)).slice(0, 6);
+  if (hits.length) openPortal(skillsInput, hits, t => {
+    const pill = document.createElement("span");
+    pill.setAttribute("data-automation-id", "selectedItem");
+    pill.textContent = t;
+    document.getElementById("skillPills").appendChild(pill);
+    skillsInput.value = "";
+  });
+  else closePortal();
+});
+
+// ---------- resume upload ----------
+document.getElementById("fileIn").addEventListener("change", e => {
+  [...e.target.files].forEach((f, i) => {
+    const d = document.createElement("div");
+    d.setAttribute("data-automation-id", "file-upload-item-" + (i + 1));
+    d.textContent = "✓ " + f.name + " (" + f.size + " bytes)";
+    document.getElementById("fileList").appendChild(d);
+  });
+});
+
+// ---------- websites ----------
+let webN = 0;
+document.getElementById("webAdd").onclick = () => {
+  webN++;
+  const d = document.createElement("div");
+  d.className = "panel";
+  d.setAttribute("data-automation-id", "websitePanelSet-" + webN);
+  d.innerHTML = `<label>URL</label><input type="text" data-automation-id="website">`;
+  document.getElementById("webPanels").appendChild(d);
+  document.getElementById("webAdd").textContent = "Add Another";
+};
+
+// ---------- EEO listboxes (verbose option vocabularies, like real Workday) ----------
+const EEO = {
+  gender: ["Male", "Female", "Non-Binary", "I do not wish to answer"],
+  ethnicity: ["White (Not Hispanic or Latino)", "Black or African American (Not Hispanic or Latino)",
+              "Asian (Not Hispanic or Latino)", "Two or More Races (Not Hispanic or Latino)",
+              "I do not wish to answer"],
+  veteranStatus: ["I am not a protected veteran",
+                  "I identify as one or more of the classifications of a protected veteran",
+                  "I don't wish to answer"],
+};
+Object.entries(EEO).forEach(([aid, opts]) => {
+  const btn = document.querySelector(`[data-automation-id="${aid}"]`);
+  btn.onclick = () => openPortal(btn, opts, t => { btn.textContent = t; });
+});
+</script>
+</body>
+</html>

@@ -53,6 +53,7 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
+    num_ctx = ollama_config.get("num_ctx", 16384)
 
     client = get_ollama_client()
 
@@ -68,7 +69,7 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
             response = client.chat(
                 model=model,
                 messages=messages,
-                options={"temperature": 0.3, "num_predict": 4096},
+                options={"temperature": 0.3, "num_predict": 4096, "num_ctx": num_ctx},
                 format="json",
             )
             last_content = response.message.content.strip()
@@ -121,6 +122,7 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
+    num_ctx = ollama_config.get("num_ctx", 16384)
 
     client = get_ollama_client()
 
@@ -132,7 +134,7 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
     response = client.chat(
         model=model,
         messages=messages,
-        options={"temperature": 0.4, "num_predict": 4096},
+        options={"temperature": 0.4, "num_predict": 4096, "num_ctx": num_ctx},
     )
     return response.message.content.strip()
 

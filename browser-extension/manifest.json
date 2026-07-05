@@ -1,10 +1,29 @@
 {
   "manifest_version": 3,
   "name": "JobPilot Autofill",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Agentically autofill job-application fields from your resume via the local JobPilot backend. You review and click Apply.",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://127.0.0.1:7777/*"],
+  "host_permissions": [
+    "http://127.0.0.1:7777/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.workday.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.icims.com/*",
+    "https://*.taleo.net/*",
+    "https://*.jobvite.com/*",
+    "https://*.workable.com/*",
+    "https://*.bamboohr.com/*",
+    "https://*.rippling.com/*",
+    "https://*.paylocity.com/*",
+    "https://*.dayforcehcm.com/*",
+    "https://*.successfactors.com/*",
+    "https://*.applytojob.com/*",
+    "https://*.breezy.hr/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "JobPilot Autofill"
@@ -15,8 +34,9 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content/scan.js", "content/fill.js", "content/widget.js"],
-      "run_at": "document_idle"
+      "js": ["content/scan.js", "content/fill.js", "content/workday.js", "content/widget.js"],
+      "run_at": "document_end",
+      "all_frames": true
     }
   ]
 }

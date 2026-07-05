@@ -1,14 +1,17 @@
-"""Windows desktop notifications for JobPilot."""
+"""Desktop notifications for JobPilot — Windows toast or macOS Notification Center."""
 
 import logging
 import platform
+import subprocess
 
 logger = logging.getLogger(__name__)
+
+_SYSTEM = platform.system()
 
 
 def _get_notifier():
     """Get the Windows toast notifier, or None if unavailable."""
-    if platform.system() != "Windows":
+    if _SYSTEM != "Windows":
         return None
     try:
         from win10toast import ToastNotifier
@@ -18,14 +21,39 @@ def _get_notifier():
         return None
 
 
+def _notify_macos(title: str, message: str) -> bool:
+    """Post to macOS Notification Center via osascript. Returns True on success."""
+    # osascript string literals escape double quotes with backslash
+    t = title.replace("\\", "\\\\").replace('"', '\\"')
+    m = message.replace("\\", "\\\\").replace('"', '\\"')
+    script = f'display notification "{m}" with title "{t}"'
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        return True
+    except Exception as e:
+        logger.debug(f"[notifications] osascript failed: {e}")
+        return False
+
+
 def notify(title: str, message: str, duration: int = 10):
-    """Send a Windows desktop toast notification.
+    """Send a desktop notification (Windows toast / macOS Notification Center).
 
     Args:
         title: Notification title.
         message: Notification body text.
-        duration: How long to show the notification (seconds).
+        duration: How long to show the notification (seconds, Windows only).
     """
+    if _SYSTEM == "Darwin":
+        if _notify_macos(title, message):
+            return
+        logger.info(f"[NOTIFICATION] {title}: {message}")
+        return
+
     notifier = _get_notifier()
     if notifier:
         try:

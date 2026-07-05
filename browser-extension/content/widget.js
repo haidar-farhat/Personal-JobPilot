@@ -37,6 +37,9 @@
   function looksLikeApplication() {
     const host = location.hostname || "";
     if (host === "127.0.0.1" || host === "localhost") return false; // not on the dashboard itself
+    // In sub-frames (all_frames:true) only surface the pill in frames big
+    // enough to hold a real application form — never in ad/captcha iframes.
+    if (window.top !== window && (window.innerWidth < 400 || window.innerHeight < 300)) return false;
     if (ATS.some((d) => host.includes(d))) return true;
 
     const inputs = visibleInputs();
@@ -59,9 +62,11 @@
   function build() {
     hostEl = document.createElement("div");
     hostEl.id = "__jpaf_host";
-    // all:initial first, then our positioning overrides it (last wins in one declaration)
+    // all:initial first, then our positioning overrides it (last wins in one declaration).
+    // Bottom-right corner — clear of Simplify/JobRight side panels that own the
+    // vertically-centered right edge.
     hostEl.style.cssText =
-      "all:initial;position:fixed;z-index:2147483647;right:14px;top:50%;transform:translateY(-50%);";
+      "all:initial;position:fixed;z-index:2147483647;right:14px;bottom:18px;";
     root = hostEl.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
@@ -89,6 +94,19 @@
           background:#111a2e; color:#fff; font-size:12.5px; outline:none; }
         .res{ font-size:12px; color:#cdd8ec; min-height:16px; line-height:1.45; }
         .res .amber{ color:#fbbf24; } .res .err{ color:#fca5a5; }
+        .steps{ display:flex; flex-direction:column; gap:5px; }
+        .steps[hidden]{ display:none; }
+        .step{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:#cdd8ec; }
+        .step .ic{ width:16px; height:16px; border-radius:50%; flex:none; display:flex;
+          align-items:center; justify-content:center; font-size:10px; font-weight:800;
+          background:rgba(255,255,255,.12); color:#9fb0cc; }
+        .step.run .ic{ background:#1d4ed8; color:#fff; animation:jp-pulse 1s infinite; }
+        .step.done .ic{ background:#16a34a; color:#fff; }
+        .step.skip .ic{ background:rgba(255,255,255,.10); color:#7e8aa6; }
+        .step.fail .ic{ background:#b45309; color:#fff; }
+        .step .nt{ margin-left:auto; font-size:11px; color:#7e8aa6; max-width:90px;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        @keyframes jp-pulse{ 50%{ opacity:.55; } }
         .hide{ border:0; background:transparent; color:#7e8aa6; cursor:pointer; font-size:11.5px;
           text-align:left; padding:0; }
         .hide:hover{ color:#cdd8ec; text-decoration:underline; }
@@ -102,6 +120,7 @@
         </div>
         <div class="panel" id="panel" hidden>
           <div class="ttl">JobPilot Autofill</div>
+          <div class="steps" id="steps" hidden></div>
           <div>
             <label>Résumé</label>
             <select id="resume">
@@ -146,17 +165,70 @@
     if (r) r.innerHTML = html;
   }
 
+  const SECTION_LABELS = {
+    work: "Work experience", education: "Education", skills: "Skills",
+    resume: "Résumé/CV", websites: "Websites", linkedin: "LinkedIn",
+    source: "How you heard", identity: "Disclosures & identity",
+    fields: "Contact & questions",
+  };
+
+  function stepsInit(names) {
+    const box = root.getElementById("steps");
+    if (!box) return;
+    box.hidden = false;
+    box.innerHTML = names.map((n) =>
+      `<div class="step" data-sec="${n}"><span class="ic">○</span><span>${SECTION_LABELS[n] || n}</span><span class="nt"></span></div>`
+    ).join("");
+  }
+
+  function stepSet(name, status, note) {
+    const box = root.getElementById("steps");
+    if (!box) return;
+    let row = box.querySelector(`[data-sec="${name}"]`);
+    if (!row) {  // section discovered mid-run
+      box.insertAdjacentHTML("beforeend",
+        `<div class="step" data-sec="${name}"><span class="ic">○</span><span>${SECTION_LABELS[name] || name}</span><span class="nt"></span></div>`);
+      row = box.querySelector(`[data-sec="${name}"]`);
+    }
+    row.className = "step " + ({ start: "run", done: "done", skip: "skip", fail: "fail" }[status] || "");
+    row.querySelector(".ic").textContent = { start: "…", done: "✓", skip: "–", fail: "!" }[status] || "○";
+    if (note) row.querySelector(".nt").textContent = note;
+  }
+
+  window.addEventListener("jpaf-progress", (e) => {
+    const d = e.detail || {};
+    if (d.section) stepSet(d.section, d.status, d.note);
+  });
+
   async function run() {
     const go = root.getElementById("go");
     go.disabled = true;
     go.textContent = "Filling…";
     try {
+      // Wizard ATSes (Workday): structured sections first, with a live checklist.
+      let wizardFilled = 0;
+      const isWizard = window.__jpafIsWorkday && window.__jpafIsWorkday();
+      if (isWizard && window.__jpafWorkdayRun) {
+        root.getElementById("panel").hidden = false;
+        const secs = (window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [];
+        stepsInit([...secs, "fields"]);
+        const ws = await window.__jpafWorkdayRun();
+        wizardFilled = (ws && ws.filled) || 0;
+      }
+
       const fields = window.__jpafScan ? window.__jpafScan() : [];
-      if (!fields.length) {
+      if (!fields.length && !wizardFilled) {
         root.getElementById("panel").hidden = false;
         setRes(`<span class="err">No application fields detected here.</span>`);
         return;
       }
+      if (!fields.length) {
+        stepSet("fields", "skip", "none left");
+        go.textContent = `✓ ${wizardFilled} filled`;
+        setRes(`<b>Filled ${wizardFilled}</b> field(s) — review &amp; continue. Never submits.`);
+        return;
+      }
+      if (isWizard) stepSet("fields", "start");
       const ctx = {
         url: location.href,
         title: document.title,
@@ -170,11 +242,14 @@
         setRes(`<span class="err">${(plan && plan.error) || "Failed to get a plan."}</span>`);
         return;
       }
-      const stats = window.__jpafApply ? window.__jpafApply(plan) : { filled: 0 };
-      go.textContent = `✓ ${stats.filled || 0} filled`;
+      plan._scanMeta = fields;  // lets fill.js know which ids are aria/combo widgets
+      const stats = window.__jpafApply ? await window.__jpafApply(plan) : { filled: 0 };
+      if (isWizard) stepSet("fields", "done", `${stats.filled || 0} filled`);
+      const total = (stats.filled || 0) + wizardFilled;
+      go.textContent = `✓ ${total} filled`;
       root.getElementById("panel").hidden = false;
       setRes(
-        `<b>Filled ${stats.filled || 0}</b> field(s)` +
+        `<b>Filled ${total}</b> field(s)` +
         (stats.file_flags ? ` · attach résumé manually` : "") +
         (stats.needs_review ? ` · <span class="amber">${stats.needs_review} need review</span>` : "") +
         (plan._offline ? ` · offline mode` : "")
@@ -189,7 +264,11 @@
   }
 
   function maybeShow() {
-    if (dismissed || hostEl) return;
+    if (dismissed) return;
+    // SPA frameworks (React hydration, document.write) can rip our host out of
+    // the DOM after we've built it — detect that and rebuild.
+    if (hostEl && !hostEl.isConnected) { hostEl = null; root = null; }
+    if (hostEl) return;
     if (looksLikeApplication()) build();
   }
 
@@ -197,9 +276,13 @@
   maybeShow();
   let timer = null;
   const obs = new MutationObserver(() => {
-    if (dismissed || hostEl) return;
+    if (dismissed) return;
+    if (hostEl && hostEl.isConnected) return;
     clearTimeout(timer);
     timer = setTimeout(maybeShow, 800);
   });
   try { obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* noop */ }
+  // Belt-and-suspenders: some wipes don't fire useful mutations by the time we
+  // observe. A cheap periodic check guarantees the pill comes back.
+  setInterval(maybeShow, 2000);
 })();

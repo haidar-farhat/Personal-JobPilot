@@ -1,6 +1,8 @@
 """Unit tests for the pure autofill field mapper."""
 
-from agents.autofill_mapper import normalize, choose_archetype, map_standard_field, build_plan
+from agents.autofill_mapper import (
+    normalize, choose_archetype, map_standard_field, build_plan, _match_choice,
+)
 
 PROFILE = {
     "identity": {"first_name": "Matthew", "last_name": "Cromaz", "full_name": "Matthew Cromaz",
@@ -134,3 +136,50 @@ def test_build_plan_essay_cap():
               for i in range(5)]
     plan = build_plan(fields, PROFILE, None, "R", essay_fn=lambda f, c: "x", max_essays=2)
     assert plan["stats"]["llm_used"] == 2
+
+
+# --- EEO / voluntary-disclosure choice matching (verbose ATS option text) ---
+
+def test_match_choice_verbose_disability_yes():
+    opts = ["Yes, I have a disability, or have had one in the past",
+            "No, I do not have a disability", "I do not want to answer"]
+    assert _match_choice("Yes", opts) == opts[0]
+
+
+def test_match_choice_no_maps_to_not_hispanic():
+    opts = ["Hispanic or Latino", "Not Hispanic or Latino", "Decline to answer"]
+    assert _match_choice("No", opts) == "Not Hispanic or Latino"
+
+
+def test_match_choice_gender_synonym_man():
+    assert _match_choice("Male", ["Man", "Woman", "Decline To Self Identify"]) == "Man"
+
+
+def test_match_choice_decline_synonym():
+    opts = ["Male", "Female", "I don't wish to answer"]
+    assert _match_choice("Decline to answer", opts) == "I don't wish to answer"
+
+
+def test_match_choice_token_overlap_two_or_more_races():
+    opts = ["White", "Asian", "Two or More Races (Not Hispanic or Latino)", "Decline"]
+    assert _match_choice("Two or More Races", opts) == opts[2]
+
+
+def test_eeoc_fields_resolve_against_verbose_options():
+    # Synthetic EEO answers — these exercise the verbose-option matching only and
+    # are NOT anyone's real self-identification (never commit real EEO data).
+    profile = {
+        "eeoc": {"gender": "Female", "race_ethnicity": "Asian",
+                 "hispanic_latino": "No", "veteran_status": "Decline to answer",
+                 "disability_status": "Decline to answer", "lgbtq": "Yes",
+                 "sexual_orientation": "Prefer not to say"},
+    }
+    def val(label, options):
+        return map_standard_field(
+            {"id": "x", "label": label, "name": "", "type": "text", "options": options}, profile)
+    r = val("What is your gender?", ["Man", "Woman", "Non-binary", "Decline"])
+    assert r["value"] == "Woman" and not r["needs_review"]      # Female → Woman synonym
+    r = val("Are you Hispanic or Latino?", ["Hispanic or Latino", "Not Hispanic or Latino", "Decline"])
+    assert r["value"] == "Not Hispanic or Latino"               # No → verbose
+    r = val("Please select your race", ["White", "Asian", "Two or More Races", "Decline"])
+    assert r["value"] == "Asian"

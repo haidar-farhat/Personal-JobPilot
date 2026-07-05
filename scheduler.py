@@ -48,13 +48,32 @@ def task_scan_career_pages():
 
         from agents.scanner.career_pages import GreenhouseScanner, LeverScanner
         from agents.scanner.ashby import AshbyScanner
+        from agents.scanner.company_sites import (
+            WorkdayScanner, SmartRecruitersScanner, WorkableScanner, GenericCareersScanner,
+        )
 
         gh_result = GreenhouseScanner(config).run()
         lever_result = LeverScanner(config).run()
         ashby_result = AshbyScanner(config).run()
 
-        # EdJoin (school-district BT roles) is Playwright-rendered + slower; isolate
-        # it so a failure there never aborts the lightweight API scans above.
+        # Direct company-site sources (Workday / SmartRecruiters / Workable JSON
+        # APIs). Each isolated so one bad company config never aborts the sweep.
+        counts = {}
+        for scanner_cls in (WorkdayScanner, SmartRecruitersScanner, WorkableScanner):
+            try:
+                counts[scanner_cls.source_name] = scanner_cls(config).run().get("jobs_new", 0)
+            except Exception as e:
+                logger.error(f"[{scanner_cls.source_name}] scanner crashed: {e}")
+                counts[scanner_cls.source_name] = 0
+
+        # Playwright-rendered sources are slower — isolate them too.
+        for scanner_cls in (GenericCareersScanner,):
+            try:
+                counts[scanner_cls.source_name] = scanner_cls(config).run().get("jobs_new", 0)
+            except Exception as e:
+                logger.error(f"[{scanner_cls.source_name}] scanner crashed: {e}")
+                counts[scanner_cls.source_name] = 0
+
         try:
             from agents.scanner.edjoin import EdJoinScanner
             edjoin_result = EdJoinScanner(config).run()
@@ -63,11 +82,16 @@ def task_scan_career_pages():
             edjoin_result = {"jobs_new": 0}
 
         total_new = (gh_result["jobs_new"] + lever_result["jobs_new"]
-                     + ashby_result["jobs_new"] + edjoin_result.get("jobs_new", 0))
+                     + ashby_result["jobs_new"] + edjoin_result.get("jobs_new", 0)
+                     + sum(counts.values()))
         if total_new > 0:
             logger.info(
                 f"[career_pages] {total_new} new jobs (gh={gh_result['jobs_new']}, "
                 f"lever={lever_result['jobs_new']}, ashby={ashby_result['jobs_new']}, "
+                f"workday={counts.get('workday', 0)}, "
+                f"smartrecruiters={counts.get('smartrecruiters', 0)}, "
+                f"workable={counts.get('workable', 0)}, "
+                f"custom={counts.get('custom', 0)}, "
                 f"edjoin={edjoin_result.get('jobs_new', 0)})"
             )
     except Exception as e:

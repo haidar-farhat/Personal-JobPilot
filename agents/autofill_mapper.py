@@ -48,6 +48,63 @@ def _match_option(desired: str, options: list[str]) -> str | None:
     return None
 
 
+_DECLINE_HINTS = ("decline", "do not wish", "dont wish", "prefer not", "not to answer",
+                  "not wish", "choose not", "rather not", "not answer")
+
+# Cross-vocabulary synonyms: some ATSes render "Man/Woman" for gender, spell out
+# race categories differently, etc. Keys and values are normalize()d forms.
+_CHOICE_SYNONYMS = {
+    "male": ["man"],
+    "female": ["woman"],
+    "heterosexual": ["straight", "heterosexual straight"],
+    "two or more races": ["two or more", "multiracial", "multiple races"],
+}
+
+
+def _match_choice(desired: str, options: list[str]) -> str | None:
+    """EEO / single-choice matcher tolerant of verbose ATS option text.
+
+    Handles the ways a short stored answer maps onto a long rendered option:
+    "No" → "Not Hispanic or Latino"; "Yes" → "Yes, I Have A Disability…";
+    "Decline to answer" → "I don't wish to answer"; "Male" → "Man"; and finally
+    best token overlap ("Two or More Races" → "Two or More Races (Not Hispanic…)").
+    """
+    if not options:
+        return desired
+    nd = normalize(desired)
+    cands = [nd] + _CHOICE_SYNONYMS.get(nd, [])
+    for c in cands:                                      # exact (incl. synonyms)
+        for o in options:
+            if normalize(o) == c:
+                return o
+    if nd in ("decline to answer", "decline", "prefer not to say", "prefer not to answer",
+              "i dont wish to answer", "do not wish to answer", "i do not wish to answer"):
+        for o in options:
+            if any(h in normalize(o) for h in _DECLINE_HINTS):
+                return o
+    if nd in ("yes", "no"):                              # leading-token yes/no
+        for o in options:
+            if normalize(o).split(" ")[:1] == [nd]:
+                return o
+        if nd == "no":                                   # "Not Hispanic or Latino"
+            for o in options:
+                if normalize(o).startswith("not "):
+                    return o
+    for c in cands:                                      # substring either way
+        for o in options:
+            no = normalize(o)
+            if c and (c in no or no in c):
+                return o
+    dwords = [w for w in nd.split() if len(w) > 2]       # best token overlap
+    best, best_n = None, 0
+    for o in options:
+        ow = set(normalize(o).split())
+        n = sum(1 for w in dwords if w in ow)
+        if n > best_n:
+            best, best_n = o, n
+    return best
+
+
 def choose_archetype(title, page_text, archetypes, resume_pref: str = "auto") -> str | None:
     """Pick the archetype key driving résumé routing.
 
@@ -106,8 +163,19 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
             return {"value": desired, "source": "deterministic", "confidence": 0.5, "needs_review": True}
         return {"value": m, "source": "deterministic", "confidence": conf, "needs_review": False}
 
+    def choice(desired, conf=0.9):
+        """Like option() but with EEO-tolerant matching (verbose option text)."""
+        if not desired:
+            return None
+        if not options:
+            return {"value": desired, "source": "deterministic", "confidence": conf, "needs_review": False}
+        m = _match_choice(desired, options)
+        if m is None:
+            return {"value": desired, "source": "deterministic", "confidence": 0.5, "needs_review": True}
+        return {"value": m, "source": "deterministic", "confidence": conf, "needs_review": False}
+
     def yesno(flag):
-        return option("Yes" if flag else "No")
+        return choice("Yes" if flag else "No")
 
     name_set = {"name", "full name", "your name", "legal name", "full legal name",
                 "preferred name", "applicant name", "candidate name"}
@@ -121,6 +189,11 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return text(ident.get("full_name"))
     if _has_sub(norm, "email"):
         return text(ident.get("email"))
+    # Workday-style "Country Phone Code" dropdowns want a country, not a number
+    if _has_sub(norm, "country code", "country phone", "phone country", "phone code"):
+        return option(addr.get("country")) if options else text(addr.get("country"))
+    if _has_sub(norm, "phone device", "device type", "phone type"):
+        return option("Mobile")
     if _has_sub(norm, "phone", "mobile", "telephone"):
         return text(ident.get("phone"))
 
@@ -142,16 +215,24 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return text(wa.get("citizenship"))
 
     # --- EEOC (checked before address: "ethnicity" contains the substring "city") ---
-    if _has_sub(norm, "gender"):
-        return option(eeoc.get("gender"))
-    if _has_sub(norm, "race", "ethnicity"):
-        return option(eeoc.get("race_ethnicity"))
-    if _has_sub(norm, "veteran"):
-        return option(eeoc.get("veteran_status"))
-    if _has_sub(norm, "disability"):
-        return option(eeoc.get("disability_status"))
+    # Order matters: the more specific identity questions come before "gender"
+    # because e.g. "gender identity" contains the substring "gender".
+    if _has_sub(norm, "transgender"):
+        return choice(eeoc.get("transgender") or "No")
+    if _has_sub(norm, "sexual orientation") or _has_tok(norm, "orientation"):
+        return choice(eeoc.get("sexual_orientation"))
+    if _has_sub(norm, "lgbtq", "lgbtqia", "lgbt"):
+        return choice(eeoc.get("lgbtq"))
     if _has_sub(norm, "hispanic", "latino", "latinx"):
-        return option(eeoc.get("hispanic_latino"))
+        return choice(eeoc.get("hispanic_latino"))
+    if _has_sub(norm, "gender"):  # covers "gender" and "gender identity"
+        return choice(eeoc.get("gender"))
+    if _has_sub(norm, "race", "ethnicity"):
+        return choice(eeoc.get("race_ethnicity"))
+    if _has_sub(norm, "veteran", "protected veteran", "military"):
+        return choice(eeoc.get("veteran_status"))
+    if _has_sub(norm, "disability", "disabled"):
+        return choice(eeoc.get("disability_status"))
 
     # --- Address ---
     if _has_tok(norm, "city"):

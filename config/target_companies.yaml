@@ -4,8 +4,10 @@
 companies:
   # Priority targets (Matthew's specific requests)
   - name: "Kaiser Permanente"
-    career_url: "https://www.kaiserpermanentejobs.org/search-jobs"
-    ats_platform: "workday"
+    # Kaiser's Workday tenant isn't publicly queryable — scan their careers
+    # search page with the generic Playwright scanner instead.
+    career_url: "https://www.kaiserpermanentejobs.org/search-jobs/data%20analyst/California/"
+    ats_platform: "custom"
     location: "Oakland, CA"
     priority: high
     search_params:
@@ -320,3 +322,58 @@ companies:
     search_params:
       keywords: "behavior technician"
       location: "San Francisco"
+
+  # ---- Direct company-site sources (added 2026-07-03) -------------------
+  # Workday CXS public JSON API — same API the company's careers page uses.
+  - name: "NVIDIA"
+    career_url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+    ats_platform: "workday"
+    location: "Santa Clara, CA"
+    priority: high
+    workday:
+      host: "nvidia.wd5.myworkdayjobs.com"
+      tenant: "nvidia"
+      site: "NVIDIAExternalCareerSite"
+
+  - name: "Salesforce"
+    career_url: "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"
+    ats_platform: "workday"
+    location: "San Francisco, CA"
+    priority: high
+    workday:
+      host: "salesforce.wd12.myworkdayjobs.com"
+      tenant: "salesforce"
+      site: "External_Career_Site"
+
+  - name: "Adobe"
+    career_url: "https://adobe.wd5.myworkdayjobs.com/external_experienced"
+    ats_platform: "workday"
+    location: "San Jose, CA"
+    priority: medium
+    workday:
+      host: "adobe.wd5.myworkdayjobs.com"
+      tenant: "adobe"
+      site: "external_experienced"
+
+  # SmartRecruiters public postings API
+  - name: "Visa"
+    career_url: "https://jobs.smartrecruiters.com/Visa"
+    ats_platform: "smartrecruiters"
+    location: "San Francisco, CA"
+    priority: high
+    sr_company_id: "Visa"
+
+  - name: "ServiceNow"
+    career_url: "https://jobs.smartrecruiters.com/ServiceNow"
+    ats_platform: "smartrecruiters"
+    location: "Santa Clara, CA"
+    priority: medium
+    sr_company_id: "ServiceNow"
+
+  # Workable public widget API
+  - name: "Hugging Face"
+    career_url: "https://apply.workable.com/huggingface/"
+    ats_platform: "workable"
+    location: "Remote (US)"
+    priority: high
+    workable_account: "huggingface"

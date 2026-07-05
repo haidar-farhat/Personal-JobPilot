@@ -58,6 +58,28 @@ class GreenhouseAutoApplier(BaseAutoApplier):
                 page.wait_for_load_state("networkidle", timeout=10000)
                 break
 
+        # 1.5. Embedded-board handling — many companies host the Greenhouse form
+        # inside an iframe on their own careers site (e.g. databricks.com pages
+        # with a gh_jid param). Navigating straight to the iframe's src turns
+        # this into the standard boards.greenhouse.io form that every selector
+        # below expects.
+        if page.locator("input[name='first_name']").count() == 0:
+            for frame_sel in ("iframe#grnhse_iframe",
+                              "iframe[src*='greenhouse.io']",
+                              "iframe[src*='greenhouse.dev']"):
+                loc = page.locator(frame_sel)
+                try:
+                    loc.first.wait_for(state="attached", timeout=5000)
+                except Exception:
+                    continue
+                src = loc.first.get_attribute("src")
+                if src:
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    page.goto(src, wait_until="networkidle", timeout=20000)
+                    result.add_step("entered_embedded_board", src, success=True)
+                    break
+
         # 2. Bail if we hit a CAPTCHA
         if has_captcha(page):
             result.success = False

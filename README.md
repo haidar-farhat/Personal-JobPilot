@@ -19,10 +19,10 @@ So I built the system I wished existed — one that runs on my own hardware, use
 
 This repo is the result. It's been running 24/7 for weeks and now:
 
-- Scans **Greenhouse, Lever, Ashby, EdJoin, and 40+ company career pages** every 30 minutes (ATS-API-first, zero-ToS-risk — the old Indeed/Google scrapers were retired)
+- Scans **Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, EdJoin, and 45+ company career pages** (including fully custom ones via Playwright) every 30 minutes — ATS-API-first, zero-ToS-risk; deliberately no Indeed/LinkedIn scraping
 - Classifies each role into **10 archetypes across three tracks** — data/quant, AI-engineering (AI Engineer / Solutions Engineer / AI Analyst), and hourly Behavioral-Technician (ABA/RBT) work
 - Scores every one on a **10-dimension archetype-weighted rubric** via local Gemma-4 27B, with AI-intensity and hourly-pay signals baked in
-- Generates **ATS-clean tailored resumes + cover letters** as ready-to-send `.docx` files (résumé auto-routed by track)
+- Generates **ATS-clean tailored resumes + cover letters** as ready-to-send `.docx` files (résumé auto-routed by track), then **audits them against the JD** with an evidence-based optimizer (scoring approach adapted from [HackerRank's hiring-agent](https://github.com/interviewstreet/hiring-agent)) — keyword coverage, requirement alignment, impact quantification — and regenerates once with concrete feedback when the audit scores below threshold
 - Drafts a **role-specific interview-prep pack** and **networking outreach** for any job, locally, on demand
 - Auto-submits high-fit applications via Playwright behind strict guardrails — never CAPTCHAs, never paid jobs
 
@@ -196,11 +196,15 @@ Total monthly infra cost: **$0**.
 ### Prerequisites
 
 - Python 3.11+
-- [Ollama](https://ollama.com/) installed and the `gemma4:latest` model pulled:
+- [Ollama](https://ollama.com/) installed and a Gemma 4 model pulled:
   ```bash
-  ollama pull gemma4
+  ollama pull gemma4:e4b   # default — 9.6GB, ~25 tok/s on an M4 Mac mini (24GB)
+  ollama pull gemma4:12b   # optional quality mode — ~11 tok/s on the same hardware
   ```
-- ~16GB free disk (model is ~10GB)
+  On 24GB machines, skip `gemma4:26b`/`31b` — their weights alone (18-20GB)
+  exceed what macOS lets the GPU wire. Set the model in `config/settings.yaml`
+  (`ollama.model`).
+- ~20GB free disk
 - A GPU helps but is not required — runs on CPU at ~15 tok/s
 
 ### Install
@@ -239,6 +243,10 @@ Then tune `config/settings.yaml` for the roles you want — search keywords, tar
 ```bash
 python watchdog.py
 ```
+
+On macOS, double-click `start_jobpilot.command` (launches the watchdog and opens
+the dashboard), or run `./install_autostart_mac.sh` once to install a LaunchAgent
+that starts it at every login (`./uninstall_autostart_mac.sh` removes it).
 
 On Windows, double-click `start_jobpilot.bat` (launches the watchdog and opens the dashboard), or run `register_autostart.bat` once to have it start automatically at every login — see [Reliability](#reliability--it-stays-up-on-its-own).
 

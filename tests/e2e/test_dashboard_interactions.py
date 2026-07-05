@@ -21,11 +21,19 @@ def test_what_search_filters_list(page, base_url):
     page.wait_for_timeout(500)
     filtered = _count(page)
     assert 0 < filtered <= total
-    # every visible card should mention the term in title/company
-    titles = page.eval_on_selector_all(".card .title", "els => els.map(e => e.innerText.toLowerCase())")
-    cos = page.eval_on_selector_all(".card .co", "els => els.map(e => e.innerText.toLowerCase())")
-    for t, c in zip(titles, cos):
-        assert "scientist" in t or "scientist" in c
+    # The search haystack is title + company + ats_keywords (LLM-extracted) —
+    # verify every visible card matches in one of those fields.
+    ids = page.eval_on_selector_all(".card", "els => els.map(e => +e.dataset.id)")
+    apps = page.evaluate("fetch('/api/applications?limit=500').then(r => r.json())")
+    by_id = {a["id"]: a for a in apps}
+    for card_id in ids:
+        a = by_id.get(card_id)
+        assert a is not None, f"card {card_id} not in API response"
+        hay = " ".join([
+            a.get("title") or "", a.get("company") or "",
+            " ".join(a.get("ats_keywords") or []),
+        ]).lower()
+        assert "scientist" in hay, f"card {card_id} ({a.get('title')}) doesn't match search"
 
 
 def test_role_category_facet_filters(page, base_url):
