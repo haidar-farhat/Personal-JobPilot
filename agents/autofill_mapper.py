@@ -41,15 +41,32 @@ def _match_option(desired: str, options: list[str]) -> str | None:
     for o in options:
         if normalize(o) == nd:
             return o
+    # Substring tier: prefer the TIGHTEST match, not the first in list order —
+    # "United States" must pick "United States of America", not the
+    # alphabetically-earlier "United States Minor Outlying Islands".
+    best = None
     for o in options:
         no = normalize(o)
         if nd and (nd in no or no in nd):
-            return o
-    return None
+            d = abs(len(no) - len(nd))
+            if best is None or d < best[0]:
+                best = (d, o)
+    return best[1] if best else None
 
 
 _DECLINE_HINTS = ("decline", "do not wish", "dont wish", "prefer not", "not to answer",
                   "not wish", "choose not", "rather not", "not answer")
+
+# How ATSes spell "Yes"/"No" on consent questions: "Confirmed", "I acknowledge",
+# "No, I am not a current or former Government Official", …
+_AFFIRM_HINTS = ("confirmed", "confirm", "i confirm", "i agree", "agree",
+                 "i acknowledge", "acknowledge", "i accept", "accept",
+                 "i understand", "i consent", "i have read")
+_NEGATE_HINTS = ("not ", "i do not", "i dont", "i have not", "i am not",
+                 "i havent", "never ", "none")
+
+_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
+                "August", "September", "October", "November", "December"]
 
 # Cross-vocabulary synonyms: some ATSes render "Man/Woman" for gender, spell out
 # race categories differently, etc. Keys and values are normalize()d forms.
@@ -86,10 +103,11 @@ def _match_choice(desired: str, options: list[str]) -> str | None:
         for o in options:
             if normalize(o).split(" ")[:1] == [nd]:
                 return o
-        if nd == "no":                                   # "Not Hispanic or Latino"
-            for o in options:
-                if normalize(o).startswith("not "):
-                    return o
+        hints = _AFFIRM_HINTS if nd == "yes" else _NEGATE_HINTS
+        for o in options:                                # "Confirmed" / "Not Hispanic or Latino"
+            no = normalize(o)
+            if any(no == h.strip() or no.startswith(h.strip() + " ") for h in hints):
+                return o
     for c in cands:                                      # substring either way
         for o in options:
             no = normalize(o)
@@ -140,6 +158,8 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     if not norm:
         return None
 
+    nsection = normalize(field.get("section") or "")
+
     ident = profile.get("identity", {})
     addr = profile.get("address", {})
     links = profile.get("links", {})
@@ -148,6 +168,9 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     sal = profile.get("salary", {})
     ref = profile.get("referral", {})
     eeoc = profile.get("eeoc", {})
+    edu = profile.get("education") or []
+    e0 = edu[0] if edu else {}
+    prefs = profile.get("preferences", {})
 
     def text(v):
         return {"value": v, "source": "deterministic", "confidence": 0.95,
@@ -177,6 +200,26 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     def yesno(flag):
         return choice("Yes" if flag else "No")
 
+    def month_year(m, y):
+        """Answer a date field: month/year <select>s (year lists are numeric,
+        month lists aren't), split month/year text inputs, or one MM/YYYY box.
+        Comboboxes (react-select) expose no options at plan time — answer with
+        the month NAME / year string so the fill-side option matcher commits."""
+        is_combo = bool(field.get("combo"))
+        if options:
+            if y and any((o or "").strip() == str(y) for o in options):
+                return option(str(y))
+            if m and not any((o or "").strip().isdigit() for o in options[:5] if o):
+                return choice(_MONTH_NAMES[int(m) - 1])
+            return None
+        if _has_tok(norm, "year"):
+            return text(str(y)) if y else None
+        if _has_tok(norm, "month"):
+            if not m:
+                return None
+            return choice(_MONTH_NAMES[int(m) - 1]) if is_combo else text(f"{int(m):02d}")
+        return text(f"{int(m):02d}/{y}") if (m and y) else (text(str(y)) if y else None)
+
     name_set = {"name", "full name", "your name", "legal name", "full legal name",
                 "preferred name", "applicant name", "candidate name"}
 
@@ -187,6 +230,11 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return text(ident.get("last_name"))
     if nlabel in name_set or nname in name_set:
         return text(ident.get("full_name"))
+    # SMS/WhatsApp consent questions mention "email" and "telephone" in their
+    # fine print ("If you select no, we will only communicate with you via
+    # email and/or telephone calls") — decide them BEFORE the contact rules.
+    if _has_sub(norm, "sms", "whatsapp", "text message"):
+        return yesno(profile.get("preferences", {}).get("sms_opt_in", True))
     if _has_sub(norm, "email"):
         return text(ident.get("email"))
     # Workday-style "Country Phone Code" dropdowns want a country, not a number
@@ -194,6 +242,10 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return option(addr.get("country")) if options else text(addr.get("country"))
     if _has_sub(norm, "phone device", "device type", "phone type"):
         return option("Mobile")
+    # "Phone Extension" must stay EMPTY — it contains "phone", so decide it
+    # before the phone rule (NVIDIA Workday got the full number typed into it)
+    if _has_tok(norm, "extension", "ext"):
+        return {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
     if _has_sub(norm, "phone", "mobile", "telephone"):
         return text(ident.get("phone"))
 
@@ -208,11 +260,20 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     # --- Work eligibility (sponsorship before generic auth) ---
     if _has_sub(norm, "sponsor"):
         return yesno(wa.get("requires_sponsorship", False))
-    if (_has_sub(norm, "authorized", "authorization", "eligible") and _has_sub(norm, "work")) \
-            or _has_sub(norm, "work authorization", "legally authorized"):
+    if (_has_sub(norm, "authorized", "authorization", "eligible", "permitted") and _has_sub(norm, "work")) \
+            or _has_sub(norm, "work authorization", "legally authorized", "right to work"):
         return yesno(wa.get("authorized_to_work_us", True))
     if _has_sub(norm, "citizen"):
         return text(wa.get("citizenship"))
+
+    # --- Relocation / on-site willingness (already in SF — yes to both) ---
+    if _has_sub(norm, "relocat", "willing to move", "open to moving"):
+        return yesno(prefs.get("willing_to_relocate", True))
+    if _has_sub(norm, "in person", "onsite", "on site", "in office", "in the office",
+                "hybrid", "commute") \
+            and _has_sub(norm, "willing", "are you", "can you", "able to",
+                         "comfortable", "open to"):
+        return yesno(prefs.get("willing_onsite", True))
 
     # --- EEOC (checked before address: "ethnicity" contains the substring "city") ---
     # Order matters: the more specific identity questions come before "gender"
@@ -228,13 +289,90 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     if _has_sub(norm, "gender"):  # covers "gender" and "gender identity"
         return choice(eeoc.get("gender"))
     if _has_sub(norm, "race", "ethnicity"):
+        # Checkbox "select all that apply" groups get the individual components
+        # ("Asian; White") — fill.js checks one box per ";"-separated part.
+        # Single-choice renders (radio/select/listbox) keep the umbrella answer.
+        comps = eeoc.get("race_components") or []
+        if ftype == "checkbox" and len(comps) > 1:
+            return {"value": "; ".join(comps), "source": "deterministic",
+                    "confidence": 0.9, "needs_review": False}
         return choice(eeoc.get("race_ethnicity"))
     if _has_sub(norm, "veteran", "protected veteran", "military"):
         return choice(eeoc.get("veteran_status"))
     if _has_sub(norm, "disability", "disabled"):
         return choice(eeoc.get("disability_status"))
 
+    # --- Education section (school / degree / discipline / GPA / dates) ---
+    # Fills entry 0 (most recent). Multi-entry forms are handled by the
+    # Greenhouse/Workday engines, which own their sections so we never clash.
+    in_education = "education" in nsection or _has_sub(norm, "education")
+    # Token match, NOT substring: Coinbase's "were you referred … by a senior
+    # leader at a prospective INSTITUTIONAL client?" must not become a school.
+    if _has_tok(norm, "school", "university", "college", "institution", "institute") \
+            and not _has_sub(norm, "high school"):
+        v = e0.get("school")
+        return (option(v) if options else text(v)) if v else None
+    if _has_sub(norm, "discipline", "major", "field of study", "area of study", "concentration"):
+        v = e0.get("discipline") or e0.get("field_of_study")
+        return choice(v) if v else None
+    if _has_tok(norm, "gpa") or _has_sub(norm, "grade point"):
+        v = str(e0.get("gpa") or "").strip()
+        return text(v) if v else None
+    if _has_tok(norm, "degree") and not _has_sub(norm, "highest"):
+        v = e0.get("degree") or exp.get("highest_education")
+        if not v:
+            return None
+        return choice(v) if options else text(e0.get("degree_full") or v)
+    if in_education and (_has_tok(norm, "end", "graduation") or _has_sub(norm, "date completed")):
+        return month_year(e0.get("end_month"), e0.get("end_year"))
+
+    # --- Employment / work-experience section (entry 0 = most recent role;
+    #     multi-entry sections are owned by the Greenhouse/Workday engines) ---
+    work_hist = profile.get("employment") or []
+    w0 = work_hist[0] if work_hist else {}
+    in_employment = _has_sub(nsection, "employment", "work experience", "work history", "experience") \
+        or _has_sub(norm, "employment")
+    if in_employment and w0:
+        if _has_tok(norm, "company", "employer", "organization"):
+            return option(w0.get("company")) if options else text(w0.get("company"))
+        if _has_tok(norm, "title", "position", "role"):
+            return text(w0.get("title"))
+        if _has_sub(norm, "currently work", "current position", "i currently", "present"):
+            return yesno(bool(w0.get("current")))
+        if _has_tok(norm, "start", "from"):
+            return month_year(w0.get("start_month"), w0.get("start_year"))
+        if _has_tok(norm, "end", "to") and not w0.get("current"):
+            return month_year(w0.get("end_month"), w0.get("end_year"))
+        if _has_sub(norm, "responsibilities", "duties", "description"):
+            return text(w0.get("description"))
+
+    # --- Location (typeahead "Location (City)" / bare or "Current Location",
+    #     plus phrasings that never say "location") ---
+    if (_has_tok(norm, "location") and not _has_sub(norm, "office")) \
+            or _has_sub(norm, "where are you located", "currently located", "where do you live",
+                        "where are you based", "currently based", "currently reside",
+                        "city of residence", "current city"):
+        if options:
+            # The list may be cities, states, OR countries ("Where are you
+            # currently based?" with a country dropdown) — try each granularity.
+            for cand in (addr.get("city"), addr.get("state_full"), addr.get("country")):
+                if cand and _match_option(cand, options):
+                    return option(cand)
+            return option(addr.get("city"))
+        return text(addr.get("location_line") or addr.get("city"))
+
     # --- Address ---
+    # Line 2 (apt/suite) is optional and not ours to invent — deterministic no-fill.
+    # Checked first: "street address line 2" also contains "street address".
+    if _has_sub(norm, "address line 2", "address 2") or _has_tok(norm, "apt", "apartment", "suite"):
+        return {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
+    if _has_sub(norm, "address line 1", "address 1", "street address") or _has_tok(norm, "street"):
+        return text(addr.get("street"))
+    if nlabel == "address" or _has_sub(norm, "home address", "mailing address",
+                                       "current address", "residential address"):
+        line = ", ".join(p for p in (addr.get("street"), addr.get("city"), addr.get("state")) if p)
+        zipc = addr.get("postal_code")
+        return text(f"{line} {zipc}".strip() if zipc else line)
     if _has_tok(norm, "city"):
         return option(addr.get("city")) if options else text(addr.get("city"))
     if _has_tok(norm, "state", "province"):
@@ -265,6 +403,46 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     if _has_sub(norm, "salary", "compensation", "desired pay", "expected pay", "rate of pay"):
         return text(sal.get("preferred_text"))
 
+    # --- Recurring consent / preference questions ---
+    if _has_sub(norm, "worked at", "worked for", "worked here", "previously employed",
+                "been employed by", "employed by", "former employee",
+                "current or former employee"):
+        if not prefs.get("worked_here_before", False) and options:
+            for o in options:  # prefer explicit "I have not worked at …" over bare "No"
+                if _has_sub(normalize(o), "not worked", "never worked", "have not worked"):
+                    return {"value": o, "source": "deterministic", "confidence": 0.9, "needs_review": False}
+        return yesno(prefs.get("worked_here_before", False))
+    if _has_sub(norm, "18 years", "at least 18", "age of 18", "over 18", "minimum age"):
+        return yesno(prefs.get("age_18_or_older", True))
+    # Availability — "When can you start?" / "Earliest start date" / "Date
+    # available". Employment/education section dates never reach here (their
+    # section-gated rules run above).
+    if _has_sub(norm, "when can you start", "when could you start", "when can you begin",
+                "available to start", "earliest start", "start date", "date available",
+                "availability date", "want to start working", "when do you want to start"):
+        return text(prefs.get("earliest_start_date"))
+    # Compliance screeners (Coinbase-style): government-official family,
+    # conflict-of-interest, insider referral. Verbose option vocabularies
+    # ("No, I am not a current or former Government Official") resolve via
+    # the leading yes/no token in _match_choice / fill.js.
+    if _has_sub(norm, "government official", "government agency", "public office"):
+        if _has_sub(norm, "relative"):
+            return yesno(prefs.get("relative_of_government_official", False))
+        return yesno(prefs.get("government_official", False))
+    if _has_sub(norm, "conflict of interest"):
+        return yesno(prefs.get("conflict_of_interest", False))
+    if _has_sub(norm, "were you referred", "referred to this position", "referred to this role"):
+        return yesno(prefs.get("referred_by_insider", False))
+    # "How do you use AI tools?" self-assessment — BEFORE the acknowledgement
+    # rule ("I understand that {company} may USE AI TOOLS…" is an ack, this
+    # is not: it asks how *you* use them).
+    if _has_sub(norm, "how you use ai", "you use ai tools", "your use of ai"):
+        v = prefs.get("ai_tools_usage")
+        return choice(v) if v else None
+    if _has_sub(norm, "privacy", "acknowledg", "consent", "agree to the", "i agree",
+                "i understand", "confirm receipt", "i have read"):
+        return yesno(prefs.get("privacy_acknowledged", True))
+
     # --- Source / referral ---
     if _has_sub(norm, "how did you hear", "referral", "referred by") or _has_tok(norm, "source"):
         return option(ref.get("default_source"))
@@ -272,7 +450,7 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     return None
 
 
-def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_essays: int = 3) -> dict:
+def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_essays: int = 4) -> dict:
     """Assemble the fill-plan: deterministic mapping first, essay_fn for the rest.
 
     essay_fn(field, context) -> str | None, where context = {archetype, resume}.
@@ -287,7 +465,11 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_es
 
         ftype = (f.get("type") or "text").lower()
         label = (f.get("label") or "").strip()
-        is_open = ftype in ESSAY_TYPES or label.endswith("?") or ftype == "select"
+        # Open-ended: textareas, question-marked labels, selects — and plain
+        # text inputs whose label reads like a question ("Describe your biggest
+        # accomplishment", "Why do you want to work here") rather than a field name.
+        is_open = ftype in ESSAY_TYPES or label.endswith("?") or ftype == "select" \
+            or (ftype == "text" and len(label.split()) >= 5)
         if essay_fn and is_open and llm_used < max_essays:
             try:
                 val = essay_fn(f, {"archetype": archetype, "resume": resume_summary})

@@ -89,10 +89,10 @@ schedule:
 # Ollama configuration
 ollama:
   base_url: "http://localhost:11434"
-  # gemma4:e4b — efficiency variant, ~25 tok/s on M4 24GB (2.2x faster than 12b).
-  # gemma4:12b is also pulled — swap it in for max quality at ~11 tok/s.
-  # 26b/31b do NOT fit 24GB unified memory (18-20GB weights alone).
-  model: "gemma4:e4b"
+  # This machine has gemma4:latest and gemma4:31b pulled (2026-07-05). If the
+  # configured model isn't installed, the client falls back to the closest
+  # available one instead of silently failing every LLM call.
+  model: "gemma4:latest"
   num_ctx: 16384        # long JDs + resume summary would truncate at ollama's 4096 default
   timeout: 120  # seconds
 

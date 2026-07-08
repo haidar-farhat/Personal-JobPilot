@@ -25,6 +25,7 @@ STATUS_LABELS = {
     "interview": "Interview",
     "rejected": "Rejected",
     "no_response": "No Response",
+    "no_longer_available": "No Longer Available",
     "skipped": "Skipped",
 }
 

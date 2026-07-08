@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobPilot Autofill",
-  "version": "1.2.0",
+  "version": "1.7.3",
   "description": "Agentically autofill job-application fields from your resume via the local JobPilot backend. You review and click Apply.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
@@ -29,12 +29,12 @@
     "default_title": "JobPilot Autofill"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "service_worker.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content/scan.js", "content/fill.js", "content/workday.js", "content/widget.js"],
+      "js": ["content/scan.js", "content/fill.js", "content/workday.js", "content/greenhouse.js", "content/widget.js"],
       "run_at": "document_end",
       "all_frames": true
     }

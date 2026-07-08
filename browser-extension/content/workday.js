@@ -58,24 +58,51 @@
 
   function done(el) { if (el) el.setAttribute("data-jpaf-done", "1"); }
 
-  // Resolve a form control: the automation-id node itself, or a control inside it.
+  // Resolve a form control: the automation-id node itself, or a control inside
+  // it. Tenants differ — NVIDIA wraps controls in formField-<id> divs — so try
+  // the raw id, the formField- prefixed wrapper, and any alias ids given.
   function control(panel, id, kind = "input, textarea") {
-    const n = aid(panel, id);
-    if (!n) return null;
-    if (n.matches && n.matches(kind)) return n;
-    return n.querySelector(kind);
+    const ids = Array.isArray(id) ? id : [id];
+    for (const one of ids) {
+      const n = aid(panel, one) || aid(panel, `formField-${one}`);
+      if (!n) continue;
+      if (n.matches && n.matches(kind)) return n;
+      const c = n.querySelector(kind);
+      if (c) return c;
+    }
+    return null;
   }
 
-  // Fill a plain text control unless it already holds a value (never clobber
+  // Fill a plain text element unless it already holds a value (never clobber
   // what the user — or another tool — already entered).
-  function fillText(panel, id, value) {
-    const el = control(panel, id);
+  function fillTextEl(el, value) {
     if (!el || value == null || value === "") return false;
     if ((el.value || "").trim()) { done(el); return false; }
     setNative(el, String(value));
     el.dispatchEvent(new Event("blur", { bubbles: true }));
     done(el);
     return true;
+  }
+
+  function fillText(panel, id, value) {
+    return fillTextEl(control(panel, id), value);
+  }
+
+  // Force-overwrite variants for POSITION-OWNED sections (work experience):
+  // Workday's résumé-parser values must yield to history — wrong order,
+  // "Company | Location" mashups, stale locations. Skips only when equal.
+  function setTextEl(el, value) {
+    if (!el || value == null || value === "") return false;
+    const want = String(value).trim();
+    if ((el.value || "").trim() === want) { done(el); return false; }
+    setNative(el, want);
+    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    done(el);
+    return true;
+  }
+
+  function setText(panel, id, value) {
+    return setTextEl(control(panel, id), value);
   }
 
   function visibleOptions() {
@@ -147,6 +174,84 @@
     return n;
   }
 
+  // Force variant for position-owned sections: parser dates must yield.
+  // "8" and "08" count as the same month — don't churn equal values.
+  function setDateGroup(panel, wrapperId, month, year) {
+    const wrap = aid(panel, wrapperId);
+    if (!wrap) return 0;
+    let n = 0;
+    const put = (sel, v, pad) => {
+      const el = wrap.querySelector(sel);
+      if (!el || !v) return;
+      const want = pad ? String(v).padStart(2, "0") : String(v);
+      const cur = (el.value || "").trim();
+      if (cur && cur.replace(/^0+/, "") === want.replace(/^0+/, "")) { done(el); return; }
+      setNative(el, want);
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+      done(el); n++;
+    };
+    put("[data-automation-id$='dateSectionMonth-input']", month, true);
+    put("[data-automation-id$='dateSectionYear-input']", year, false);
+    return n;
+  }
+
+  // STRICT option matcher for searchable prompts: exact, then containment —
+  // NEVER token-overlap or first-option fallbacks. A weak match once planted
+  // "Afghanistan (+93)" in Cisco's Country Phone Code while the list was still
+  // unfiltered, and +93 then rejected the US phone number as invalid-length.
+  function promptOption(value) {
+    const nv = norm(value);
+    if (!nv) return null;
+    const opts = visibleOptions().map((el) => ({ el, t: norm(el.innerText) }));
+    const o = opts.find((x) => x.t === nv) ||
+              opts.find((x) => x.t.includes(nv)) ||
+              opts.find((x) => x.t.length >= 4 && nv.includes(x.t));
+    return o ? o.el : null;
+  }
+
+  // Workday searchable prompt (multiselectInputContainer): type into the
+  // Search input, click the matching promptOption; commits as a selectedItem
+  // chip. Plain typing WITHOUT the pick never registers (NVIDIA's Country
+  // Phone Code stayed empty that way). A chip that does NOT match what we
+  // want (bogus pick from an old run) is removed and replaced.
+  async function fillPrompt(wrap, ...values) {
+    if (!wrap) return false;
+    const vals = values.filter(Boolean).map(String);
+    const wanted = vals.map(norm);
+    const chipSel = "[data-automation-id^='selectedItem']";
+    const chips = () => [...wrap.querySelectorAll(chipSel)];
+    if (chips().length) {
+      const ok = chips().some((c) => {
+        const t = norm(c.innerText);
+        return wanted.some((v) => t.includes(v) || (t && v.includes(t)));
+      });
+      if (ok) { wrap.setAttribute("data-jpaf-done", "1"); return false; }
+      for (const c of chips()) {           // wrong value — remove the chip(s)
+        realClick(c.querySelector("button") || c);
+        await sleep(250);
+      }
+      if (chips().length) { wrap.setAttribute("data-jpaf-done", "1"); return false; }
+    }
+    const inp = wrap.querySelector("input");
+    if (!inp) return false;
+    inp.focus();
+    realClick(inp);
+    for (const v of vals) {
+      setNative(inp, v);
+      const opt = await waitFor(() => promptOption(v), 4000);
+      if (opt) {
+        realClick(opt);
+        await sleep(250);
+        done(inp);
+        return true;
+      }
+    }
+    setNative(inp, "");
+    inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    done(inp);
+    return false;
+  }
+
   function setCheckbox(panel, id, checked) {
     const el = control(panel, id, "input[type='checkbox']") ||
                (aid(panel, id) && aid(panel, id).querySelector("input[type='checkbox']"));
@@ -158,13 +263,53 @@
     return true;
   }
 
-  // Find a wizard section by automation id, falling back to a heading match.
-  function findSection(autoId, headingRe) {
+  // Find a wizard section: automation id, then NVIDIA-style role=group with
+  // aria-labelledby "<Name>-section", then a heading-scoped container. The old
+  // heading fallback (h.closest("[data-automation-id]")) resolved to the WHOLE
+  // PAGE on NVIDIA and fillSkills typed skills into the first work entry's Job
+  // Title — the container must hold this section's own fields and stop growing
+  // before it swallows a neighbouring section's heading.
+  const SECTION_HEADS = /work experience|education|^skills$|add skills|resume|websites|social network|certific|languages/i;
+  function findSection(autoId, headingRe, groupName, probeSel) {
     const s = aid(document, autoId);
     if (s) return s;
+    if (groupName) {
+      const g = document.querySelector(`div[role='group'][aria-labelledby*='${groupName}' i]`);
+      if (g) return g;
+    }
     const h = [...document.querySelectorAll("h2, h3, h4")]
       .find((x) => headingRe.test(x.innerText || "") && x.getClientRects().length > 0);
-    return h ? (h.closest("[data-automation-id]") || h.parentElement) : null;
+    if (!h) return null;
+    let n = h.parentElement, best = null;
+    for (let i = 0; n && n !== document.body && i < 6; i++) {
+      const foreign = [...n.querySelectorAll("h2, h3, h4")]
+        .some((x) => x !== h && SECTION_HEADS.test((x.innerText || "").trim()));
+      if (foreign) break;
+      if (!probeSel || n.querySelector(probeSel)) best = n;
+      n = n.parentElement;
+    }
+    return best;
+  }
+
+  // Repeating entry panels inside a section: classic "workExperience-N"
+  // automation ids, NVIDIA-style "<Name>-N-panel" role groups, or — last
+  // resort — one group per anchor field (e.g. formField-jobTitle).
+  function entryPanels(section, classicPrefix, anchorSel) {
+    const classic = aids(section, classicPrefix);
+    if (classic.length) return classic;
+    const named = [...section.querySelectorAll("div[role='group'][aria-labelledby*='-panel']")];
+    if (named.length) return named;
+    return [...section.querySelectorAll(anchorSel)].map((a) => {
+      let scope = a, n = a.parentElement;
+      while (n && n !== section && n.querySelectorAll(anchorSel).length === 1) { scope = n; n = n.parentElement; }
+      return scope;
+    });
+  }
+
+  function addEntryButton(section) {
+    return [...section.querySelectorAll("button")].find((b) =>
+      b.getAttribute("data-automation-id") === "add-button" ||
+      /^add( another)?$/i.test((b.innerText || "").trim()));
   }
 
   // Grow a repeating section to `count` entries by clicking Add / Add Another.
@@ -185,59 +330,226 @@
 
   // ---------------- sections ----------------
 
+  // "My Information" step (NVIDIA 2026-07-05): previous-worker radios,
+  // country/state/phone-type LISTBOX BUTTONS, the Country Phone Code
+  // searchable prompt, and the Phone Extension trap (an earlier flat pass
+  // typed the phone number into it — clear that and own the field).
+  async function fillMyInfo(profile) {
+    const page = aid(document, "applyFlowMyInfoPage") ||
+                 (aid(document, "formField-candidateIsPreviousWorker") && document.body);
+    if (!page) return null;
+    const prof = profile || {};
+    const ident = prof.identity || {}, addr = prof.address || {}, prefs = prof.preferences || {};
+    progress("contact", "start");
+    let filled = 0;
+
+    const pw = aid(page, "formField-candidateIsPreviousWorker");
+    if (pw) {
+      const radios = [...pw.querySelectorAll("input[type='radio']")];
+      if (radios.length && !radios.some((r) => r.checked)) {
+        const want = prefs.worked_here_before ? "true" : "false";
+        const r = radios.find((x) => (x.value || "").toLowerCase() === want);
+        if (r) { realClick(r); r.dispatchEvent(new Event("change", { bubbles: true })); filled++; }
+      }
+      radios.forEach(done);
+    }
+
+    // candidates ordered exact-first: "United States" as a bare substring can
+    // hit "United States Minor Outlying Islands" in an alphabetical list
+    if (await fillDropdown(page, "country", "United States of America", addr.country)) filled++;
+    if (await fillDropdown(page, "countryRegion", addr.state_full, addr.state)) filled++;
+    if (await fillDropdown(page, "phoneType", "Mobile")) filled++;
+
+    if (fillText(page, "formField-legalName--firstName", ident.first_name)) filled++;
+    if (fillText(page, "formField-legalName--lastName", ident.last_name)) filled++;
+    if (fillText(page, "formField-addressLine1", addr.street)) filled++;
+    if (fillText(page, "formField-city", addr.city)) filled++;
+    if (fillText(page, "formField-postalCode", addr.postal_code)) filled++;
+
+    // Stale-account trap: a FULL street address parked in Address Line 2 (we
+    // have no line 2 — that slot is apt/suite only). Cisco 2026-07-06 carried
+    // "1670A 32nd Avenue" there. Clear it; keep genuine apt/suite values.
+    const a2 = control(page, ["addressLine2"]);
+    if (a2) {
+      const v2 = (a2.value || "").trim();
+      if (v2 && /\d/.test(v2) &&
+          /\b(ave|avenue|st|street|blvd|boulevard|rd|road|dr|drive|way|ln|lane|ct|court|pl|place|ter|terrace)\b/i.test(v2) &&
+          !/\b(apt|apartment|suite|ste|unit|#|floor|fl)\b/i.test(v2)) {
+        setNative(a2, "");
+        a2.dispatchEvent(new Event("blur", { bubbles: true }));
+        filled++;
+      }
+      done(a2);
+    }
+
+    // Phone is OWNED as bare national digits — the country code lives in its
+    // own field, and strict tenants (Cisco) reject formatted values outright.
+    const phoneDigits = (ident.phone || "").replace(/\D+/g, "");
+    const phEl = control(page, ["phoneNumber"]);
+    if (phEl && phoneDigits) {
+      if ((phEl.value || "").trim() !== phoneDigits) {
+        if (setTextEl(phEl, phoneDigits)) filled++;
+      } else done(phEl);
+    }
+
+    const cpc = aid(page, "formField-countryPhoneCode");
+    if (cpc && await fillPrompt(cpc, "United States of America", addr.country)) filled++;
+
+    // Phone extension: we have none — own it so the flat pass can't misfill
+    // it, and clear the damage if an earlier run typed the phone number here.
+    const extWrap = aid(page, "formField-extension");
+    if (extWrap) {
+      const ei = (extWrap.matches && extWrap.matches("input")) ? extWrap : extWrap.querySelector("input");
+      if (ei) {
+        const digits = (s) => (s || "").replace(/\D+/g, "");
+        if ((ei.value || "").trim() && digits(ei.value) === digits(ident.phone)) {
+          setNative(ei, "");
+          ei.dispatchEvent(new Event("blur", { bubbles: true }));
+          filled++;
+        }
+        done(ei);
+      }
+    }
+
+    progress("contact", "done", `${filled} field${filled === 1 ? "" : "s"}`);
+    return { filled };
+  }
+
+  const W_TITLE = ["jobTitle", "title"], W_COMPANY = ["company", "companyName"],
+        W_DESC = ["description", "roleDescription"];
+  const W_ANCHOR = "[data-automation-id='formField-jobTitle'], [data-automation-id='jobTitle']";
+
   async function fillWork(history) {
-    const section = findSection("workExperienceSection", /work experience/i);
+    const section = findSection("workExperienceSection", /work experience/i, "Work-Experience",
+                                W_ANCHOR + ", [data-automation-id^='workExperience-'], [data-automation-id='add-button']");
     if (!section) return null;
     progress("work", "start");
     section.setAttribute("data-jpaf-owned", "1");
     let filled = 0;
     const items = history.work || [];
     if (!items.length) { progress("work", "skip", "no history"); return { filled }; }
-    const panels = await ensurePanels(section, "workExperience-", items.length);
-    for (let i = 0; i < Math.min(panels.length, items.length); i++) {
-      const p = panels[i], w = items[i];
-      if (fillText(p, "jobTitle", w.title)) filled++;
-      if (fillText(p, "company", w.company)) filled++;
-      if (fillText(p, "location", w.location)) filled++;
-      if (w.current) setCheckbox(p, "currentlyWorkHere", true);
-      filled += fillDateGroup(p, "formField-startDate", w.start_month, w.start_year);
-      if (!w.current) filled += fillDateGroup(p, "formField-endDate", w.end_month, w.end_year);
-      if (fillText(p, "description", w.description)) filled++;
+    const skillsSet = new Set((history.skills || []).map(norm));
+    const val = (p, ids) => { const el = control(p, ids); return el ? (el.value || "").trim() : ""; };
+    const getPanels = () => entryPanels(section, "workExperience-", W_ANCHOR);
+
+    // POSITION-OWNED: history order (newest job FIRST) is the source of truth
+    // — panel i gets item i, so the current role sits at the top. Workday's
+    // résumé-parser pre-creates panels in ITS order with "Company | Location"
+    // mashups and stale locations (Cisco 2026-07-06: parser leftovers held the
+    // top slot and the newest job was missing entirely); those values are ours
+    // to overwrite. A panel is a writable slot when it's empty or its company/
+    // title matches SOME history item. Anything unrecognizable is treated as
+    // hand-entered: skipped and flagged for review, never touched.
+    const sameCompany = (a, b) => {
+      const na = norm(a), nb = norm(b);
+      return !!na && !!nb && (na === nb || na.includes(nb) || nb.includes(na));
+    };
+    const ours = (p) => {
+      const c = val(p, W_COMPANY), t = val(p, W_TITLE);
+      if (!c && !t) return true;
+      if (t && !c && skillsSet.has(norm(t))) return true;  // old skill-into-title damage
+      return items.some((w) => sameCompany(c, w.company) || (!!t && norm(t) === norm(w.title)));
+    };
+    let slots = getPanels().filter(ours);
+    let placed = 0;
+    for (let i = 0; i < items.length; i++) {
+      const w = items[i];
+      let panel = slots[i];
+      if (!panel) {
+        const btn = addEntryButton(section);
+        if (!btn) break;
+        const before = getPanels().length;
+        realClick(btn);
+        const grew = await waitFor(() => getPanels().length > before, 5000);
+        if (!grew) break;
+        await sleep(250);
+        slots = getPanels().filter(ours);
+        panel = slots[i];
+        if (!panel) break;
+      }
+      if (setText(panel, W_TITLE, w.title)) filled++;
+      if (setText(panel, W_COMPANY, w.company)) filled++;
+      if (setText(panel, "location", w.location)) filled++;
+      if (setCheckbox(panel, "currentlyWorkHere", !!w.current)) filled++;
+      filled += setDateGroup(panel, "formField-startDate", w.start_month, w.start_year);
+      if (!w.current) {
+        // unchecking "current" renders the End Date group asynchronously
+        await waitFor(() => aid(panel, "formField-endDate"), 1500);
+        filled += setDateGroup(panel, "formField-endDate", w.end_month, w.end_year);
+      }
+      if (setText(panel, W_DESC, w.description)) filled++;
+      placed++;
       await sleep(150);
     }
-    progress("work", "done", `${Math.min(panels.length, items.length)} entr${items.length === 1 ? "y" : "ies"}`);
+    const finalPanels = getPanels();
+    const foreign = finalPanels.filter((p) => !ours(p)).length;
+    const extra = Math.max(0, finalPanels.length - foreign - placed);
+    progress("work", "done",
+             `${placed} entr${placed === 1 ? "y" : "ies"}` +
+             (extra ? ` · ${extra} duplicate — delete` : "") +
+             (foreign ? ` · ${foreign} existing — review` : ""));
     return { filled };
   }
 
+  const E_ANCHOR = "[data-automation-id*='school' i], [data-automation-id='formField-schoolName']";
+
   async function fillEducation(history) {
-    const section = findSection("educationSection", /education/i);
+    const section = findSection("educationSection", /^education\b/i, "Education",
+                                E_ANCHOR + ", [data-automation-id^='education-'], [data-automation-id='add-button']");
     if (!section) return null;
     progress("education", "start");
     section.setAttribute("data-jpaf-owned", "1");
     let filled = 0;
     const items = history.education || [];
     if (!items.length) { progress("education", "skip", "no history"); return { filled }; }
-    const panels = await ensurePanels(section, "education-", items.length);
+    let panels = await ensurePanels(section, "education-", items.length);
+    if (!panels.length) {
+      // NVIDIA-style tenants: grow via Add, panels are "<Name>-N-panel" groups
+      const getPanels = () => entryPanels(section, "education-", E_ANCHOR);
+      for (let guard = 0; getPanels().length < items.length && guard < items.length + 1; guard++) {
+        const btn = addEntryButton(section);
+        if (!btn) break;
+        const before = getPanels().length;
+        realClick(btn);
+        const grew = await waitFor(() => getPanels().length > before, 5000);
+        if (!grew) break;
+        await sleep(250);
+      }
+      panels = getPanels();
+    }
     for (let i = 0; i < Math.min(panels.length, items.length); i++) {
       const p = panels[i], e = items[i];
-      if (fillText(p, "school", e.school)) filled++;
+      // Cisco renders School as a searchable PROMPT — typed text never commits
+      // (it sat as an inputAlert while Cal Poly auto-resolved); it needs the
+      // type-and-pick flow. Plain-input tenants keep the text path.
+      const schoolWrap = aid(p, "formField-school") || aid(p, "formField-schoolName") || aid(p, "school");
+      if (schoolWrap && schoolWrap.querySelector(
+            "[data-automation-id='multiselectInputContainer'], [data-automation-id='multiSelectContainer']")) {
+        if (await fillPrompt(schoolWrap, e.school)) filled++;
+      } else if (fillText(p, ["school", "schoolName", "schoolItem"], e.school)) filled++;
       if (await fillDropdown(p, "degree", e.degree_label, e.degree)) filled++;
       // field of study is a type-ahead multiselect on most tenants
-      const fos = control(p, "field-of-study") || control(p, "fieldOfStudy") ||
+      const fos = control(p, ["field-of-study", "fieldOfStudy"]) ||
                   (aid(p, "formField-fieldOfStudy") && aid(p, "formField-fieldOfStudy").querySelector("input"));
       if (fos && e.field_of_study && !(fos.value || "").trim() &&
           !p.querySelector("[data-automation-id='selectedItem']")) {
         fos.focus();
         setNative(fos, e.field_of_study);
         await sleep(700);
-        const opt = bestOption(e.field_of_study) || visibleOptions()[0];
+        // STRICT match only — a first-option fallback here is how "Afghanistan
+        // (+93)" class bugs happen; better unfilled than wrong
+        const opt = promptOption(e.field_of_study);
         if (opt) { realClick(opt); filled++; }
         else fos.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
         done(fos);
         await sleep(150);
       }
-      if (e.gpa) { if (fillText(p, "gpa", e.gpa)) filled++; }
-      if (e.end_year) filled += fillDateGroup(p, "formField-endDate", null, e.end_year);
+      if (e.gpa) { if (fillText(p, ["gpa", "gradeAverage"], e.gpa)) filled++; }
+      if (e.end_year) {
+        const got = fillDateGroup(p, "formField-endDate", null, e.end_year) ||
+                    fillDateGroup(p, "formField-lastYearAttended", null, e.end_year);
+        filled += got;
+      }
       await sleep(150);
     }
     progress("education", "done", `${Math.min(panels.length, items.length)} entr${items.length === 1 ? "y" : "ies"}`);
@@ -245,12 +557,18 @@
   }
 
   async function fillSkills(history) {
-    const section = findSection("skillsSection", /^skills$|add skills/i);
+    const section = findSection("skillsSection", /^skills$|add skills/i, "Skills",
+                                "[data-automation-id='formField-skills'], [data-automation-id='searchBox'], " +
+                                "[data-automation-id='multiselectInputContainer']");
     if (!section) return null;
     progress("skills", "start");
     section.setAttribute("data-jpaf-owned", "1");
-    const input = section.querySelector("input[type='text'], input:not([type])");
-    if (!input) { progress("skills", "skip", "no input"); return { filled: 0 }; }
+    // ONLY the skills prompt input — a loose input grab typed skills into the
+    // first work entry's Job Title on NVIDIA ("Matplotlib" as a job title)
+    const input = section.querySelector(
+      "[data-automation-id='formField-skills'] input, [data-automation-id='searchBox'], " +
+      "[data-automation-id='multiselectInputContainer'] input, input[placeholder='Search' i]");
+    if (!input) { progress("skills", "skip", "no skills box"); return { filled: 0 }; }
     const existing = new Set(
       [...section.querySelectorAll("[data-automation-id='selectedItem']")].map((x) => norm(x.innerText)));
     let added = 0;
@@ -317,7 +635,9 @@
   }
 
   async function fillWebsites(history) {
-    const section = findSection("websiteSection", /websites?/i);
+    const section = findSection("websiteSection", /websites?/i, "Websites",
+                                "[data-automation-id='formField-url'], [data-automation-id^='websitePanelSet-'], " +
+                                "[data-automation-id='add-button']");
     if (!section) return null;
     const links = history.links || {};
     const urls = [links.portfolio, links.github, links.website].filter(Boolean);
@@ -325,12 +645,14 @@
     progress("websites", "start");
     section.setAttribute("data-jpaf-owned", "1");
     let filled = 0;
-    const panels = await ensurePanels(section, "websitePanelSet-", urls.length);
+    let panels = await ensurePanels(section, "websitePanelSet-", urls.length);
+    if (!panels.length)
+      panels = entryPanels(section, "websitePanelSet-", "[data-automation-id='formField-url']");
     for (let i = 0; i < Math.min(panels.length, urls.length); i++) {
-      if (fillText(panels[i], "website", urls[i])) filled++;
+      if (fillText(panels[i], ["website", "url"], urls[i])) filled++;
     }
     // single bare input variant
-    if (!panels.length && fillText(section, "website", urls[0])) filled++;
+    if (!panels.length && fillText(section, ["website", "url"], urls[0])) filled++;
     progress("websites", "done", `${filled}`);
     return { filled };
   }
@@ -343,6 +665,19 @@
     if (wrap.querySelector("[data-automation-id='selectedItem']")) {  // already answered
       wrap.setAttribute("data-jpaf-owned", "1");
       return { filled: 0 };
+    }
+    // Cisco variant: a plain LISTBOX button, not a searchable prompt. If it
+    // already shows a value (e.g. "LinkedIn" carried in by the job link),
+    // leave it — don't report a scary "fail" for an answered field.
+    const lb = wrap.querySelector("button[aria-haspopup='listbox']");
+    if (lb) {
+      wrap.setAttribute("data-jpaf-owned", "1");
+      const cur = norm(lb.innerText);
+      if (cur && !/select one|^select$/.test(cur)) return { filled: 0 };
+      progress("source", "start");
+      const ok = await fillDropdown(document, "source", "LinkedIn", "Job Board");
+      progress("source", ok ? "done" : "skip", ok ? (lb.innerText || "").trim() : "left for you");
+      return { filled: ok ? 1 : 0 };
     }
     const input = wrap.querySelector("input");
     if (!input) return null;
@@ -373,7 +708,7 @@
   }
 
   function fillLinkedIn(history) {
-    const wrap = aid(document, "linkedinQuestion");
+    const wrap = aid(document, "linkedinQuestion") || aid(document, "formField-linkedInAccount");
     if (!wrap) return null;
     const el = wrap.querySelector("input");
     const li = (history.links || {}).linkedin;
@@ -540,14 +875,52 @@
            !!document.querySelector("[data-automation-id]");
   };
 
+  // Advance the wizard one step: click Next / Save and Continue — NEVER Submit
+  // or anything on the review step. Returns {clicked, reason?, label?} after the
+  // step actually changes (or validation errors / timeout stop us).
+  window.__jpafWorkdayNext = async function () {
+    const btn = aid(document, "bottom-navigation-next-button") ||
+                aid(document, "pageFooterNextButton") ||
+                [...document.querySelectorAll("button")].find((b) =>
+                  b.getClientRects().length &&
+                  /^(save and continue|continue|next)$/i.test((b.innerText || "").trim()));
+    if (!btn) return { clicked: false, reason: "no-next-button" };
+    const label = (btn.innerText || "").trim();
+    if (/submit|review/i.test(label)) return { clicked: false, reason: "at-" + label.toLowerCase() };
+    const sig = () => {
+      const prog = aid(document, "progressBarActiveStep");
+      const h = document.querySelector("h2, h3");
+      return ((prog && prog.innerText) || "") + "|" + ((h && h.innerText) || "");
+    };
+    const before = sig();
+    realClick(btn);
+    const end = Date.now() + 12000;
+    while (Date.now() < end) {
+      await sleep(350);
+      const err = document.querySelector(
+        "[data-automation-id='errorBanner'], [data-automation-id='alertMessage'], " +
+        "[data-automation-id='inlineAlertMessage']");
+      if (err && err.getClientRects().length) return { clicked: false, reason: "validation-errors", label };
+      if (sig() !== before) {
+        // wait for the new step's form to render before the caller refills
+        await waitFor(() => document.querySelector("[data-automation-id^='formField-'], input, button[aria-haspopup='listbox']"), 6000);
+        await sleep(600);
+        return { clicked: true, label };
+      }
+    }
+    return { clicked: false, reason: "timeout", label };
+  };
+
   // Which wizard sections exist on the current step (for the progress panel).
   window.__jpafWorkdaySections = function () {
     const out = [];
-    if (findSection("workExperienceSection", /work experience/i)) out.push("work");
-    if (findSection("educationSection", /education/i)) out.push("education");
-    if (findSection("skillsSection", /^skills$|add skills/i)) out.push("skills");
+    if (aid(document, "applyFlowMyInfoPage") || aid(document, "formField-candidateIsPreviousWorker"))
+      out.push("contact");
+    if (findSection("workExperienceSection", /work experience/i, "Work-Experience", W_ANCHOR + ", [data-automation-id='add-button']")) out.push("work");
+    if (findSection("educationSection", /^education\b/i, "Education", E_ANCHOR + ", [data-automation-id='add-button']")) out.push("education");
+    if (findSection("skillsSection", /^skills$|add skills/i, "Skills", "[data-automation-id='formField-skills'], [data-automation-id='searchBox'], [data-automation-id='multiselectInputContainer']")) out.push("skills");
     if (document.querySelector("input[type='file']")) out.push("resume");
-    if (findSection("websiteSection", /websites?/i)) out.push("websites");
+    if (findSection("websiteSection", /websites?/i, "Websites", "[data-automation-id='formField-url'], [data-automation-id='add-button']")) out.push("websites");
     if (isDisclosureStep()) out.push("identity");
     return out;
   };
@@ -557,11 +930,13 @@
     if (!window.__jpafIsWorkday()) return stats;
     const history = await send({ cmd: "history" });
     if (!history || history.error) { progress("wizard", "fail", "backend offline"); return stats; }
+    const profile = await send({ cmd: "profile" });
     const ctx = {
       company: (location.hostname.split(".")[0] || "").replace(/[^a-z0-9]/gi, " "),
       title: ((document.querySelector("h1, h2") || {}).innerText || document.title || "").slice(0, 120),
     };
     const steps = [
+      ["contact", () => fillMyInfo(profile)],
       ["work", () => fillWork(history)],
       ["education", () => fillEducation(history)],
       ["skills", () => fillSkills(history)],

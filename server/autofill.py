@@ -7,8 +7,11 @@ web server decoupled from the Playwright-heavy ``auto_applier`` package.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -44,6 +47,8 @@ class FieldSpec(BaseModel):
     type: str | None = "text"
     options: list[str] | None = None
     required: bool | None = False
+    section: str | None = ""   # nearest heading/legend — disambiguates e.g. education dates
+    combo: bool | None = False  # scan marks React-Select/autocomplete inputs
 
 
 class AutofillRequest(BaseModel):
@@ -57,8 +62,15 @@ class AutofillRequest(BaseModel):
 
 @router.get("/profile")
 def get_profile():
-    """The applicant profile JSON, for the extension to cache + standard-fill."""
-    return load_profile()
+    """The applicant profile JSON, for the extension to cache + standard-fill.
+    Enriched with structured employment entries so section engines and the
+    offline mapper can fill work-history forms."""
+    prof = dict(load_profile())
+    try:
+        prof["employment"] = _load_work_entries("auto")
+    except Exception as e:
+        logger.warning(f"[autofill] employment enrichment failed: {e}")
+    return prof
 
 
 # ---------------------------------------------------------------------------
@@ -122,13 +134,10 @@ _DEGREE_LABELS = {
 }
 
 
-@router.get("/history")
-def get_history(resume_pref: str = "auto"):
-    """Work/education/skills as structured entries for multi-entry ATS wizards."""
-    profile = load_profile()
+def _load_work_entries(resume_pref: str = "auto") -> list[dict]:
+    """Structured work-history entries from the routed base résumé YAML."""
     with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
         resume = yaml.safe_load(f) or {}
-
     work = []
     for w in resume.get("work_experience", []) or []:
         d = _parse_date_range(w.get("dates", ""))
@@ -139,6 +148,17 @@ def get_history(resume_pref: str = "auto"):
             "description": "\n".join(filter(None, (_bullet_str(b) for b in w.get("bullets", []) or []))),
             **d,
         })
+    return work
+
+
+@router.get("/history")
+def get_history(resume_pref: str = "auto"):
+    """Work/education/skills as structured entries for multi-entry ATS wizards."""
+    profile = load_profile()
+    with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
+        resume = yaml.safe_load(f) or {}
+
+    work = _load_work_entries(resume_pref)
 
     education = []
     for e in resume.get("education", []) or []:
@@ -226,7 +246,24 @@ def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = "
       except Exception as e:
         logger.warning(f"[autofill] tailored-resume lookup failed: {e}")
 
-    # 2. rendered base résumé (cached; re-rendered when the YAML changes)
+    # 2. user-provided résumé file (the polished PDF), if configured in the profile.
+    #    Attach under its ORIGINAL filename (what the widget pill shows) — the
+    #    file on the form must be recognizably the one the user uploaded.
+    try:
+        prof = load_profile()
+        rf = prof.get("resume_files") or {}
+        key = "bt" if (resume_pref or "").lower() == "bt" else "ai"
+        rel = rf.get(key) or rf.get("ai")
+        if rel:
+            p = Path(rel)
+            if not p.is_absolute():
+                p = Path(__file__).parent.parent / p
+            if p.exists():
+                return FileResponse(p, filename=_resume_serve_name(p))
+    except Exception as e:
+        logger.warning(f"[autofill] configured resume_files lookup failed: {e}")
+
+    # 3. rendered base résumé (cached; re-rendered when the YAML changes)
     try:
         from agents.tailor import _create_resume_docx, _load_config
 
@@ -246,6 +283,137 @@ def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = "
         return JSONResponse({"error": str(e)}, status_code=404)
 
 
+def _resume_target(resume_pref: str) -> Path | None:
+    """The on-disk file the profile serves for this pref, or None if unset."""
+    rf = load_profile().get("resume_files") or {}
+    key = "bt" if (resume_pref or "").lower() == "bt" else "ai"
+    rel = rf.get(key)
+    if not rel:
+        return None
+    p = Path(rel)
+    return p if p.is_absolute() else Path(__file__).parent.parent / p
+
+
+def _resume_serve_name(p: Path) -> str:
+    """Filename the ATS sees: the uploaded file's original name (what the
+    widget pill shows), falling back to the on-disk name."""
+    side = p.with_suffix(p.suffix + ".meta.json")
+    if side.exists():
+        try:
+            name = (json.loads(side.read_text(encoding="utf-8")).get("original_name") or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+    return p.name
+
+
+@router.get("/resume_meta")
+def resume_meta(resume_pref: str = "auto"):
+    """What the autofill would attach for this pref (before any per-company
+    tailored override): file, display name, and upload provenance for the
+    widget's résumé pill."""
+    p = _resume_target(resume_pref)
+    identity = load_profile().get("identity", {})
+    nice = (identity.get("full_name") or "resume").replace(" ", "_") + "_Resume"
+    if p and p.exists():
+        meta = {}
+        side = p.with_suffix(p.suffix + ".meta.json")
+        if side.exists():
+            try:
+                meta = json.loads(side.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        return {"source": "profile_pdf", "file": p.name, "serve_name": _resume_serve_name(p),
+                "original_name": meta.get("original_name") or p.name,
+                "uploaded_at": meta.get("uploaded_at") or datetime.fromtimestamp(
+                    p.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                "size": p.stat().st_size,
+                "note": "a company-matched tailored résumé still overrides this"}
+    return {"source": "rendered_base", "file": None, "serve_name": nice + ".docx",
+            "original_name": None, "uploaded_at": None, "size": None,
+            "note": "no PDF configured — the base résumé YAML is rendered to .docx"}
+
+
+class ResumeUpload(BaseModel):
+    resume_pref: str = "ai"
+    filename: str = ""
+    b64: str
+
+
+@router.post("/resume_upload")
+def resume_upload(req: ResumeUpload):
+    """Replace the configured résumé PDF from the widget ('swap it out as I
+    iterate my résumé'). Overwrites the profile-configured path only — never an
+    arbitrary location — and records provenance in a .meta.json sidecar."""
+    p = _resume_target(req.resume_pref)
+    if p is None:
+        return JSONResponse({"error": "no resume_files path configured for this pref in "
+                                      "applicant_profile.yaml — set it first"}, status_code=400)
+    try:
+        data = base64.b64decode(req.b64)
+    except Exception:
+        return JSONResponse({"error": "invalid base64 payload"}, status_code=400)
+    if not data.startswith(b"%PDF"):
+        return JSONResponse({"error": "only PDF files are supported here"}, status_code=400)
+    if len(data) > 15 * 1024 * 1024:
+        return JSONResponse({"error": "file too large (>15MB)"}, status_code=400)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(p)
+    side = p.with_suffix(p.suffix + ".meta.json")
+    side.write_text(json.dumps({
+        "original_name": (req.filename or "").strip()[:120] or p.name,
+        "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "size": len(data)}), encoding="utf-8")
+    logger.info(f"[autofill] résumé replaced via widget: {p.name} <- "
+                f"{req.filename!r} ({len(data)} bytes)")
+    return {"ok": True, **resume_meta(req.resume_pref)}
+
+
+@router.get("/cover_letter_file")
+def cover_letter_file(company: str = "", job_title: str = ""):
+    """Tailored cover letter for a matching application, if one exists.
+    No generic fallback — a wrong-company letter is worse than none."""
+    if not company:
+        return JSONResponse({"error": "no company context"}, status_code=404)
+    try:
+        from db.database import get_session
+        from db.models import Application, Job
+
+        s = get_session()
+        try:
+            q = (s.query(Application, Job).join(Job, Application.job_id == Job.id)
+                 .filter(Application.cover_letter_path.isnot(None))
+                 .filter(Job.company.ilike(f"%{company.strip()}%")))
+            rows = q.order_by(Application.id.desc()).all()
+            GENERIC = {"senior", "junior", "staff", "lead", "principal", "sr", "jr",
+                       "i", "ii", "iii", "iv", "the", "of", "and", "a", "an"}
+            jt = set(re.findall(r"[a-z]+", (job_title or "").lower())) - GENERIC
+            best, best_score = None, 0
+            for app, job in rows:
+                p = Path(app.cover_letter_path)
+                if not p.is_absolute():
+                    p = Path(__file__).parent.parent / p
+                if not p.exists():
+                    continue
+                if not jt:
+                    best = p
+                    break
+                tt = set(re.findall(r"[a-z]+", (job.title or "").lower())) - GENERIC
+                score = len(jt & tt)
+                if score > best_score:
+                    best, best_score = p, score
+            if best is not None and (not jt or best_score >= 1):
+                return FileResponse(best, filename=best.name)
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning(f"[autofill] cover-letter lookup failed: {e}")
+    return JSONResponse({"error": "no tailored cover letter for this company"}, status_code=404)
+
+
 @router.get("/health")
 def health():
     try:
@@ -255,8 +423,11 @@ def health():
     return {"ok": True, "ollama_up": check_ollama_health(), "profile_loaded": profile_loaded}
 
 
-def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: str, company: str) -> str | None:
-    """Agentic draft for an open-ended/ambiguous field, with fallback templates."""
+def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: str,
+                  company: str, page_text: str = "") -> str | None:
+    """Agentic draft for an open-ended/ambiguous field: grounded in the résumé,
+    the page's job description, and the profile's essay_facts. Falls back to
+    the fallback_essays templates when the LLM is unavailable."""
     label = (field.get("label") or field.get("name") or "this question").strip()
     nl = label.lower()
     fbs = profile.get("fallback_essays", {})
@@ -265,6 +436,8 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
         fb = fbs.get("greatest_strength")
     elif "weak" in nl:
         fb = fbs.get("weakness")
+    elif "accomplish" in nl or "achievement" in nl or "proud" in nl:
+        fb = (profile.get("essay_facts") or {}).get("biggest_accomplishment")
     elif "role" in nl or "position" in nl:
         fb = fbs.get("why_role")
     elif "company" in nl or "why" in nl:
@@ -272,14 +445,25 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
     if fb and "{company}" in fb:
         fb = fb.replace("{company}", company or "your team")
 
+    facts = profile.get("essay_facts") or {}
+    facts_block = "\n".join(f"- {k.replace('_', ' ')}: {v}" for k, v in facts.items() if v)
+    jd = re.sub(r"\s+", " ", (page_text or "")).strip()[:1800]
+
     opts = field.get("options")
     prompt = (
-        "You are the job candidate filling out an application. Answer the question "
-        "concisely (max 120 words), first person, grounded ONLY in the résumé below. "
-        "Do not invent facts.\n\n"
+        "You are the job candidate filling out a job application. Answer the question "
+        "in first person, concisely (60-120 words, or one line if the question wants a "
+        "short factual answer). Ground every claim ONLY in the RESUME and KNOWN FACTS "
+        "below — never invent employers, dates, or numbers. When the JOB DESCRIPTION "
+        "is relevant (e.g. 'why do you want to work here'), connect the candidate's "
+        "actual experience to what the role needs. No preamble, no quotes — return "
+        "only the answer text.\n\n"
         f"QUESTION: {label}\n"
         + (f"PICK ONE OF THESE OPTIONS, returning its exact text: {opts}\n" if opts else "")
-        + f"\nJOB: {job_title or ''} at {company or ''}\n\nRÉSUMÉ:\n{resume_summary[:2000]}"
+        + f"\nJOB: {job_title or ''} at {company or ''}\n"
+        + (f"\nJOB DESCRIPTION (excerpt):\n{jd}\n" if jd else "")
+        + (f"\nKNOWN FACTS:\n{facts_block}\n" if facts_block else "")
+        + f"\nRESUME:\n{resume_summary[:2000]}"
     )
     try:
         return generate_text(prompt) or fb
@@ -290,14 +474,19 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
 
 @router.post("/plan")
 def plan(req: AutofillRequest):
-    profile = load_profile()
+    profile = dict(load_profile())
+    try:  # employment entries let the mapper fill work-history sections
+        profile["employment"] = _load_work_entries(req.resume_pref or "auto")
+    except Exception as e:
+        logger.warning(f"[autofill] employment enrichment failed: {e}")
     archetypes = _archetype_config().get("archetypes", {})
     archetype = choose_archetype(req.job_title, req.page_text, archetypes, req.resume_pref or "auto")
     resume_summary = _load_resume_summary(archetype)
     archetype_label = (archetypes.get(archetype, {}).get("label") if archetype else None) or "AI / Data résumé"
 
     def essay_fn(field, ctx):
-        return _draft_answer(field, profile, resume_summary, req.job_title or "", req.company or "")
+        return _draft_answer(field, profile, resume_summary, req.job_title or "",
+                             req.company or "", req.page_text or "")
 
     fields = [f.model_dump() for f in req.fields]
     result = build_plan(fields, profile, archetype, resume_summary, essay_fn=essay_fn)

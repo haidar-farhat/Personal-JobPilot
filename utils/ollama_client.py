@@ -35,6 +35,32 @@ def get_ollama_client():
     return ollama.Client(host=ollama_config.get("base_url", "http://localhost:11434"))
 
 
+_model_cache: dict = {"target": None, "resolved": None, "ts": 0.0}
+
+
+def _resolve_model(client, target: str) -> str:
+    """The configured model if installed, else the closest available one
+    (same family preferred, ':latest' first). A missing model must degrade to
+    a working one — not silently fail every LLM call (2026-07-05: configured
+    gemma4:e4b wasn't pulled here, so every essay draft fell back to templates)."""
+    now = time.time()
+    if _model_cache["target"] == target and _model_cache["resolved"] and now - _model_cache["ts"] < 300:
+        return _model_cache["resolved"]
+    resolved = target
+    try:
+        available = [m.model for m in client.list().models]
+        if available and not any(n == target or n.startswith(target) for n in available):
+            family = target.split(":")[0]
+            fam = sorted((n for n in available if n.startswith(family)),
+                         key=lambda n: (not n.endswith(":latest"), n))
+            resolved = fam[0] if fam else available[0]
+            logger.warning(f"[ollama] configured model {target!r} not installed; using {resolved!r}")
+    except Exception:
+        pass  # ollama unreachable — let the caller's own error handling report it
+    _model_cache.update(target=target, resolved=resolved, ts=now)
+    return resolved
+
+
 def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
     """Send a prompt to Ollama and parse the JSON response.
 
@@ -56,6 +82,7 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
     num_ctx = ollama_config.get("num_ctx", 16384)
 
     client = get_ollama_client()
+    model = _resolve_model(client, model)
 
     messages = []
     if system_prompt:
@@ -125,6 +152,7 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
     num_ctx = ollama_config.get("num_ctx", 16384)
 
     client = get_ollama_client()
+    model = _resolve_model(client, model)
 
     messages = []
     if system_prompt:
@@ -140,13 +168,11 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
 
 
 def check_ollama_health() -> bool:
-    """Check if Ollama is running and the model is available."""
+    """Check if Ollama is running with ANY model available — generation
+    falls back to the closest installed model when the configured one is
+    missing, so a name mismatch is degraded quality, not an outage."""
     try:
         client = get_ollama_client()
-        models = client.list()
-        config = _load_config()
-        target_model = config.get("ollama", {}).get("model", "gemma3:27b")
-        available = [m.model for m in models.models]
-        return any(target_model in name for name in available)
+        return bool(client.list().models)
     except Exception:
         return False

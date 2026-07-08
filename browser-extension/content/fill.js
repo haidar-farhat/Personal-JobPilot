@@ -22,9 +22,21 @@
   };
   const DECLINE_HINTS = ["decline", "do not wish", "dont wish", "prefer not",
                          "not to answer", "not wish", "choose not", "rather not"];
+  // How consent questions spell Yes/No: ["Confirmed"], ["I acknowledge"],
+  // ["No, I am not a current or former Government Official", …]
+  const AFFIRM_HINTS = ["confirmed", "confirm", "i confirm", "i agree", "agree",
+                        "i acknowledge", "acknowledge", "i accept", "accept",
+                        "i understand", "i consent", "i have read"];
+  const NEGATE_HINTS = ["not", "i do not", "i dont", "i have not", "i am not",
+                        "i havent", "never", "none"];
 
   // Choose the best option element for `value` among a list of {el, t:normText}.
-  function chooseChoice(value, opts) {
+  // strict=true keeps only the precise heuristics (exact / synonym / decline /
+  // yes-no leading / substring) — the bare token-overlap fallback is for
+  // FILTERED lists only. Against an unfiltered vocabulary (a react-select
+  // school list opens alphabetically) token overlap happily commits
+  // "Adams State University" for "California Polytechnic State University".
+  function chooseChoice(value, opts, strict) {
     const nv = norm(value);
     const cands = [nv, ...(OPTION_SYNONYMS[nv] || [])];
     for (const c of cands) { const o = opts.find((x) => x.t === c); if (o) return o.el; }
@@ -34,13 +46,17 @@
     }
     if (nv === "yes" || nv === "no") {
       let o = opts.find((x) => x.t.split(" ")[0] === nv);
-      if (!o && nv === "no") o = opts.find((x) => x.t.startsWith("not "));
+      if (!o) {
+        const hints = nv === "yes" ? AFFIRM_HINTS : NEGATE_HINTS;
+        o = opts.find((x) => hints.some((h) => x.t === h || x.t.startsWith(h + " ")));
+      }
       if (o) return o.el;
     }
     for (const c of cands) {
       const o = opts.find((x) => x.t && (x.t.includes(c) || c.includes(x.t)));
       if (o) return o.el;
     }
+    if (strict) return null;
     const dw = nv.split(" ").filter((w) => w.length > 2);  // best token overlap
     let best = null, bn = 0;
     for (const x of opts) {
@@ -54,6 +70,59 @@
   function bestOption(value) {
     const opts = visibleOptions().map((el) => ({ el, t: norm(el.innerText) }));
     return chooseChoice(value, opts);
+  }
+
+  // Options belonging to THIS combobox only. A page can hold several open/
+  // hidden option lists at once (react-select portals, intl-tel-input's
+  // country list) — matching globally can commit a value into the wrong
+  // widget. react-select ids its options "react-select-<inputId>-option-N".
+  function comboOptions(el) {
+    const id = el.id || "";
+    if (id) {
+      const own = [...document.querySelectorAll(`[id^="react-select-${CSS.escape(id)}-option"]`)];
+      if (own.length) return own;
+    }
+    const lb = el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
+    if (lb) {
+      const box = document.getElementById(lb);
+      if (box) {
+        const own = [...box.querySelectorAll("[role='option']")];
+        if (own.length) return own;
+      }
+    }
+    const shell = el.closest(".select-shell, .select__container, [class*='select']") || el.parentElement;
+    if (shell) {
+      const own = [...shell.querySelectorAll(".select__menu [role='option'], [role='listbox'] [role='option']")];
+      if (own.length) return own;
+    }
+    return [...document.querySelectorAll("[role='option'], li[role='menuitem']")]
+      .filter((o) => o.getClientRects().length > 0 && !(o.className || "").toString().includes("iti__"));
+  }
+
+  function bestOptionIn(opts, value, strict) {
+    return chooseChoice(value, opts.filter((o) => o.getClientRects().length > 0)
+      .map((o) => ({ el: o, t: norm(o.innerText) })), strict);
+  }
+
+  // Did the combobox actually COMMIT a value? react-select renders a
+  // .select__single-value / multi-value chip; its input keeps transient typed
+  // text, so for those the chip is the only truth. Plain autocompletes keep
+  // the committed text in the input itself. Walk up level by level (the chip
+  // is a SIBLING branch of the input) but stop at the widget boundary so we
+  // never read a neighbouring select's chip.
+  function comboCommitted(el) {
+    let n = el.parentElement;
+    for (let hops = 0; n && hops < 6; hops++) {
+      if (n.querySelector(".select__single-value, .select__multi-value, " +
+                          "[class*='single-value'], [class*='multi-value'], [class*='selectedItem']"))
+        return true;
+      const cl = n.classList;
+      if (cl && (cl.contains("select-shell") || cl.contains("select__container") ||
+                 cl.contains("select") || n.tagName === "FORM")) break;
+      n = n.parentElement;
+    }
+    if ((el.className || "").toString().includes("select__input")) return false;
+    return !!(el.value || "").trim();
   }
 
   function realClick(el) {
@@ -84,17 +153,93 @@
     return false;
   }
 
-  // Autocomplete/React-Select inputs: type the value, then pick the matching
-  // suggestion if one appears (typed text alone often isn't committed).
+  async function waitFor(fn, timeout = 2500, step = 200) {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      const v = fn();
+      if (v) return v;
+      await sleep(step);
+    }
+    return null;
+  }
+
+  // React-Select / autocomplete inputs. Strategy:
+  //   1. OPEN the menu first (click the control) — fixed vocabularies list all
+  //      options on open, and non-searchable react-selects ignore typing.
+  //   2. If nothing matches, TYPE to search (async pickers: Greenhouse school
+  //      search, location geo-lookup) and poll for the suggestion.
+  //   3. Click the option and VERIFY the value committed (chip rendered) —
+  //      typed-but-uncommitted text in a react-select is worthless.
   async function fillCombo(el, value) {
     el.focus();
-    setNative(el, value);
-    await sleep(500);
-    const opt = bestOption(value);
-    if (opt) { realClick(opt); await sleep(150); return true; }
-    // no suggestion list — the typed text may still be valid; leave it
+    const control = el.closest(".select__control") || el;
+    const menuOpen = () => comboOptions(el).some((o) => o.getClientRects().length > 0);
+    realClick(control);
+    // open phase shows the UNFILTERED vocabulary — match strictly, or not at all
+    let opt = await waitFor(() => bestOptionIn(comboOptions(el), value, true), 900, 150);
+    if (!opt && !menuOpen()) {
+      // ONLY when the menu never opened: widgets that open on focus see our
+      // click as a TOGGLE — one more click recovers. (Clicking again while a
+      // no-strict-match menu is open would CLOSE it and kill the typed search.)
+      realClick(control);
+      opt = await waitFor(() => bestOptionIn(comboOptions(el), value, true), 900, 150);
+    }
+    if (!opt && !el.readOnly) {
+      // typed phase: the list is now FILTERED by our own query, so the loose
+      // token-overlap matcher is safe (async searches return close variants,
+      // e.g. "California Polytechnic State University - San Luis Obispo").
+      // Comma-form values ("X University, San Luis Obispo", full location
+      // lines) return ZERO results from async searches and can wedge them —
+      // type the prefix FIRST, like a human would, then fall back to the full
+      // value for plain filter-style lists.
+      const short = String(value).split(",")[0].trim();
+      const queries = short && short !== String(value) ? [short, String(value)] : [String(value)];
+      for (const q of queries) {
+        setNative(el, q);
+        opt = await waitFor(() => bestOptionIn(comboOptions(el), value) ||
+                                  bestOptionIn(comboOptions(el), q), 3500, 250);
+        if (opt) break;
+      }
+    }
+    if (opt) {
+      realClick(opt);
+      await sleep(200);
+      if (comboCommitted(el)) return true;
+    }
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    return true;
+    return comboCommitted(el);
+  }
+
+  // ---- résumé attach (DataTransfer — same trick JobRight/Simplify use) ----
+  function sendBg(msg) {
+    return new Promise((resolve) => {
+      try {
+        if (window.chrome && chrome.runtime && chrome.runtime.sendMessage)
+          chrome.runtime.sendMessage(msg, resolve);
+        else resolve(null);
+      } catch (e) { resolve(null); }
+    });
+  }
+
+  async function attachFile(el, ctx, cmd) {
+    try {
+      if (el.files && el.files.length) return true;  // user already attached one
+      const f = await sendBg({ cmd, company: (ctx && ctx.company) || "",
+                               title: (ctx && ctx.title) || "" });
+      if (!f || !f.b64) return false;
+      const bytes = Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0));
+      const name = f.filename || "resume.pdf";
+      const mime = f.mime || (/\.pdf$/i.test(name) ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], name, { type: mime }));
+      el.files = dt.files;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   function setNative(el, value) {
@@ -165,9 +310,28 @@
     return false;
   }
 
+  // Outline something the user can SEE. react-select inputs are ~3px wide and
+  // ATS file inputs are visually hidden — outlining them paints stray green
+  // slivers. Walk to the widget's visible container instead.
+  function markTarget(el) {
+    if ((el.type || "").toLowerCase() === "file") {
+      const wrap = el.closest("div");
+      const btn = wrap && wrap.querySelector("button");
+      return btn || wrap || el;
+    }
+    let t = el.closest(".select__control") || el;
+    for (let hops = 0; t && hops < 4; hops++) {
+      const r = t.getBoundingClientRect();
+      if (t.getClientRects().length && r.width >= 40 && r.height >= 10) return t;
+      t = t.parentElement;
+    }
+    return el;
+  }
+
   function mark(el, ok) {
-    el.style.outline = ok ? "2px solid #0a7e07" : "2px solid #c08a00";
-    el.style.outlineOffset = "1px";
+    const t = markTarget(el);
+    t.style.outline = ok ? "2px solid #0a7e07" : "2px solid #c08a00";
+    t.style.outlineOffset = "1px";
   }
 
   function toast(msg) {
@@ -187,15 +351,49 @@
   }
 
   window.__jpafApply = async function (plan) {
-    let filled = 0, review = 0, fileFlags = 0;
+    let filled = 0, review = 0, fileFlags = 0, resumeAttached = 0, coverAttached = 0;
     const metaById = new Map((plan._scanMeta || []).map((m) => [m.id, m]));
+    const fileFieldCount = (plan.fields || []).filter((x) => x.source === "file").length;
+    const comboRetries = [];
+    const reviewFields = [];
+    const noteReview = (f, el) => {
+      const meta = metaById.get(f.id) || {};
+      const label = (meta.label ||
+        (el && (el.getAttribute("aria-label") || el.name || el.id)) || f.id).toString().slice(0, 70);
+      reviewFields.push({ id: f.id, label });
+    };
     // Sequential (not forEach) — ARIA dropdowns open popups that must close
     // before the next field is touched.
     for (const f of plan.fields || []) {
       const el = document.querySelector(`[data-jpaf-id="${f.id}"]`);
       if (!el) continue;
-      if (f.source === "file") { mark(el, false); fileFlags++; review++; continue; }
-      if (f.value == null || f.value === "") { if (f.needs_review) { mark(el, false); review++; } continue; }
+      if (f.source === "file") {
+        const meta = metaById.get(f.id) || {};
+        // combine scan meta with the element's own attributes ("Attach" labels
+        // carry nothing — the input's id/name is what says resume vs cover)
+        const lab = norm((meta.label || "") + " " + (meta.name || "") + " " + (meta.section || "") + " " +
+                         (el.getAttribute("aria-label") || "") + " " + (el.name || "") + " " + (el.id || ""));
+        const isCover = /cover/.test(lab);
+        const isResume = !isCover && (/resume|curriculum|\bcv\b/.test(lab) ||
+                         (fileFieldCount === 1 && !/transcript|portfolio|photo/.test(lab)));
+        let attached = false;
+        if (isResume) attached = await attachFile(el, plan._ctx, "resume_file");
+        else if (isCover) attached = await attachFile(el, plan._ctx, "cover_letter_file");
+        if (attached) {
+          mark(el, true); filled++;
+          if (isResume) resumeAttached++; else coverAttached++;
+        } else if (isCover) {
+          // no tailored letter for this company — quietly leave it manual
+          fileFlags++;
+        } else {
+          mark(el, false); fileFlags++; review++; noteReview(f, el);
+        }
+        continue;
+      }
+      if (f.value == null || f.value === "") {
+        if (f.needs_review) { mark(el, false); review++; noteReview(f, el); }
+        continue;
+      }
       try {
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
@@ -207,24 +405,64 @@
           el.getAttribute("aria-haspopup") === "listbox" ||
           (metaById.get(f.id) || {}).combo);
         let ok;
+        let target = el;
         if (isAria) ok = await fillAriaSelect(el, f.value);
         else if (tag === "select") ok = fillSelect(el, f.value);
-        else if (type === "radio" || type === "checkbox") ok = fillChoice(el, f.value);
+        else if (type === "radio" || type === "checkbox") {
+          // multi-value checkbox answers ("Asian; White"): one box per part
+          const parts = type === "checkbox"
+            ? String(f.value).split(";").map((s) => s.trim()).filter(Boolean) : [];
+          if (parts.length > 1) ok = parts.map((v) => fillChoice(el, v)).some(Boolean);
+          else ok = fillChoice(el, f.value);
+        }
         else if (isCombo) ok = await fillCombo(el, f.value);
         else { setNative(el, f.value); ok = true; }
-        mark(el, ok && !f.needs_review);
+        if (!ok && isCombo) comboRetries.push(f);
+        mark(target, ok && !f.needs_review);
         if (ok) filled++;
-        if (f.needs_review || !ok) review++;
+        if (f.needs_review || !ok) { review++; noteReview(f, target); }
       } catch (e) {
-        mark(el, false); review++;
+        mark(el, false); review++; noteReview(f, el);
       }
     }
+    // Final retry pass for combos that failed mid-run: résumé uploads and
+    // conditional notes re-render the whole React form while we fill — once
+    // it settles, a fresh attempt on a freshly-located element usually lands.
+    if (comboRetries.length) {
+      await sleep(1200);
+      for (const f of comboRetries) {
+        const meta2 = metaById.get(f.id) || {};
+        const el2 = document.querySelector(`[data-jpaf-id="${f.id}"]`) ||
+                    (meta2.name && (document.getElementById(meta2.name) ||
+                                    document.getElementsByName(meta2.name)[0]));
+        if (!el2) continue;
+        try {
+          if (await fillCombo(el2, f.value)) {
+            mark(el2, !f.needs_review);
+            filled++;
+            if (review > 0) review--;
+            const ri = reviewFields.findIndex((r) => r.id === f.id);
+            if (ri >= 0) reviewFields.splice(ri, 1);
+          }
+        } catch (e) { /* stays flagged for review */ }
+      }
+    }
+
     toast(
       `JobPilot filled ${filled} field(s)` +
-      (fileFlags ? " · attach résumé manually" : "") +
+      (resumeAttached ? " · résumé attached ✓" : "") +
+      (coverAttached ? " · cover letter attached ✓" : "") +
+      (fileFlags ? " · attach file manually" : "") +
       (review ? ` · ${review} need review` : "") +
       " — review & click Apply"
     );
-    return { filled, needs_review: review, file_flags: fileFlags };
+    return { filled, needs_review: review, file_flags: fileFlags,
+             resume_attached: resumeAttached, cover_attached: coverAttached,
+             review_fields: reviewFields.slice(0, 15) };
   };
+
+  // Shared with the per-ATS engines (greenhouse.js) — same isolated world,
+  // loaded after this file per the manifest order.
+  window.__jpafHelpers = { realClick, setNative, waitFor, fillCombo, comboOptions,
+                           bestOptionIn, comboCommitted, chooseChoice, mark };
 })();

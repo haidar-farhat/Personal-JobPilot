@@ -32,7 +32,39 @@
     return el.name || el.id || "";
   }
 
+  // Nearest section heading/legend above the field — lets the mapper
+  // disambiguate e.g. an "End Date" inside Education vs Work Experience.
+  function sectionFor(el) {
+    const fs = el.closest("fieldset");
+    if (fs) {
+      const lg = fs.querySelector("legend");
+      if (lg && txt(lg.innerText)) return txt(lg.innerText).slice(0, 80);
+    }
+    let node = el, hops = 0;
+    while (node && node !== document.body && hops < 12) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        if (/^h[1-4]$/i.test(sib.tagName) && txt(sib.innerText)) return txt(sib.innerText).slice(0, 80);
+        if (sib.querySelectorAll) {
+          const hs = sib.querySelectorAll("h1, h2, h3, h4");
+          if (hs.length) {
+            const last = hs[hs.length - 1];
+            if (txt(last.innerText)) return txt(last.innerText).slice(0, 80);
+          }
+        }
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement; hops++;
+    }
+    return "";
+  }
+
   window.__jpafScan = function () {
+    // Clear ids from any earlier scan: each scan owns the id-space of the fill
+    // that follows it. A stale id on a now-skipped element (e.g. a section an
+    // engine has since claimed) would otherwise collide with a fresh id and
+    // route the fill into the wrong element.
+    document.querySelectorAll("[data-jpaf-id]").forEach((el) => el.removeAttribute("data-jpaf-id"));
     const nodes = document.querySelectorAll("input, select, textarea");
     const SKIP = new Set(["hidden", "submit", "button", "image", "reset"]);
     const out = [];
@@ -40,7 +72,13 @@
     let i = 0;
     nodes.forEach((el) => {
       const type = (el.type || el.tagName).toLowerCase();
-      if (SKIP.has(type) || el.disabled || el.readOnly) return;
+      if (SKIP.has(type) || el.disabled) return;
+      // non-searchable react-selects render a readOnly input — still fillable
+      // (open + click); every other readOnly control is off-limits
+      if (el.readOnly && el.getAttribute("role") !== "combobox") return;
+      // react-select's shadow "required" input and other a11y decoys
+      if (el.getAttribute("aria-hidden") === "true") return;
+      if (el.tabIndex === -1 && type !== "file" && el.getAttribute("role") !== "combobox") return;
       // fields the Workday wizard engine already handled (or owns the section of)
       if (el.getAttribute("data-jpaf-done") || el.closest("[data-jpaf-owned]")) return;
       const visible = type === "file" || el.getClientRects().length > 0;
@@ -56,12 +94,31 @@
       if (el.tagName.toLowerCase() === "select") {
         options = [...el.options].map((o) => o.label || o.text || o.value).filter(Boolean);
       }
+      // radio/checkbox groups: the QUESTION lives on the group (fieldset legend /
+      // labelled group), not on the first option's own label ("Male", "Asexual"…)
+      let label = labelFor(el);
+      if (type === "radio" || type === "checkbox") {
+        const fs = el.closest("fieldset");
+        const lg = fs && fs.querySelector("legend");
+        if (lg && txt(lg.innerText)) label = txt(lg.innerText);
+        else {
+          const grp = el.closest("[role='group'][aria-labelledby], [role='radiogroup'][aria-labelledby]");
+          if (grp) {
+            const n = document.getElementById(grp.getAttribute("aria-labelledby"));
+            if (n && txt(n.innerText)) label = txt(n.innerText);
+          } else {
+            const sec = sectionFor(el);
+            if (sec) label = sec;
+          }
+        }
+      }
       // React-Select / autocomplete inputs need a type-then-pick fill
       const combo = el.getAttribute("role") === "combobox" ||
                     el.getAttribute("aria-autocomplete") === "list" ||
                     el.getAttribute("aria-haspopup") === "listbox";
-      out.push({ id, label: labelFor(el), name: el.name || el.id || "", type,
-                 options, required: !!el.required, ...(combo ? { combo: true } : {}) });
+      out.push({ id, label, name: el.name || el.id || "", type,
+                 options, required: !!el.required, section: sectionFor(el),
+                 ...(combo ? { combo: true } : {}) });
     });
 
     // ARIA dropdowns that are NOT native selects — Workday and other React UIs
@@ -81,7 +138,8 @@
       seen.add(el);
       out.push({ id, label: labelFor(el),
                  name: el.getAttribute("name") || el.getAttribute("data-automation-id") || el.id || "",
-                 type: "aria_select", options: null, required: el.getAttribute("aria-required") === "true" });
+                 type: "aria_select", options: null, section: sectionFor(el),
+                 required: el.getAttribute("aria-required") === "true" });
     });
     return out;
   };

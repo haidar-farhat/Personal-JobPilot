@@ -52,3 +52,5 @@ Thumbs.db
 # ─── Playwright ─────────────────────────────────────────
 playwright-report/
 test-results/
+config/*.pdf
+config/*.meta.json

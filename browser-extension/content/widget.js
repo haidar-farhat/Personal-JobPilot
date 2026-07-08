@@ -25,6 +25,8 @@
   let hostEl = null;        // the shadow-DOM host element (truthy once built)
   let root = null;          // shadow root
   let dismissed = false;    // user hid it on this page
+  let disabled = false;     // global kill switch — persisted, all sites
+  const DISABLE_KEY = "jpaf_disabled";
 
   function visibleInputs() {
     return [...document.querySelectorAll("input, textarea, select")].filter((e) => {
@@ -35,6 +37,7 @@
   }
 
   function looksLikeApplication() {
+    if (window.__jpafForceApp) return true;  // test/debug hook
     const host = location.hostname || "";
     if (host === "127.0.0.1" || host === "localhost") return false; // not on the dashboard itself
     // In sub-frames (all_frames:true) only surface the pill in frames big
@@ -111,6 +114,20 @@
           text-align:left; padding:0; }
         .hide:hover{ color:#cdd8ec; text-decoration:underline; }
         .ttl{ font-weight:800; font-size:12.5px; letter-spacing:-.2px; }
+        .rev{ display:flex; flex-direction:column; gap:4px; border-top:1px solid rgba(255,255,255,.12);
+          padding-top:8px; max-height:150px; overflow-y:auto; }
+        .rev[hidden]{ display:none; }
+        .rttl{ font-size:11px; color:#fbbf24; font-weight:700; }
+        .rl{ border:0; cursor:pointer; background:rgba(251,191,36,.10); color:#fde68a; font-size:11.5px;
+          text-align:left; padding:5px 8px; border-radius:7px; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; }
+        .rl:hover{ background:rgba(251,191,36,.22); }
+        .rfile{ display:flex; align-items:center; gap:7px; font-size:11.5px; margin-top:5px; }
+        .rfname{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#cdd8ec; }
+        .rswap{ border:0; cursor:pointer; background:rgba(255,255,255,.10); color:#cdd8ec;
+          font-size:11px; padding:3px 9px; border-radius:7px; flex:none; }
+        .rswap:hover{ background:rgba(255,255,255,.2); }
+        .rswap[hidden]{ display:none; }
       </style>
       <div class="dock">
         <div class="bar">
@@ -128,9 +145,16 @@
               <option value="ai">AI / data résumé</option>
               <option value="bt">Behavioral Technician résumé</option>
             </select>
+            <div class="rfile">
+              <span class="rfname" id="rfname">…</span>
+              <button class="rswap" id="rswap" title="Upload a newer résumé PDF — it becomes the file autofill attaches">Replace</button>
+              <input type="file" id="rfinput" accept="application/pdf,.pdf" hidden>
+            </div>
           </div>
           <div class="res" id="res">Fills the form — never submits. You review &amp; click Apply.</div>
+          <div class="rev" id="review" hidden></div>
           <button class="hide" id="hide">Hide on this page</button>
+          <button class="hide" id="off" title="Stop the pill from appearing on any site — nothing fills until you re-enable it from the JobPilot toolbar popup.">Turn off autofill (all sites)</button>
         </div>
       </div>`;
     document.documentElement.appendChild(hostEl);
@@ -144,7 +168,61 @@
       dismissed = true;
       if (hostEl) hostEl.remove();
     };
+    root.getElementById("off").onclick = () => {
+      try { chrome.storage.local.set({ [DISABLE_KEY]: true }); } catch (e) { /* no chrome.storage (tests) */ }
+      setDisabled(true);
+    };
+    root.getElementById("resume").onchange = refreshResumeMeta;
+    root.getElementById("rswap").onclick = () => root.getElementById("rfinput").click();
+    root.getElementById("rfinput").onchange = uploadResume;
     health();
+    refreshResumeMeta();
+  }
+
+  // Show WHICH résumé file autofill will attach, so it can be swapped as the
+  // résumé iterates (a company-matched tailored résumé still overrides it).
+  async function refreshResumeMeta() {
+    const nameEl = root && root.getElementById("rfname");
+    if (!nameEl) return;
+    const pref = root.getElementById("resume").value;
+    const m = await send({ cmd: "resume_meta", resumePref: pref });
+    const swap = root.getElementById("rswap");
+    if (m && !m.error) {
+      const when = m.uploaded_at ? ` · ${String(m.uploaded_at).slice(0, 10)}` : "";
+      nameEl.textContent = `📄 ${m.original_name || m.serve_name}${when}`;
+      nameEl.title = `Attaches as ${m.serve_name}. ${m.note || ""}`;
+      swap.hidden = m.source !== "profile_pdf";
+    } else {
+      nameEl.textContent = "📄 résumé: backend offline";
+      nameEl.title = "";
+      swap.hidden = true;
+    }
+  }
+
+  async function uploadResume(ev) {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    const nameEl = root.getElementById("rfname");
+    if (!/pdf$/i.test(f.name) && f.type !== "application/pdf") {
+      nameEl.textContent = "📄 only PDF files supported";
+      return;
+    }
+    nameEl.textContent = `📄 uploading ${f.name}…`;
+    const b64 = await new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onload = () => resolve(String(rd.result).split(",")[1] || "");
+      rd.onerror = reject;
+      rd.readAsDataURL(f);
+    });
+    const pref = root.getElementById("resume").value === "bt" ? "bt" : "ai";
+    const r = await send({ cmd: "resume_upload", resumePref: pref, filename: f.name, b64 });
+    if (r && r.ok) {
+      nameEl.textContent = `📄 ${r.original_name} ✓`;
+      setTimeout(refreshResumeMeta, 2500);
+    } else {
+      nameEl.textContent = `📄 upload failed: ${(r && r.error) || "backend offline"}`;
+    }
   }
 
   async function health() {
@@ -166,10 +244,10 @@
   }
 
   const SECTION_LABELS = {
-    work: "Work experience", education: "Education", skills: "Skills",
-    resume: "Résumé/CV", websites: "Websites", linkedin: "LinkedIn",
+    contact: "Contact info", work: "Work experience", education: "Education",
+    skills: "Skills", resume: "Résumé/CV", websites: "Websites", linkedin: "LinkedIn",
     source: "How you heard", identity: "Disclosures & identity",
-    fields: "Contact & questions",
+    fields: "Contact & questions", page: "Next page",
   };
 
   function stepsInit(names) {
@@ -200,60 +278,139 @@
     if (d.section) stepSet(d.section, d.status, d.note);
   });
 
+  // JobRight-style review list: fields the fill flagged, click to jump there.
+  function renderReview(items) {
+    const box = root && root.getElementById("review");
+    if (!box) return;
+    if (!items.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    box.innerHTML = `<div class="rttl">Needs your review (${items.length})</div>` +
+      items.slice(0, 10).map((r) =>
+        `<button class="rl" data-rid="${esc(r.id)}" title="${esc(r.label)}">${esc(r.label)}</button>`).join("");
+    box.querySelectorAll(".rl").forEach((b) => {
+      b.onclick = () => {
+        const el = document.querySelector(`[data-jpaf-id="${b.dataset.rid}"]`);
+        if (!el) return;
+        const t = el.closest(".select__control") || el;
+        t.scrollIntoView({ behavior: "smooth", block: "center" });
+        const old = t.style.outline;
+        t.style.outline = "3px solid #f59e0b";
+        setTimeout(() => { t.style.outline = old || "2px solid #c08a00"; }, 1400);
+        try { el.focus({ preventScroll: true }); } catch (e) { /* non-focusable */ }
+      };
+    });
+  }
+
+  function companyFromPage() {
+    const h = location.hostname, seg = location.pathname.split("/").filter(Boolean);
+    if (/greenhouse\.io$/i.test(h) || /lever\.co$/i.test(h) || /ashbyhq\.com$/i.test(h)) return seg[0] || "";
+    if (/myworkdayjobs\.com$|myworkdaysite\.com$/i.test(h)) return h.split(".")[0] || "";
+    return "";
+  }
+
+  // Fill the current page/step: wizard engine first (Workday / Greenhouse own
+  // their structured sections), then the flat scan → plan → fill pass.
+  async function fillCurrentPage(resumePref, mode) {
+    let wizardFilled = 0;
+    if (mode.wizard === "workday" && window.__jpafWorkdayRun) {
+      const ws = await window.__jpafWorkdayRun();
+      wizardFilled = (ws && ws.filled) || 0;
+    } else if (mode.wizard === "greenhouse" && window.__jpafGreenhouseRun) {
+      const gs = await window.__jpafGreenhouseRun();
+      wizardFilled = (gs && gs.filled) || 0;
+    }
+
+    const fields = window.__jpafScan ? window.__jpafScan() : [];
+    if (!fields.length) {
+      if (mode.steps) stepSet("fields", "skip", "none left");
+      return { filled: wizardFilled, needs_review: 0, file_flags: 0, scanned: 0, wizard: wizardFilled };
+    }
+    if (mode.steps) stepSet("fields", "start");
+    const ctx = {
+      url: location.href,
+      title: document.title,
+      h1: (document.querySelector("h1") || {}).innerText || "",
+      text: document.body ? document.body.innerText.slice(0, 4000) : "",
+      company: companyFromPage(),
+    };
+    const plan = await send({ cmd: "plan", fields, ctx, resumePref });
+    if (!plan || plan.error) throw new Error((plan && plan.error) || "Failed to get a plan.");
+    plan._scanMeta = fields;  // lets fill.js know which ids are aria/combo widgets
+    plan._ctx = { company: ctx.company, title: ctx.h1 || ctx.title };
+    const stats = window.__jpafApply ? await window.__jpafApply(plan) : { filled: 0 };
+    if (mode.steps) stepSet("fields", "done", `${stats.filled || 0} filled`);
+    return {
+      filled: (stats.filled || 0) + wizardFilled,
+      needs_review: stats.needs_review || 0,
+      file_flags: stats.file_flags || 0,
+      scanned: fields.length,
+      offline: !!plan._offline,
+      wizard: wizardFilled,
+      review_fields: stats.review_fields || [],
+    };
+  }
+
   async function run() {
     const go = root.getElementById("go");
     go.disabled = true;
     go.textContent = "Filling…";
     try {
-      // Wizard ATSes (Workday): structured sections first, with a live checklist.
-      let wizardFilled = 0;
-      const isWizard = window.__jpafIsWorkday && window.__jpafIsWorkday();
-      if (isWizard && window.__jpafWorkdayRun) {
+      const isWD = window.__jpafIsWorkday && window.__jpafIsWorkday();
+      const ghSecs = (!isWD && window.__jpafIsGreenhouse && window.__jpafIsGreenhouse() &&
+                      window.__jpafGreenhouseSections) ? window.__jpafGreenhouseSections() : [];
+      const mode = {
+        wizard: isWD ? "workday" : (ghSecs.length ? "greenhouse" : null),
+        steps: isWD || ghSecs.length > 0,
+      };
+      if (mode.steps) {
         root.getElementById("panel").hidden = false;
+        const secs = isWD
+          ? ((window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [])
+          : ghSecs;
+        stepsInit([...secs, "fields"]);
+      }
+      const resumePref = root.getElementById("resume").value;
+
+      // Fill this page; on Workday keep advancing (Next / Save and Continue —
+      // NEVER Submit or the review step) and filling each new step.
+      let total = 0, review = 0, fileFlags = 0, offline = false, sawAny = 0, pages = 0;
+      const reviewItems = [];
+      const MAX_PAGES = 7;
+      while (true) {
+        const r = await fillCurrentPage(resumePref, mode);
+        total += r.filled; review += r.needs_review; fileFlags += r.file_flags;
+        reviewItems.push(...(r.review_fields || []));
+        offline = offline || !!r.offline;
+        sawAny += r.scanned + r.filled;
+        pages++;
+        if (!isWD || pages >= MAX_PAGES || !window.__jpafWorkdayNext) break;
+        const nxt = await window.__jpafWorkdayNext();
+        if (!nxt || !nxt.clicked) {
+          if (nxt && /^at-/.test(nxt.reason || "")) stepSet("page", "done", "review step — your turn");
+          else if (nxt && nxt.reason === "validation-errors") stepSet("page", "fail", "fix highlighted fields");
+          break;
+        }
+        stepSet("page", "done", nxt.label || "next");
         const secs = (window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [];
         stepsInit([...secs, "fields"]);
-        const ws = await window.__jpafWorkdayRun();
-        wizardFilled = (ws && ws.filled) || 0;
       }
 
-      const fields = window.__jpafScan ? window.__jpafScan() : [];
-      if (!fields.length && !wizardFilled) {
+      if (!sawAny) {
         root.getElementById("panel").hidden = false;
         setRes(`<span class="err">No application fields detected here.</span>`);
         return;
       }
-      if (!fields.length) {
-        stepSet("fields", "skip", "none left");
-        go.textContent = `✓ ${wizardFilled} filled`;
-        setRes(`<b>Filled ${wizardFilled}</b> field(s) — review &amp; continue. Never submits.`);
-        return;
-      }
-      if (isWizard) stepSet("fields", "start");
-      const ctx = {
-        url: location.href,
-        title: document.title,
-        h1: (document.querySelector("h1") || {}).innerText || "",
-        text: document.body ? document.body.innerText.slice(0, 4000) : "",
-      };
-      const resumePref = root.getElementById("resume").value;
-      const plan = await send({ cmd: "plan", fields, ctx, resumePref });
-      if (!plan || plan.error) {
-        root.getElementById("panel").hidden = false;
-        setRes(`<span class="err">${(plan && plan.error) || "Failed to get a plan."}</span>`);
-        return;
-      }
-      plan._scanMeta = fields;  // lets fill.js know which ids are aria/combo widgets
-      const stats = window.__jpafApply ? await window.__jpafApply(plan) : { filled: 0 };
-      if (isWizard) stepSet("fields", "done", `${stats.filled || 0} filled`);
-      const total = (stats.filled || 0) + wizardFilled;
       go.textContent = `✓ ${total} filled`;
       root.getElementById("panel").hidden = false;
       setRes(
         `<b>Filled ${total}</b> field(s)` +
-        (stats.file_flags ? ` · attach résumé manually` : "") +
-        (stats.needs_review ? ` · <span class="amber">${stats.needs_review} need review</span>` : "") +
-        (plan._offline ? ` · offline mode` : "")
+        (pages > 1 ? ` across ${pages} pages` : "") +
+        (fileFlags ? ` · attach file manually` : "") +
+        (review ? ` · <span class="amber">${review} need review</span>` : "") +
+        (offline ? ` · offline mode` : "")
       );
+      renderReview(reviewItems);
       setTimeout(() => { if (root.getElementById("go") === go) go.textContent = "⚡ Autofill"; }, 4000);
     } catch (e) {
       root.getElementById("panel").hidden = false;
@@ -264,7 +421,7 @@
   }
 
   function maybeShow() {
-    if (dismissed) return;
+    if (disabled || dismissed) return;
     // SPA frameworks (React hydration, document.write) can rip our host out of
     // the DOM after we've built it — detect that and rebuild.
     if (hostEl && !hostEl.isConnected) { hostEl = null; root = null; }
@@ -272,8 +429,26 @@
     if (looksLikeApplication()) build();
   }
 
-  // Initial check + watch for SPA / dynamically-loaded forms (debounced).
-  maybeShow();
+  // Kill switch: flipping it off tears the pill down everywhere; flipping it
+  // back on (from the toolbar popup) rebuilds it live — no page refresh.
+  function setDisabled(off) {
+    disabled = !!off;
+    if (disabled) {
+      if (hostEl) { try { hostEl.remove(); } catch (e) { /* already gone */ } }
+      hostEl = null; root = null;
+    } else {
+      maybeShow();
+    }
+  }
+
+  // Initial check — respect the persisted switch before first paint, then
+  // watch for SPA / dynamically-loaded forms (debounced).
+  try {
+    chrome.storage.local.get(DISABLE_KEY, (v) => setDisabled(!!(v && v[DISABLE_KEY])));
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === "local" && ch[DISABLE_KEY]) setDisabled(!!ch[DISABLE_KEY].newValue);
+    });
+  } catch (e) { maybeShow(); }  // no chrome.storage (tests) — default on
   let timer = null;
   const obs = new MutationObserver(() => {
     if (dismissed) return;

@@ -35,6 +35,7 @@ class ApplicationStatus(enum.Enum):
     INTERVIEW = "interview"
     REJECTED = "rejected"
     NO_RESPONSE = "no_response"
+    NO_LONGER_AVAILABLE = "no_longer_available"   # posting was taken down / role closed
     SKIPPED = "skipped"
 
 

@@ -22,12 +22,71 @@
 </style>
 </head>
 <body>
-<h1>My Experience (fixture)</h1>
+<div style="display:flex;justify-content:space-between;align-items:center">
+  <h1 style="margin:0">Apply (fixture wizard)</h1>
+  <div data-automation-id="progressBarActiveStep" id="progressLabel"
+       style="font-size:13px;color:#475569;font-weight:700">Step 1 of 3 — My Experience</div>
+</div>
 
-<div data-automation-id="workExperienceSection">
-  <h2>Work Experience</h2>
+<div id="wstep1">
+<h2 style="font-size:20px">My Experience</h2>
+
+<!-- "My Information" block (NVIDIA-shaped, 2026-07-05): previous-worker radios,
+     listbox-button dropdowns, the Country Phone Code searchable PROMPT, and a
+     Phone Extension pre-poisoned with the phone number (a past flat-pass bug —
+     the engine must CLEAR it). -->
+<div data-automation-id="applyFlowMyInfoPage">
+  <div class="panel" data-automation-id="formField-candidateIsPreviousWorker">
+    <fieldset><legend>Have you previously worked for NVIDIA as an employee or contractor?*</legend>
+      <label><input type="radio" name="prevWorker" value="true"> Yes</label>
+      <label><input type="radio" name="prevWorker" value="false"> No</label>
+    </fieldset>
+  </div>
+  <div class="panel" data-automation-id="formField-country">
+    <label>Country*</label>
+    <button aria-haspopup="listbox" id="myinfoCountry">Select One</button>
+  </div>
+  <div class="panel">
+    <label>First Name*</label><input type="text" data-automation-id="formField-legalName--firstName" id="mi-first">
+    <label>Last Name*</label><input type="text" data-automation-id="formField-legalName--lastName" id="mi-last">
+    <label>Address Line 1</label><input type="text" data-automation-id="formField-addressLine1" id="mi-addr1">
+    <!-- stale-account trap (Cisco 2026-07-06): an OLD full address parked in
+         Line 2 — the engine must clear it (apt/suite values it must keep) -->
+    <label>Address Line 2</label><input type="text" data-automation-id="formField-addressLine2" id="mi-addr2" value="1670A 32nd Avenue">
+    <label>City</label><input type="text" data-automation-id="formField-city" id="mi-city">
+    <label>Postal Code</label><input type="text" data-automation-id="formField-postalCode" id="mi-postal">
+  </div>
+  <div class="panel" data-automation-id="formField-countryRegion">
+    <label>State</label>
+    <button aria-haspopup="listbox" id="myinfoState">Select One</button>
+  </div>
+  <div class="panel" data-automation-id="formField-phoneType">
+    <label>Phone Device Type*</label>
+    <button aria-haspopup="listbox" id="myinfoPhoneType">Select One</button>
+  </div>
+  <div class="panel" data-automation-id="formField-countryPhoneCode">
+    <label>Country Phone Code*</label>
+    <div data-automation-id="multiselectInputContainer">
+      <input type="text" id="mi-cpc" placeholder="Search">
+      <div class="pills" id="cpcPills"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <!-- formatted value pre-filled: strict tenants (Cisco) reject it — the
+         engine must rewrite to bare national digits -->
+    <label>Phone Number*</label><input type="text" data-automation-id="formField-phoneNumber" id="mi-phone" value="(415) 745-5603">
+    <label>Phone Extension</label><input type="text" data-automation-id="formField-extension" id="mi-ext" value="415-745-5603">
+  </div>
+</div>
+
+<!-- Cisco/NVIDIA-shaped: role=group section, "Work-Experience-N-panel" entry
+     groups, formField- wrapped controls. Pre-seeded with Workday résumé-parser
+     leftovers exactly as found on cisco.wd5 (2026-07-06): wrong order (BT on
+     top), "Company | Location" mashup, stale location, newest job MISSING. -->
+<div role="group" aria-labelledby="Work-Experience-section">
+  <h2 id="Work-Experience-section">Work Experience</h2>
   <div id="workPanels"></div>
-  <button data-automation-id="add-button" id="workAdd">Add</button>
+  <button data-automation-id="add-button" id="workAdd">Add Another</button>
 </div>
 
 <div data-automation-id="educationSection">
@@ -59,7 +118,9 @@
   <label>Please provide a link to your LinkedIn profile:</label>
   <input type="text">
 </div>
+</div><!-- /wstep1 -->
 
+<div id="wstep2" hidden>
 <h1 style="margin-top:36px">Voluntary Disclosures</h1>
 <div class="panel" data-automation-id="formField-gender">
   <label>Gender</label>
@@ -104,6 +165,40 @@
     <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
   </div>
 </div>
+</div><!-- /wstep2 -->
+
+<div id="wstep3" hidden>
+  <h1>Review</h1>
+  <p>Review your application, then submit. (Fixture: the autofill must NEVER click the button below.)</p>
+</div>
+
+<div style="margin-top:28px;padding-top:14px;border-top:1px solid #cbd5e1">
+  <button data-automation-id="bottom-navigation-next-button" id="navNext">Save and Continue</button>
+</div>
+
+<script>
+// ---------- 3-step wizard shell (Workday-style async step transitions) ----------
+window.__submitted = false;
+let step = 1;
+const STEP_META = {
+  1: ["Step 1 of 3 — My Experience", "Save and Continue"],
+  2: ["Step 2 of 3 — Voluntary Disclosures", "Save and Continue"],
+  3: ["Step 3 of 3 — Review", "Submit"],
+};
+document.getElementById("navNext").addEventListener("click", () => {
+  if (step === 3) { window.__submitted = true; return; }   // Submit — must never happen
+  const nxt = step + 1;
+  // async: Workday saves the step server-side before rendering the next one
+  setTimeout(() => {
+    document.getElementById("wstep" + step).hidden = true;
+    document.getElementById("wstep" + nxt).hidden = false;
+    step = nxt;
+    document.getElementById("progressLabel").textContent = STEP_META[step][0];
+    document.getElementById("navNext").textContent = STEP_META[step][1];
+    scrollTo(0, 0);
+  }, 600);
+});
+</script>
 
 <script>
 // ---------- shared type-ahead portal (Workday renders options at body level) ----------
@@ -127,33 +222,74 @@ function openPortal(anchor, items, onPick){
 }
 document.addEventListener("keydown", e => { if(e.key === "Escape") closePortal(); });
 
-// ---------- work experience: Add creates workExperience-N panels ----------
+// ---------- work experience: Cisco-shaped "Work-Experience-N-panel" groups ----
+// The End Date group is REMOVED from the DOM while "I currently work here" is
+// checked and re-rendered asynchronously on uncheck — exactly like the real
+// tenant. "Add Another" appends an empty panel after a short async delay.
 let workN = 0;
-document.getElementById("workAdd").onclick = () => {
+function addWorkPanel(seed) {
   workN++;
+  const s = seed || {};
   const d = document.createElement("div");
   d.className = "panel";
-  d.setAttribute("data-automation-id", "workExperience-" + workN);
+  d.setAttribute("role", "group");
+  d.setAttribute("aria-labelledby", `Work-Experience-${workN}-panel`);
   d.innerHTML = `
-    <strong>Work Experience ${workN}</strong>
-    <label>Job Title*</label><input type="text" data-automation-id="jobTitle">
-    <label>Company*</label><input type="text" data-automation-id="company">
-    <label>Location</label><input type="text" data-automation-id="location">
-    <label><input type="checkbox" data-automation-id="currentlyWorkHere"> I currently work here</label>
+    <strong id="Work-Experience-${workN}-panel">Work Experience ${workN}</strong>
+    <label>Job Title*</label>
+    <div data-automation-id="formField-jobTitle"><input type="text"></div>
+    <label>Company*</label>
+    <div data-automation-id="formField-companyName"><input type="text"></div>
+    <label>Location</label>
+    <div data-automation-id="formField-location"><input type="text"></div>
+    <div data-automation-id="formField-currentlyWorkHere">
+      <label><input type="checkbox"> I currently work here</label>
+    </div>
     <label>From*</label>
     <div class="dates" data-automation-id="formField-startDate">
       <input type="text" data-automation-id="dateSectionMonth-input" placeholder="MM" aria-label="Month">
       <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
     </div>
-    <label>To</label>
+    <label class="toLbl">To</label>
     <div class="dates" data-automation-id="formField-endDate">
       <input type="text" data-automation-id="dateSectionMonth-input" placeholder="MM" aria-label="Month">
       <input type="text" data-automation-id="dateSectionYear-input" placeholder="YYYY" aria-label="Year">
     </div>
-    <label>Role Description</label><textarea data-automation-id="description"></textarea>`;
+    <label>Role Description</label>
+    <div data-automation-id="formField-roleDescription"><textarea></textarea></div>`;
   document.getElementById("workPanels").appendChild(d);
-  document.getElementById("workAdd").textContent = "Add Another";
-};
+  const q = (id) => d.querySelector(`[data-automation-id='formField-${id}'] input, [data-automation-id='formField-${id}'] textarea`);
+  q("jobTitle").value = s.title || "";
+  q("companyName").value = s.company || "";
+  q("location").value = s.location || "";
+  q("roleDescription").value = s.desc || "";
+  d.querySelector("[data-automation-id='formField-startDate'] [data-automation-id='dateSectionMonth-input']").value = s.sm || "";
+  d.querySelector("[data-automation-id='formField-startDate'] [data-automation-id='dateSectionYear-input']").value = s.sy || "";
+  const cb = q("currentlyWorkHere");
+  const endWrap = d.querySelector("[data-automation-id='formField-endDate']");
+  const toLbl = d.querySelector(".toLbl");
+  const syncEnd = () => setTimeout(() => {
+    if (cb.checked) { endWrap.remove(); toLbl.remove(); }
+    else if (!d.contains(endWrap)) {
+      const desc = d.querySelector("[data-automation-id='formField-roleDescription']");
+      d.insertBefore(toLbl, desc.previousElementSibling);
+      d.insertBefore(endWrap, desc.previousElementSibling);
+    }
+  }, 80);
+  cb.addEventListener("change", syncEnd);
+  if (s.current) { cb.checked = true; endWrap.remove(); toLbl.remove(); }
+  return d;
+}
+document.getElementById("workAdd").onclick = () => setTimeout(() => addWorkPanel(), 120);
+// the résumé-parser leftovers found live on cisco.wd5 (2026-07-06)
+addWorkPanel({ title: "Behavioral Technician", company: "Behavioral Intervention Associates",
+               location: "San Mateo CA", current: true, sm: "8", sy: "2025",
+               desc: "Collect quantitative session data to track client progress." });
+addWorkPanel({ title: "Economic Consultant", company: "Rithum | Remote",
+               desc: "Built nested logit demand models with cross-price elasticity estimation." });
+addWorkPanel({ title: "Investment Analyst", company: "Reed College Finance & Investment Club",
+               location: "Portland OR",
+               desc: "Co-managed a $150K equity portfolio benchmarked to the S&P 100." });
 
 // ---------- education: degree is a listbox button, field of study a type-ahead ----------
 const FIELDS = ["Economics","Quantitative Economics","Econometrics","Computer Science","Data Science","Mathematics"];
@@ -230,6 +366,48 @@ document.getElementById("webAdd").onclick = () => {
   document.getElementById("webPanels").appendChild(d);
   document.getElementById("webAdd").textContent = "Add Another";
 };
+
+// ---------- My Information block (NVIDIA-shaped) ----------
+// Country list carries the classic trap: "United States Minor Outlying
+// Islands" sorts BEFORE "United States of America".
+const MI_COUNTRIES = ["United Arab Emirates", "United Kingdom",
+                      "United States Minor Outlying Islands", "United States of America"];
+const MI_STATES = ["Alabama", "Arizona", "California", "Colorado", "New York", "Texas", "Washington"];
+const MI_PHONETYPES = ["Home", "Mobile", "Work"];
+const MI_CODES = ["Afghanistan (+93)", "United Kingdom (+44)",
+                  "United States Minor Outlying Islands (+1)",
+                  "United States of America (+1)"];
+[["myinfoCountry", MI_COUNTRIES], ["myinfoState", MI_STATES], ["myinfoPhoneType", MI_PHONETYPES]]
+  .forEach(([id, opts]) => {
+    const btn = document.getElementById(id);
+    btn.onclick = () => openPortal(btn, opts, t => { btn.textContent = t; });
+  });
+// a bogus chip planted by an old buggy run (live Cisco had "Afghanistan
+// (+93)" here) — the engine must REMOVE it and commit the right code
+(function seedBogusCpcChip() {
+  const pill = document.createElement("span");
+  pill.setAttribute("data-automation-id", "selectedItem");
+  pill.textContent = "Afghanistan (+93)";
+  const x = document.createElement("button");
+  x.textContent = "×";
+  x.onclick = () => pill.remove();
+  pill.appendChild(x);
+  document.getElementById("cpcPills").appendChild(pill);
+})();
+const cpcInput = document.getElementById("mi-cpc");
+cpcInput.addEventListener("input", () => {
+  const q = cpcInput.value.toLowerCase().trim();
+  if (!q) { closePortal(); return; }
+  const hits = MI_CODES.filter(c => c.toLowerCase().includes(q));
+  if (hits.length) openPortal(cpcInput, hits, t => {
+    const pill = document.createElement("span");
+    pill.setAttribute("data-automation-id", "selectedItem");
+    pill.textContent = t;
+    document.getElementById("cpcPills").appendChild(pill);
+    cpcInput.value = "";
+  });
+  else closePortal();
+});
 
 // ---------- EEO listboxes (verbose option vocabularies, like real Workday) ----------
 const EEO = {

@@ -296,14 +296,39 @@ The in-page button is a content script (`content/widget.js`) injected on all sit
 only shown when the page looks like a job application; it reuses the same scan → plan →
 fill pipeline as the popup via the service worker.
 
-If the backend is offline it still fills standard fields from a cached copy of your profile
-(no AI essays). Résumé file uploads are flagged for manual attach — browsers block scripted
-`<input type=file>` for security.
+It attaches your résumé to Resume/CV upload fields automatically (DataTransfer — the same
+mechanism Simplify/JobRight use): a company-matched tailored .docx when one exists, else the
+PDF configured in `applicant_profile.yaml` (`resume_files:`), else the rendered base résumé.
+The widget panel shows **which résumé file will be attached** (name + upload date) with a
+**Replace** button — upload a newer PDF there any time you iterate your résumé and every
+autofill from then on uses it. Dates fill in every shape ATSes serve: month/year dropdowns
+(native or react-select "January…" lists), split month + year boxes, or one MM/YYYY field.
+Education sections (school / degree / discipline / GPA / end dates) fill from the profile's
+`education:` list and **work-experience sections** (company / title / dates / "I currently
+work here") fill from your résumé's work history — on Greenhouse both click "Add another"
+for extra entries. EEO / voluntary self-identification questions answer from your `eeoc:`
+presets across each ATS's option vocabulary; compliance screeners (18+, previously
+employed here, government-official, conflict-of-interest, insider referral, AI-tools
+usage) answer from `preferences:` — including nonstandard consent vocabularies like a
+lone "Confirmed" option — and the in-page panel lists any fields that still **need your
+review** — click one to jump straight to it. **Open-ended questions** ("Why do you want to
+work here?", "What's your biggest accomplishment?") are drafted by the local LLM from the
+page's job description, your résumé, and the `essay_facts:` block in
+`applicant_profile.yaml` — drafts are always flagged for your review, never trusted
+blindly. Availability questions answer from `preferences.earliest_start_date`. On Workday
+it works the wizard **page by page**: fill the step, click Save and Continue, fill the
+next — stopping at the review step. It NEVER clicks Submit.
 
-Backed by `server/autofill.py` (`/api/autofill/profile|plan|health`) and the pure
-`agents/autofill_mapper.py`. Verify with `python -m pytest tests/test_autofill_mapper.py
-tests/test_autofill_api.py -q` and, with the dashboard up,
-`python -m pytest tests/e2e/test_extension_autofill.py -q -m live`.
+If the backend is offline it still fills standard fields from a cached copy of your profile
+(no AI essays, no résumé attach).
+
+Backed by `server/autofill.py` (`/api/autofill/profile|plan|history|resume_file|health`) and
+the pure `agents/autofill_mapper.py`. Verify with `python -m pytest
+tests/test_autofill_mapper.py tests/test_autofill_mapper_profile_sync.py
+tests/test_autofill_api.py -q` and, with the dashboard up, `python -m pytest
+tests/e2e/test_extension_autofill.py tests/e2e/test_extension_autofill_greenhouse.py
+tests/e2e/test_extension_autofill_workday_multipage.py -q -m live` (manual QA fixtures:
+`/static/qa_greenhouse.html`, `/static/qa_workday.html`).
 
 ---
 

@@ -1,0 +1,389 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QA fixture — Greenhouse job-boards form (react-select clone, DoorDash-shaped)</title>
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#111}
+  h2{font-size:17px;margin:26px 0 8px}
+  h3{font-size:14px;margin:18px 0 6px}
+  .panel{border:1px solid #cbd5e1;border-radius:8px;padding:14px;margin:10px 0}
+  label,.select__label{display:block;font-size:12px;font-weight:600;color:#334155;margin:10px 0 3px}
+  input.input,textarea{width:100%;padding:7px 9px;border:1px solid #94a3b8;border-radius:6px;font:inherit}
+  fieldset{border:1px solid #cbd5e1;border-radius:8px;margin:10px 0}
+  fieldset label{font-weight:400;display:flex;gap:6px;align-items:center}
+  button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid #64748b;background:#f1f5f9;cursor:pointer}
+  /* --- react-select clone --- */
+  .select-shell{position:relative}
+  .select__control{display:flex;align-items:center;min-height:34px;border:1px solid #94a3b8;border-radius:6px;padding:2px 8px;cursor:default;background:#fff}
+  .select__value-container{display:grid;flex:1;align-items:center}
+  .select__placeholder{grid-area:1/1;color:#94a3b8}
+  .select__single-value{grid-area:1/1}
+  .select__multi-value{display:inline-block;background:#dbeafe;border-radius:4px;padding:1px 6px;margin-right:4px;font-size:12.5px}
+  .select__input-container{grid-area:1/2}
+  input.select__input{border:0;outline:0;padding:0;margin:0;background:transparent;font:inherit;width:3px;min-width:2px}
+  .select__menu{position:absolute;left:0;right:0;top:100%;z-index:40;background:#fff;border:1px solid #94a3b8;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+  .select__menu [role=option]{padding:7px 12px;cursor:pointer}
+  .select__menu [role=option]:hover{background:#e2e8f0}
+  .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .filelist div{margin-top:6px;font-size:13px;color:#166534}
+  #submitBtn{background:#16a34a;color:#fff;border-color:#15803d;margin-top:20px}
+  .decoy{margin-top:40px;padding:10px;border:1px dashed #f87171;font-size:12px;color:#991b1b}
+</style>
+</head>
+<body>
+<h1>Analytics Engineer — Apply (fixture)</h1>
+
+<form id="app" novalidate>
+  <h2>Apply for this job</h2>
+  <label for="first_name">First Name *</label><input class="input" type="text" id="first_name" aria-label="First Name">
+  <label for="last_name">Last Name *</label><input class="input" type="text" id="last_name" aria-label="Last Name">
+  <label for="email">Email *</label><input class="input" type="text" id="email" aria-label="Email">
+  <label for="phone">Phone *</label><input class="input" type="tel" id="phone" aria-label="Phone">
+
+  <div id="rsMount-top"></div>
+
+  <h3>Resume/CV *</h3>
+  <div class="secondary-button"><div>
+    <button type="button" class="btn btn--pill" onclick="document.getElementById('resume').click()">Attach</button>
+    <label class="visually-hidden" for="resume">Attach</label>
+    <input id="resume" class="visually-hidden" type="file" accept=".pdf,.doc,.docx,.txt,.rtf">
+  </div></div>
+  <div class="filelist" id="resumeList"></div>
+
+  <h3>Cover Letter</h3>
+  <div class="secondary-button"><div>
+    <button type="button" class="btn btn--pill" onclick="document.getElementById('cover_letter').click()">Attach</button>
+    <label class="visually-hidden" for="cover_letter">Attach</label>
+    <input id="cover_letter" class="visually-hidden" type="file" accept=".pdf,.doc,.docx,.txt,.rtf">
+  </div></div>
+  <div class="filelist" id="coverList"></div>
+
+  <label for="question_linkedin">LinkedIn Profile *</label>
+  <input class="input" type="text" id="question_linkedin" aria-label="LinkedIn Profile">
+
+  <div id="rsMount-questions"></div>
+
+  <h2>Education</h2>
+  <div class="education--container">
+    <div id="eduEntries"></div>
+    <button type="button" id="eduAdd">Add another</button>
+  </div>
+
+  <h2>Work Experience</h2>
+  <div class="employment--container">
+    <div id="workEntries"></div>
+    <button type="button" id="workAdd">Add another</button>
+  </div>
+
+  <h2>USA - Self-Identification Survey</h2>
+  <div id="rsMount-demo"></div>
+
+  <fieldset><legend>How would you describe your sexual orientation? (mark all that apply)</legend>
+    <label><input type="checkbox" name="demo_orientation" value="Asexual"> Asexual</label>
+    <label><input type="checkbox" name="demo_orientation" value="Bisexual"> Bisexual</label>
+    <label><input type="checkbox" name="demo_orientation" value="Gay"> Gay</label>
+    <label><input type="checkbox" name="demo_orientation" value="Heterosexual (straight)"> Heterosexual (straight)</label>
+    <label><input type="checkbox" name="demo_orientation" value="Lesbian"> Lesbian</label>
+    <label><input type="checkbox" name="demo_orientation" value="Queer"> Queer</label>
+    <label><input type="checkbox" name="demo_orientation" value="Decline"> I don't wish to answer</label>
+  </fieldset>
+
+  <fieldset><legend>Race and/or Ethnicity (select all that apply)</legend>
+    <label><input type="checkbox" name="demo_race" value="American Indian or Alaska Native"> American Indian or Alaska Native</label>
+    <label><input type="checkbox" name="demo_race" value="Asian"> Asian</label>
+    <label><input type="checkbox" name="demo_race" value="Black or African American"> Black or African American</label>
+    <label><input type="checkbox" name="demo_race" value="Hispanic or Latinx"> Hispanic or Latinx</label>
+    <label><input type="checkbox" name="demo_race" value="Native Hawaiian or Other Pacific Islander"> Native Hawaiian or Other Pacific Islander</label>
+    <label><input type="checkbox" name="demo_race" value="White"> White</label>
+    <label><input type="checkbox" name="demo_race" value="Decline"> I don't wish to answer</label>
+  </fieldset>
+
+  <button type="submit" id="submitBtn">Submit application</button>
+</form>
+
+<!-- decoy: an unrelated widget's option list (like intl-tel-input's country
+     menu). If option matching isn't scoped per-combobox, fills will hit these. -->
+<div class="decoy" aria-hidden="false">
+  unrelated widget (must never be clicked):
+  <div role="option" class="iti__country" data-decoy="1">Yes</div>
+  <div role="option" class="iti__country" data-decoy="1">No</div>
+  <div role="option" class="iti__country" data-decoy="1">United States+1</div>
+</div>
+
+<script>
+window.__submitted = false;
+window.__decoyClicks = 0;
+document.getElementById("app").addEventListener("submit", (e) => {
+  e.preventDefault();
+  window.__submitted = true;
+});
+document.querySelectorAll("[data-decoy]").forEach((d) =>
+  d.addEventListener("mousedown", () => { window.__decoyClicks++; }));
+
+/* ---------- faithful react-select clone ----------
+ * - input.select__input (3px wide) with role=combobox + aria-labelledby
+ * - options portal: .select__menu > .select__menu-list#react-select-{id}-listbox
+ *   with children  div[role=option]#react-select-{id}-option-N
+ * - open on control mousedown; type-to-filter (async delay supported)
+ * - option MOUSEDOWN commits: renders .select__single-value / multi chip
+ * - searchable:false renders the input readOnly (typing does nothing)
+ * - a shadow required input (aria-hidden, tabindex=-1) like the real page
+ */
+function makeSelect(mount, cfg) {
+  const { id, label, options, searchable = true, asyncDelay = 0, multi = false } = cfg;
+  const wrap = document.createElement("div");
+  wrap.className = "select";
+  wrap.innerHTML = `
+    <div class="select__container">
+      <label id="${id}-label" for="${id}" class="label select__label">${label}</label>
+      <div class="select-shell">
+        <div class="select__control">
+          <div class="select__value-container">
+            <div class="select__placeholder" id="react-select-${id}-placeholder">Select...</div>
+            <div class="select__input-container">
+              <input class="select__input" id="${id}" type="text" role="combobox"
+                     aria-autocomplete="list" aria-haspopup="true" aria-expanded="false"
+                     aria-labelledby="${id}-label" autocomplete="off" ${searchable ? "" : "readonly"}>
+            </div>
+          </div>
+        </div>
+      </div>
+      <input required tabindex="-1" aria-hidden="true" class="remix-requiredInput"
+             style="opacity:0;height:1px;width:120px;border:0;padding:0">
+    </div>`;
+  mount.appendChild(wrap);
+  const shell = wrap.querySelector(".select-shell");
+  const control = wrap.querySelector(".select__control");
+  const input = wrap.querySelector("input.select__input");
+  const vc = wrap.querySelector(".select__value-container");
+  let menu = null, values = [];
+
+  function close() {
+    if (menu) { menu.remove(); menu = null; input.setAttribute("aria-expanded", "false"); }
+  }
+  function render(list) {
+    close();
+    if (!list.length) return;
+    menu = document.createElement("div");
+    menu.className = "select__menu";
+    const ml = document.createElement("div");
+    ml.className = "select__menu-list";
+    ml.id = `react-select-${id}-listbox`;
+    ml.setAttribute("role", "listbox");
+    list.forEach((t, n) => {
+      const o = document.createElement("div");
+      o.setAttribute("role", "option");
+      o.id = `react-select-${id}-option-${n}`;
+      o.textContent = t;
+      // react-select commits on MOUSEDOWN
+      o.addEventListener("mousedown", (e) => { e.preventDefault(); commit(t); });
+      ml.appendChild(o);
+    });
+    menu.appendChild(ml);
+    shell.appendChild(menu);
+    input.setAttribute("aria-expanded", "true");
+  }
+  function commit(t) {
+    if (multi) {
+      if (!values.includes(t)) {
+        values.push(t);
+        const chip = document.createElement("div");
+        chip.className = "select__multi-value";
+        chip.textContent = t;
+        vc.insertBefore(chip, vc.querySelector(".select__input-container"));
+      }
+    } else {
+      values = [t];
+      let sv = vc.querySelector(".select__single-value");
+      if (!sv) {
+        sv = document.createElement("div");
+        sv.className = "select__single-value";
+        vc.insertBefore(sv, vc.querySelector(".select__input-container"));
+      }
+      sv.textContent = t;
+    }
+    const ph = vc.querySelector(".select__placeholder");
+    if (ph) ph.remove();
+    input.value = "";
+    close();
+  }
+  function openAll() {
+    if (asyncDelay) { render([]); return; }  // async pickers list nothing until typed
+    render(options);
+  }
+  // real react-select: menu toggles on control MOUSEDOWN; focus alone does
+  // NOT open it (openMenuOnFocus defaults to false)
+  control.addEventListener("mousedown", (e) => {
+    if (e.target === input) return;
+    e.preventDefault();
+    input.focus();
+    if (menu) close(); else openAll();
+  });
+  let timer = null;
+  input.addEventListener("input", () => {
+    if (input.readOnly) return;
+    clearTimeout(timer);
+    const q = input.value.toLowerCase().trim();
+    timer = setTimeout(() => {
+      if (!q) { openAll(); return; }
+      const qTokens = q.split(/[^a-z0-9]+/).filter(Boolean);
+      const hits = options.filter((v) => {
+        const lv = v.toLowerCase();
+        return lv.includes(q) || qTokens.filter((t) => lv.includes(t)).length >= Math.max(1, qTokens.length - 2);
+      }).slice(0, 8);
+      render(hits);
+    }, asyncDelay || 30);
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+}
+
+const YN = ["Yes", "No"];
+const COUNTRIES = ["United States", "United Kingdom", "Canada", "Mexico", "Germany", "India"];
+const LOCATIONS = ["San Francisco, California, United States",
+                   "South San Francisco, California, United States",
+                   "San Jose, California, United States",
+                   "Seattle, Washington, United States"];
+const SCHOOLS = ["California Polytechnic State University-San Luis Obispo",
+                 "California State University-Los Angeles", "Reed College",
+                 "Portland State University", "Stanford University", "University of California-Berkeley"];
+const DEGREES = ["Associate's Degree", "Bachelor's Degree", "Master's Degree",
+                 "Master of Business Administration (M.B.A.)", "Doctorate", "High School Diploma"];
+const DISCIPLINES = ["Economics", "Econometrics and Quantitative Economics", "Computer Science",
+                     "Data Science", "Mathematics", "Statistics"];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+// top block: country + location (async), like the real page
+makeSelect(document.getElementById("rsMount-top"), { id: "country", label: "Country*", options: COUNTRIES });
+makeSelect(document.getElementById("rsMount-top"), { id: "candidate-location", label: "Location (City)*", options: LOCATIONS, asyncDelay: 350 });
+
+// custom questions — searchable react-selects (like the real page)
+const Q = document.getElementById("rsMount-questions");
+makeSelect(Q, { id: "question_58117065", label: "Are you legally authorized to work in the United States?*", options: YN });
+makeSelect(Q, { id: "question_58117066", label: "Will you now require immigration sponsorship by our company to attain or maintain your employment eligibility (e.g., H-1B, E-3, TN, O-1, STEM OPT, or any immigration work authorization requiring a written submission from the company to a government agency)?*", options: YN });
+makeSelect(Q, { id: "question_58117067", label: "Have you worked at DoorDash?*",
+  options: ["I am a previous employee", "I am a previous contractor", "I am a previous DoorDash Dasher",
+            "I am a current contractor", "I am a current DoorDash Dasher", "I am a current DoorDash employee",
+            "I have not worked at DoorDash"] });
+makeSelect(Q, { id: "question_58117068", label: "Applicant Privacy Acknowledgement *", options: YN });
+makeSelect(Q, { id: "question_58117069", label: "Would you like to receive communications via SMS and/or WhatsApp to the number provided [above or during the application process] about your application process? Message & data rates may apply and message frequency may vary. If you select no, we will only communicate with you via email and/or telephone calls.*", options: YN });
+makeSelect(Q, { id: "question_58117070", label: "Will you in the future require immigration require immigration sponsorship by our company to attain or maintain your employment eligibility?*", options: YN });
+
+// Coinbase-embed-shaped compliance screeners (real page, 2026-07-05):
+// single-option "Confirmed"/"Yes" vocabularies, verbose government-official
+// options, and the "institutional client" referral question that used to
+// substring-match the school rule.
+makeSelect(Q, { id: "question_67781422", label: "Are you at least 18 years of age?*", options: YN });
+makeSelect(Q, { id: "question_67781423", label: "Have you previously been employed by Coinbase in any capacity?*", options: YN });
+makeSelect(Q, { id: "question_67781425", label: "Please confirm receipt of the above linked Global Data Privacy Notice and US Arbitration Agreement.*", options: ["Confirmed"] });
+makeSelect(Q, { id: "question_67781426", label: "I understand that Coinbase may use AI tools to assist in the application and interview process. *", options: ["Yes"] });
+makeSelect(Q, { id: "question_67781427", label: "Which of the following best describes how you use AI tools today?*",
+  options: ["I am opposed to using AI tools in my workflow and prefer traditional/manual workflows.",
+            "I do not use AI tools for my work but I am not against it.",
+            "I have experimented with AI tools (professionally and/or personally).",
+            "I regularly use AI tools to speed up existing tasks (e.g., drafting, summarizing, debugging, basic analysis).",
+            "I design or automate workflows with AI tools (e.g., building agents, integrating AI into team processes)."] });
+makeSelect(Q, { id: "question_67781430", label: "Are you a current government official or were you a government official in the last five years (e.g., employee of a government agency or a government owned/controlled company, holder of public office or a civil service position)?*",
+  options: ["No, I am not a current or former Government Official",
+            "Yes, I am a current Government Official",
+            "Yes, I am a former Government Official"] });
+makeSelect(Q, { id: "question_67781431", label: "Are you a close relative of a government official (i.e., child/step-child, spouse/partner, parent/guardian, aunt/uncle, first cousin, in-law)?*",
+  options: ["Yes, I am a relative of a government official.",
+            "No, I am not a relative of a government official."] });
+makeSelect(Q, { id: "question_67781433", label: "To your knowledge, were you referred to this position by a senior leader or decision‑maker at a current or prospective institutional client, business partner, or vendor of Coinbase?*", options: YN });
+
+// open-ended / availability questions (plain text + textarea, like many ATSes)
+Q.insertAdjacentHTML("beforeend", `
+  <div class="field"><label for="q_current_location">Where are you currently located?</label>
+    <input class="input" type="text" id="q_current_location"></div>
+  <div class="field"><label for="q_start_when">When can you start? *</label>
+    <input class="input" type="text" id="q_start_when"></div>
+  <div class="field"><label for="q_why">Why do you want to work at DoorDash?</label>
+    <textarea class="input" id="q_why" rows="4"></textarea></div>`);
+
+// demographics — Gender is MULTI-select; Race/Degree are NON-searchable
+const D = document.getElementById("rsMount-demo");
+makeSelect(D, { id: "864", label: "Gender*", options: ["Male", "Female", "Non-binary", "I don't wish to answer"], multi: true });
+makeSelect(D, { id: "1328", label: "Do you identify as transgender?*", options: ["Yes", "No", "I don't wish to answer"] });
+makeSelect(D, { id: "1332", label: "Are you Hispanic or Latinx?*", options: ["Yes", "No", "I don't wish to answer"] });
+makeSelect(D, { id: "1333", label: "Race (*Please select one option that best describes how you identify*)*",
+  options: ["American Indian or Alaska Native", "Asian", "Black or African American", "Hispanic or Latino",
+            "Native Hawaiian or Other Pacific Islander", "Two or more races", "White", "I don't wish to answer"],
+  searchable: false });
+makeSelect(D, { id: "1336", label: "Protected Veteran Status*",
+  options: ["I am one or more of the classifications of protected veterans", "I am not a protected veteran",
+            "I don't wish to answer"] });
+makeSelect(D, { id: "1337", label: "Disability Status*",
+  options: ["Yes, I have (or have previously had) a disability", "No, I don't have a disability",
+            "I don't wish to answer"] });
+makeSelect(D, { id: "q_lgbtq", label: "Do you identify as LGBTQ+?", options: ["Yes", "No", "Prefer not to say"] });
+
+// education entries: school (async search), degree (NON-searchable), discipline,
+// GPA + end-date natives for other-tenant coverage
+let eduN = 0;
+function addEducation() {
+  const i = eduN++;
+  const d = document.createElement("div");
+  d.className = "panel education--entry";
+  document.getElementById("eduEntries").appendChild(d);
+  makeSelect(d, { id: `school--${i}`, label: "School", options: SCHOOLS, asyncDelay: 400 });
+  makeSelect(d, { id: `degree--${i}`, label: "Degree", options: DEGREES, searchable: false });
+  makeSelect(d, { id: `discipline--${i}`, label: "Discipline", options: DISCIPLINES });
+  const extra = document.createElement("div");
+  extra.innerHTML = `
+    <label for="gpa--${i}">GPA</label><input class="input" type="text" id="gpa--${i}">
+    <label>End Date</label>
+    <div style="display:flex;gap:8px">
+      <select id="end-month--${i}" aria-label="End date month"><option value=""></option>${MONTHS.map((m) => `<option>${m}</option>`).join("")}</select>
+      <select id="end-year--${i}" aria-label="End date year"><option value=""></option>${Array.from({length: 40}, (_, k) => `<option>${2030 - k}</option>`).join("")}</select>
+    </div>`;
+  d.appendChild(extra);
+}
+addEducation();
+document.getElementById("eduAdd").addEventListener("click", addEducation);
+
+// employment entries: plain text company/title, current checkbox, and dates in
+// the REAL Coinbase-embed shape — month is a react-select COMBO, year is a
+// plain text input (native month/year <select>s stay covered by education).
+let workN = 0;
+function addWork() {
+  const i = workN++;
+  const d = document.createElement("div");
+  d.className = "panel employment--entry";
+  d.innerHTML = `
+    <strong>Employment ${i + 1}</strong>
+    <label for="company--${i}">Company *</label><input class="input" type="text" id="company--${i}">
+    <label for="title--${i}">Title *</label><input class="input" type="text" id="title--${i}">
+    <label><input type="checkbox" id="current--${i}"> I currently work here</label>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1" id="wsm-${i}"></div>
+      <div style="flex:1"><label for="start-year--${i}">Start date year*</label>
+        <input class="input" type="text" id="start-year--${i}"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1" id="wem-${i}"></div>
+      <div style="flex:1"><label for="w-end-year--${i}">End date year*</label>
+        <input class="input" type="text" id="w-end-year--${i}"></div>
+    </div>`;
+  document.getElementById("workEntries").appendChild(d);
+  makeSelect(d.querySelector(`#wsm-${i}`), { id: `start-month--${i}`, label: "Start date month*", options: MONTHS });
+  makeSelect(d.querySelector(`#wem-${i}`), { id: `w-end-month--${i}`, label: "End date month*", options: MONTHS });
+}
+addWork();
+document.getElementById("workAdd").addEventListener("click", addWork);
+
+// file inputs render an upload row on change (like GH)
+function wireFile(id, listId) {
+  document.getElementById(id).addEventListener("change", (e) => {
+    [...e.target.files].forEach((f) => {
+      const d = document.createElement("div");
+      d.textContent = "✓ " + f.name + " (" + f.size + " bytes)";
+      document.getElementById(listId).appendChild(d);
+    });
+  });
+}
+wireFile("resume", "resumeList");
+wireFile("cover_letter", "coverList");
+</script>
+</body>
+</html>

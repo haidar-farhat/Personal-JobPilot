@@ -792,11 +792,11 @@ function renderList(){
   $("#results").querySelectorAll("[data-skip]").forEach(b=>b.onclick=e=>{e.stopPropagation(); changeStatus(+b.dataset.skip,"skipped");});
 }
 
-const STATUSES=["found","scored","materials_ready","queued","approved","applied","response_received","interview","rejected","no_response","skipped"];
+const STATUSES=["found","scored","materials_ready","queued","approved","applied","response_received","interview","rejected","no_response","no_longer_available","skipped"];
 // Mirror server STATUS_META labels so cards reflect status changes immediately (server is source of truth on reload).
 const STATUS_META={found:{label:"FOUND"},scored:{label:"SCORED"},queued:{label:"QUEUED"},materials_ready:{label:"MATERIALS READY"},
   approved:{label:"APPROVED"},applied:{label:"APPLIED"},response_received:{label:"RESPONSE"},interview:{label:"INTERVIEW"},
-  rejected:{label:"REJECTED"},no_response:{label:"NO RESPONSE"},skipped:{label:"SKIPPED"}};
+  rejected:{label:"REJECTED"},no_response:{label:"NO RESPONSE"},no_longer_available:{label:"NO LONGER AVAILABLE"},skipped:{label:"SKIPPED"}};
 function selectApp(id){
   state.selectedId=id;
   const a=state.apps.find(x=>x.id===id); if(!a){ return; }
@@ -1076,7 +1076,7 @@ const BOARD_COLS=[
   {key:"applied",   name:"Applied",           status:"applied",           color:"#6d28d9", from:["applied"]},
   {key:"response",  name:"Response",          status:"response_received", color:"#0891b2", from:["response_received"]},
   {key:"interview", name:"Interview",         status:"interview",         color:"#067647", from:["interview"]},
-  {key:"closed",    name:"Rejected / Closed", status:"rejected",          color:"#b3123f", from:["rejected","no_response","skipped"]},
+  {key:"closed",    name:"Rejected / Closed", status:"rejected",          color:"#b3123f", from:["rejected","no_response","no_longer_available","skipped"]},
 ];
 const COL_OF={}; BOARD_COLS.forEach(c=>c.from.forEach(s=>COL_OF[s]=c.key));
 function ringColor(s){ const t=fitTier(s); return t==="strong"?"#067647":t==="maybe"?"#9a6700":"#5b7bb4"; }

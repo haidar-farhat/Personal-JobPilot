@@ -128,3 +128,95 @@ def test_file_download_404_for_missing_resume(base_url):
         pytest.skip("no application without a tailored CV available")
     r = requests.get(f"{base_url}/api/file/resume/{target['id']}", timeout=5)
     assert r.status_code == 404
+
+
+def test_resume_meta_reports_configured_pdf(base_url):
+    r = requests.get(f"{base_url}/api/autofill/resume_meta?resume_pref=ai", timeout=5)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] in ("profile_pdf", "rendered_base")
+    if body["source"] == "profile_pdf":
+        # the ATS sees the file under its ORIGINAL name — exactly what the pill shows
+        assert body["serve_name"] == body["original_name"]
+        assert body["size"] > 0
+    else:
+        assert body["serve_name"].startswith("Matthew_Cromaz_Resume")
+
+
+def test_resume_upload_roundtrip_and_restore(base_url):
+    """Upload a dummy PDF via the widget endpoint, verify meta + served bytes
+    change, then restore the real résumé exactly."""
+    import base64
+    from pathlib import Path
+
+    target = Path(__file__).resolve().parents[2] / "config" / "resume_matthew_ai.pdf"
+    if not target.exists():
+        pytest.skip("no configured resume PDF to test against")
+    original = target.read_bytes()
+    side = target.with_suffix(target.suffix + ".meta.json")
+    original_side = side.read_bytes() if side.exists() else None
+
+    dummy = b"%PDF-1.4 jobpilot upload test\n%%EOF"
+    try:
+        r = requests.post(f"{base_url}/api/autofill/resume_upload",
+                          json={"resume_pref": "ai", "filename": "iteration_7.pdf",
+                                "b64": base64.b64encode(dummy).decode()}, timeout=10)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["original_name"] == "iteration_7.pdf"
+        assert body["size"] == len(dummy)
+
+        served = requests.get(f"{base_url}/api/autofill/resume_file?resume_pref=ai", timeout=10)
+        assert served.status_code == 200
+        assert served.content == dummy
+        # attaches under the uploaded file's own name, not a renamed one
+        assert "iteration_7.pdf" in served.headers.get("content-disposition", "")
+
+        # non-PDF payload must be rejected
+        bad = requests.post(f"{base_url}/api/autofill/resume_upload",
+                            json={"resume_pref": "ai", "filename": "x.pdf",
+                                  "b64": base64.b64encode(b"not a pdf").decode()}, timeout=10)
+        assert bad.status_code == 400
+    finally:
+        target.write_bytes(original)
+        if original_side is not None:
+            side.write_bytes(original_side)
+        elif side.exists():
+            side.unlink()
+
+
+def test_import_jobs_ingests_and_dedupes(base_url):
+    """MCP-connector bridge: POSTed jobs flow through dedupe + store + scoring.
+
+    Uses a fixed fake company so repeat runs MERGE as duplicates instead of
+    growing the DB — first-ever run imports, every run after merges.
+    """
+    payload = {
+        "source": "mcp-indeed",
+        "score": False,  # defer LLM ranking — keeps Ollama free for the autofill e2es
+        "jobs": [
+            {"title": "QA Import AI Engineer", "company": "QA Import Test Co",
+             "location": "San Francisco, CA", "url": "https://example.com/qa-import-1",
+             "salary_text": "$150,000 - $180,000 a year",
+             "date_posted": "June 11, 2026", "job_type": "Full-time"},
+            {"title": "QA Import Behavior Technician", "company": "QA Import Test Co",
+             "location": "San Mateo, CA", "url": "https://example.com/qa-import-2",
+             "salary_text": "$35 - $45 an hour",
+             "date_posted": "2026-06-25", "job_type": "Part-time"},
+        ],
+    }
+    r = requests.post(f"{base_url}/api/import/jobs", json=payload, timeout=120)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["received"] == 2
+    # every job either imported now or merged into an earlier run's row
+    assert body["imported"] + body["duplicates_merged"] == 2
+    assert body["errors"] == []
+
+    # idempotent: same payload again -> all duplicates, nothing new
+    r2 = requests.post(f"{base_url}/api/import/jobs", json=payload, timeout=120)
+    body2 = r2.json()
+    assert body2["imported"] == 0
+    assert body2["duplicates_merged"] == 2

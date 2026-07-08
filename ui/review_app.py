@@ -330,7 +330,8 @@ def render_pipeline():
 
     # Display as columns
     status_order = ["found", "scored", "queued", "materials_ready", "approved", "applied",
-                    "interview", "response_received", "rejected", "no_response", "skipped"]
+                    "interview", "response_received", "rejected", "no_response",
+                    "no_longer_available", "skipped"]
 
     status_labels = {
         "found": "🔍 Found",
@@ -343,6 +344,7 @@ def render_pipeline():
         "response_received": "💬 Response",
         "rejected": "❌ Rejected",
         "no_response": "⏳ No Response",
+        "no_longer_available": "🚫 No Longer Available",
         "skipped": "⏭️ Skipped",
     }
 

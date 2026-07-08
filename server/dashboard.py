@@ -66,6 +66,10 @@ app.include_router(autofill_router)
 from server.sheets import router as sheets_router
 app.include_router(sheets_router)
 
+# Agent-side job imports (MCP job-board connectors -> pipeline)
+from server.job_import import router as import_router
+app.include_router(import_router)
+
 # Initialize DB
 init_db()
 
@@ -85,6 +89,7 @@ STATUS_META = {
     "interview":          {"label": "INTERVIEW",         "tone": "success",  "stage": 8},
     "rejected":           {"label": "REJECTED",          "tone": "danger",   "stage": 9},
     "no_response":        {"label": "NO RESPONSE",       "tone": "muted",    "stage": 9},
+    "no_longer_available": {"label": "NO LONGER AVAILABLE", "tone": "muted",  "stage": 9},
     "skipped":            {"label": "SKIPPED",           "tone": "muted",    "stage": 0},
 }
 
