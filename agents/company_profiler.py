@@ -9,20 +9,6 @@ v1 fetches with requests only (spec mentioned a Playwright fallback for
 JS-rendered pages — deliberately deferred: a thin page yields a thin,
 honest profile per the system prompt, and the user can hand-edit; revisit
 if drafts for JS-heavy sites prove useless).
-
-Session lifecycle: unlike the other write-paths in this codebase (e.g.
-server/companies.py, scripts/seed_companies.py), draft_profile does NOT
-close the session it gets from get_session(). Task 14 calls this with a
-single `company_id` arg — no `close` override the way seed_companies.py's
-tests use `run(close=False)` — so the only way for a caller (test or
-production) that reuses the same session to still see fresh attributes
-afterward is to leave the session open; Session.close() expunges all
-objects, which detaches the caller's row and breaks a subsequent
-`session.refresh(row)`. In production get_session() hands back a fresh
-Session per call anyway, so the cost is one un-closed Session (and its
-pooled connection) per draft — acceptable for a low-frequency, single-user
-background task, but worth revisiting in Task 14 if it becomes a real
-resource concern.
 """
 
 import logging
@@ -84,38 +70,42 @@ def draft_profile(company_id: int) -> None:
     previous profile.
     """
     session = get_session()
-    c = session.query(Company).get(company_id)
-    if not c:
-        return
-
     try:
-        page = ""
-        if c.careers_url:
-            try:
-                page = _fetch_page_text(c.careers_url)
-            except Exception as e:
-                logger.warning(f"[profiler] page fetch failed for {c.name}: {e} — drafting from name alone")
+        c = session.query(Company).get(company_id)
+        if not c:
+            return
 
-        resume = _load_resume_summary()
-        data = generate_json(
-            _PROMPT.format(name=c.name, page=page or "(no page available)",
-                           resume=resume),
-            system_prompt=_SYSTEM)
+        try:
+            page = ""
+            if c.careers_url:
+                try:
+                    page = _fetch_page_text(c.careers_url)
+                except Exception as e:
+                    logger.warning(f"[profiler] page fetch failed for {c.name}: {e} — drafting from name alone")
 
-        # Field writes only happen once generate_json has succeeded — if it
-        # raises, control jumps straight to `except` below and nothing here
-        # runs, so a failed draft never half-overwrites a good profile.
-        c.overview_md = data.get("overview_md") or c.overview_md
-        c.why_fit_md = data.get("why_fit_md") or c.why_fit_md
-        c.hiring_bar_md = data.get("hiring_bar_md") or c.hiring_bar_md
-        guess = (data.get("ats_platform_guess") or "").strip().lower()
-        if guess in _ATS_WHITELIST and not c.ats_platform:
-            c.ats_platform = guess
-        c.profile_source = "llm"
-        c.draft_status = None
-        c.last_refreshed_at = datetime.now(timezone.utc)
-    except Exception as e:
-        logger.error(f"[profiler] draft failed for {c.name}: {e}")
-        c.draft_status = "failed"
+            resume = _load_resume_summary()
+            data = generate_json(
+                _PROMPT.format(name=c.name, page=page or "(no page available)",
+                               resume=resume),
+                system_prompt=_SYSTEM)
 
-    session.commit()
+            # Field writes only happen once generate_json has succeeded — if
+            # it raises, control jumps straight to `except` below and nothing
+            # here runs, so a failed draft never half-overwrites a good
+            # profile.
+            c.overview_md = data.get("overview_md") or c.overview_md
+            c.why_fit_md = data.get("why_fit_md") or c.why_fit_md
+            c.hiring_bar_md = data.get("hiring_bar_md") or c.hiring_bar_md
+            guess = (data.get("ats_platform_guess") or "").strip().lower()
+            if guess in _ATS_WHITELIST and not c.ats_platform:
+                c.ats_platform = guess
+            c.profile_source = "llm"
+            c.draft_status = None
+            c.last_refreshed_at = datetime.now(timezone.utc)
+        except Exception as e:
+            logger.error(f"[profiler] draft failed for {c.name}: {e}")
+            c.draft_status = "failed"
+
+        session.commit()
+    finally:
+        session.close()
