@@ -74,6 +74,10 @@ app.include_router(import_router)
 from server.applied import router as applied_router
 app.include_router(applied_router)
 
+# Companies — tailored profiles + per-company pipeline trees
+from server.companies import router as companies_router
+app.include_router(companies_router)
+
 # Initialize DB
 init_db()
 
