@@ -508,6 +508,10 @@
     #advisorView[hidden]{display:none!important}
     .adv-hdr{display:block;font-size:18px;font-weight:800;margin:0 0 4px}
     .adv-stat,.adv-app{border:1px solid #999;background:#fff;color:#000;break-inside:avoid}
+    /* dark theme persists its near-white text vars into print — force ink */
+    .adv-stat b,.adv-co h3,.adv-app .ahead .t{color:#000!important}
+    .adv-status{background:#fff!important;color:#000!important;border-color:#999!important}
+    .adv-src{color:#333!important}
     .adv-ev,.board-sub{color:#333}
     a{color:#000;text-decoration:none}
   }
@@ -615,10 +619,10 @@
 </section>
 
 <section id="advisorView" hidden>
-  <div class="board-head">
+  <div class="board-head no-print">
     <div>
       <div class="board-title">Advisor report</div>
-      <div class="board-sub no-print">For Vantage Point check-ins — pick your last meeting date, review, print.</div>
+      <div class="board-sub">For Vantage Point check-ins — pick your last meeting date, review, print.</div>
     </div>
   </div>
   <div class="adv-controls no-print">
@@ -1449,10 +1453,10 @@ async function runAdvisorReport(){
   $("#advBody").innerHTML=`
     <div class="adv-hdr">Matthew Cromaz — application report, ${esc(d.since)} → ${esc(d.generated_at.slice(0,10))}</div>
     <div class="adv-stats">
-      <div class="adv-stat"><b>${d.stats.applied}</b>applied</div>
-      <div class="adv-stat"><b>${d.stats.responses}</b>responses</div>
-      <div class="adv-stat"><b>${d.stats.interviews}</b>interviews</div>
-      <div class="adv-stat"><b>${d.stats.closed}</b>closed</div>
+      <div class="adv-stat"><b>${esc(String(d.stats.applied))}</b>applied</div>
+      <div class="adv-stat"><b>${esc(String(d.stats.responses))}</b>responses</div>
+      <div class="adv-stat"><b>${esc(String(d.stats.interviews))}</b>interviews</div>
+      <div class="adv-stat"><b>${esc(String(d.stats.closed))}</b>closed</div>
     </div>
     ${d.companies.map(sec=>`<div class="adv-co"><h3>${esc(sec.company)}</h3>
       ${sec.applications.map(a=>`<div class="adv-app">
