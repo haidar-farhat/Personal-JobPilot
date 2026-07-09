@@ -332,6 +332,74 @@ tests/e2e/test_extension_autofill_workday_multipage.py -q -m live` (manual QA fi
 
 ---
 
+## Companies & Advisor — target-account tracking
+
+Beyond the per-job Kanban board, the dashboard tracks the search at the **company**
+level — target accounts, the full pipeline history within each one, and a
+since-date report for advisor/mentor conversations.
+
+**Companies tab** — one card per target company (tailored profile teaser +
+pipeline counts across `watching / applied / in_play / closed`), opening into a
+detail view: the full profile (`overview_md`, `why_fit_md`, `hiring_bar_md`,
+plus a free-text `notes_md`) and a **pipeline tree** grouping every job at that
+company into the same four stages. Companies are seeded from a gitignored
+`config/companies_seed.yaml` (copy `config/companies_seed.example.yaml` to
+start) via `venv/bin/python scripts/seed_companies.py` — an idempotent upsert
+keyed on the normalized company name that never overwrites a row you've hand-
+edited (`profile_source: manual`) or one still mid-draft. Jobs already in the
+DB link to their company automatically by normalized name on every read
+(`db/company_linking.py`), so scanner finds from *before* a company was added
+still show up in its tree.
+
+**LLM company profiler** (`agents/company_profiler.py`) — drafts
+`overview_md` / `why_fit_md` / `hiring_bar_md` for a company from its careers
+page + your résumé summary, locally via Ollama, as a background task (Create
+and Refresh both trigger a draft). It never invents facts the page doesn't
+support — a thin careers page yields a thin, honest profile rather than
+hallucinated detail — and a Refresh snapshots the prior profile first so one
+click undoes a bad redraft.
+
+**Advisor report tab** — pick a since-date and get a stakeholder-ready report:
+headline stats (applied / responses / interviews / closed, each a *distinct*
+application count so re-entering a status never double-counts) plus a
+per-company timeline of every application that hit a real milestone in the
+window. Pipeline churn (found/scored/materials-ready noise) is filtered out so
+the report stays readable. **Print to PDF** from the browser's print dialog for
+a clean, dark-mode-legible printout to bring to a meeting.
+
+**External-apply capture** — for applications made outside JobPilot (a direct
+company-site apply, a referral), record them without losing pipeline history:
+the extension's **✓ Mark applied** button (in the autofill widget) or the
+dashboard's **+ Log apply** modal both POST to `/api/applied/record`, which
+matches an existing Job by URL (exact, then tracking-param-stripped canonical
+URL), falls back to normalized title+company, or creates a minimal Job+
+Application if nothing matches. Idempotent — recording an already-applied (or
+further-along) application is a no-op rather than a regression.
+
+**Status history (`application_events`)** — every `Application.status` write
+in the codebase now goes through one function, `record_status_change`
+(`db/database.py`) — the single write-path that appends an immutable
+`ApplicationEvent` (from/to status, source, timestamp) alongside the status
+change, and stamps `date_applied` / `response_date` / `interview_date` the
+*first* time each is reached. This is what the Advisor report and each
+company's pipeline tree render as a timeline. Migration 006
+(`db/migrations/006_add_companies_and_events.py`) added the `companies` and
+`application_events` tables plus `applications.lead_source`,
+`applications.next_action`, and `jobs.company_id`, and backfilled approximate
+events (`source="backfill"`) for pre-migration applications that had none.
+
+Backed by `server/companies.py` (`/api/companies`, `/api/company/{id}`,
+`/api/company/{id}/refresh`), `server/advisor.py` (`/api/advisor/report`), and
+`server/applied.py` (`/api/applied/record`). Verify with `python -m pytest
+tests/test_companies_api.py tests/test_company_names.py
+tests/test_company_page_extraction.py tests/test_company_profiler.py
+tests/test_models_companies.py tests/test_seed_companies.py
+tests/test_advisor_report.py tests/test_applied_record.py -q` and, with the
+dashboard up, `python -m pytest
+tests/e2e/test_companies_advisor_contracts.py -q -m live`.
+
+---
+
 ## Google Sheet tracker sync
 
 The dashboard can sync the jobs you've applied to into your own Google Sheet —
@@ -378,26 +446,36 @@ Personal-JobPilot/
 │   ├── outreach.py              # Local networking-outreach drafter (drafts only)
 │   ├── autofill_mapper.py       # Deterministic form-field mapper for the extension
 │   ├── auto_applier/            # Playwright submission bot
+│   ├── company_profiler.py      # LLM-drafted tailored company profiles (local Ollama)
 │   └── sheet_sync.py            # Pure match/row logic for the Google Sheet tracker
 ├── config/
 │   ├── settings.yaml            # Search keywords, schedule, thresholds, hourly floor
 │   ├── archetypes.yaml          # 10 archetypes × 10 dimensions × weights + thresholds
 │   ├── target_companies.yaml    # Career pages to monitor
 │   ├── base_resume.example.yaml         # ← copy to base_resume.yaml (+ base_resume_bt.yaml)
-│   └── applicant_profile.example.yaml   # ← copy to applicant_profile.yaml
+│   ├── applicant_profile.example.yaml   # ← copy to applicant_profile.yaml
+│   └── companies_seed.example.yaml      # ← copy to companies_seed.yaml (Companies tab)
 ├── db/
 │   ├── models.py                # SQLAlchemy models
-│   ├── database.py              # Session management
-│   └── migrations/              # Schema migrations (004 ai-intensity, 005 hourly comp)
+│   ├── database.py              # Session management + record_status_change (single write-path)
+│   ├── company_linking.py       # Shared job↔company matching (seeder + dashboard reads)
+│   └── migrations/              # Schema migrations (004 ai-intensity, 005 hourly comp,
+│                                 #   006 companies + application_events)
 ├── server/
 │   ├── dashboard.py             # FastAPI app + SSE + interview/outreach/tailor routes
 │   ├── static/index.html        # Single-file UI (Indeed-style, dark mode, Kanban board)
 │   ├── autofill.py              # Autofill API for the browser extension
+│   ├── companies.py             # Companies tab API (profiles + pipeline trees)
+│   ├── advisor.py               # Advisor report API (since-date event aggregation)
+│   ├── applied.py               # External-apply capture API (/api/applied/record)
 │   └── sheets.py                # Google Sheet tracker-sync API
+├── scripts/
+│   └── seed_companies.py        # Idempotent Companies-tab seeder from companies_seed.yaml
 ├── browser-extension/          # MV3 autofill extension (popup, service worker, scan/fill)
 ├── utils/
 │   ├── ollama_client.py         # Ollama wrapper with JSON-mode + retries
 │   ├── dedup.py                 # Fuzzy job dedup
+│   ├── company_names.py         # Canonical company-name normalization
 │   └── notifications.py         # Windows toast for high-fit jobs
 ├── tests/                       # pytest suite for deterministic surfaces
 ├── scheduler.py                 # Entry point — starts APScheduler
