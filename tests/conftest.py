@@ -13,7 +13,8 @@ from db.models import Base
 
 @pytest.fixture()
 def tmp_engine(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path/'test.db'}", echo=False)
+    engine = create_engine(f"sqlite:///{tmp_path/'test.db'}", echo=False,
+                            connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     yield engine
     engine.dispose()

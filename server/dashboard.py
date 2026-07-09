@@ -70,6 +70,10 @@ app.include_router(sheets_router)
 from server.job_import import router as import_router
 app.include_router(import_router)
 
+# Externally-made applications (extension button / dashboard quick-add)
+from server.applied import router as applied_router
+app.include_router(applied_router)
+
 # Initialize DB
 init_db()
 
