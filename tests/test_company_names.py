@@ -23,6 +23,16 @@ def test_common_corporate_words_removed_only_as_suffix_tokens():
     assert normalize_company_name("Financial") == "financial"
 
 
+def test_plural_companies_suffix():
+    assert normalize_company_name("Lowe's Companies, Inc.") == normalize_company_name("Lowe's")
+
+
+def test_leading_the_stripped():
+    assert normalize_company_name("The Trade Desk") == "trade desk"
+    assert normalize_company_name("Trade Desk") == "trade desk"
+    assert normalize_company_name("The Honest Company") == "honest"
+
+
 def test_empty_and_none_safe():
     assert normalize_company_name("") == ""
     assert normalize_company_name(None) == ""

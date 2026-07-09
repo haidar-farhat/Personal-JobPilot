@@ -12,12 +12,13 @@ import re
 # "Global, Inc." collapses fully). Never dropped from the front/middle.
 _SUFFIX_TOKENS = {
     "inc", "incorporated", "llc", "ltd", "corp", "corporation", "co",
-    "company", "financial", "technologies", "technology", "labs",
-    "global", "holdings", "group", "plc",
+    "company", "companies", "financial", "technologies", "technology",
+    "labs", "global", "holdings", "group", "plc",
 }
 
 
 def normalize_company_name(name: str | None) -> str:
+    """Pipeline: casefold -> punctuation-to-space -> strip trailing suffix tokens repeatedly -> strip single leading "the"."""
     if not name:
         return ""
     s = name.casefold()
@@ -25,4 +26,6 @@ def normalize_company_name(name: str | None) -> str:
     tokens = s.split()
     while len(tokens) > 1 and tokens[-1] in _SUFFIX_TOKENS:
         tokens.pop()
+    if len(tokens) > 1 and tokens[0] == "the":
+        tokens = tokens[1:]
     return " ".join(tokens)
