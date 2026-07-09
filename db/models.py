@@ -195,7 +195,7 @@ class ApplicationEvent(Base):
     from_status = Column(String(50), nullable=True)   # null for creation/backfill
     to_status = Column(String(50), nullable=False)
     note = Column(Text, nullable=True)
-    # dashboard | extension | auto_applier | review_ui | quick_add | backfill
+    # dashboard | extension | auto_applier | review_ui | ranker | tailor | quick_add | backfill
     source = Column(String(30), nullable=False)
 
     application = relationship("Application", back_populates="events")

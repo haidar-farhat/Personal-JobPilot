@@ -12,7 +12,7 @@ from sqlalchemy import func
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db.database import get_session, init_db
+from db.database import get_session, init_db, record_status_change
 from db.models import Job, JobScore, Application, ApplicationStatus, ScanLog
 
 
@@ -152,9 +152,7 @@ def update_application_status(app_id: int, new_status: ApplicationStatus):
     try:
         app = session.query(Application).get(app_id)
         if app:
-            app.status = new_status
-            if new_status == ApplicationStatus.APPLIED:
-                app.date_applied = datetime.now(timezone.utc)
+            record_status_change(session, app, new_status, source="review_ui")
             session.commit()
     finally:
         session.close()

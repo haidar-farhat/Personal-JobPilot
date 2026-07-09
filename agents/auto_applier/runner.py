@@ -26,7 +26,7 @@ from agents.auto_applier.ashby import AshbyAutoApplier
 from agents.auto_applier.lever import LeverAutoApplier
 from agents.auto_applier.workday import WorkdayAutoApplier
 from agents.auto_applier.generic import GenericAutoApplier
-from db.database import get_session
+from db.database import get_session, record_status_change
 from db.models import Application, ApplicationStatus, Job, JobScore
 
 logger = logging.getLogger(__name__)
@@ -172,8 +172,9 @@ def _record_result(session, app: Application, result: ApplyResult) -> None:
     app.auto_apply_attempted_at = datetime.now(timezone.utc)
 
     if result.success and result.status == "submitted":
-        app.status = ApplicationStatus.APPLIED
-        app.date_applied = datetime.now(timezone.utc)
+        record_status_change(session, app, ApplicationStatus.APPLIED,
+                             source="auto_applier",
+                             note=f"auto-apply {result.status}")
 
     session.commit()
 

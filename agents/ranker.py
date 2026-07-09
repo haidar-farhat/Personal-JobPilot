@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from db.database import get_session
+from db.database import get_session, record_status_change
 from db.models import Job, JobScore, Application, ApplicationStatus
 from utils.ollama_client import generate_json, generate_text
 
@@ -641,7 +641,7 @@ def rank_new_jobs(config: dict) -> dict:
 
                     app = session.query(Application).filter_by(job_id=job.id).first()
                     if app:
-                        app.status = ApplicationStatus.SKIPPED
+                        record_status_change(session, app, ApplicationStatus.SKIPPED, source="ranker")
                     session.commit()
                     skipped_count += 1
                     continue
@@ -651,9 +651,9 @@ def rank_new_jobs(config: dict) -> dict:
 
                 app = session.query(Application).filter_by(job_id=job.id).first()
                 if app:
-                    app.status = ApplicationStatus.SCORED
+                    record_status_change(session, app, ApplicationStatus.SCORED, source="ranker")
                     if job_score.fit_score >= auto_queue_threshold:
-                        app.status = ApplicationStatus.QUEUED
+                        record_status_change(session, app, ApplicationStatus.QUEUED, source="ranker")
                         queued_count += 1
 
                 session.commit()

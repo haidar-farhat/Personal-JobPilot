@@ -17,7 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-from db.database import get_session
+from db.database import get_session, record_status_change
 from db.models import Job, JobScore, Application, ApplicationStatus
 from utils.ollama_client import generate_json, generate_text
 
@@ -801,7 +801,7 @@ def tailor_queued_jobs(config: dict) -> dict:
 
                 app.resume_path = paths["resume_docx"]
                 app.cover_letter_path = paths["cover_letter_docx"]
-                app.status = ApplicationStatus.MATERIALS_READY
+                record_status_change(session, app, ApplicationStatus.MATERIALS_READY, source="tailor")
                 session.commit()
 
                 tailored_count += 1

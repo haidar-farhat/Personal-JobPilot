@@ -19,7 +19,7 @@ from sqlalchemy import func, desc
 # Make parent importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db.database import get_session, init_db
+from db.database import get_session, init_db, record_status_change
 from db.models import Job, JobScore, Application, ApplicationStatus, ScanLog
 
 
@@ -411,11 +411,7 @@ async def api_update_status(app_id: int, request: Request):
         if not app_obj:
             raise HTTPException(status_code=404, detail="Application not found")
 
-        app_obj.status = status_enum
-        if status_enum == ApplicationStatus.APPLIED:
-            app_obj.date_applied = datetime.now(timezone.utc)
-        elif status_enum == ApplicationStatus.INTERVIEW:
-            app_obj.interview_date = datetime.now(timezone.utc)
+        record_status_change(session, app_obj, status_enum, source="dashboard")
 
         if notes is not None:
             app_obj.notes = notes
@@ -679,7 +675,7 @@ async def api_tailor_resume(app_id: int):
         app_obj.resume_path = paths["resume_docx"]
         app_obj.cover_letter_path = paths["cover_letter_docx"]
         if app_obj.status in (ApplicationStatus.FOUND, ApplicationStatus.SCORED, ApplicationStatus.QUEUED):
-            app_obj.status = ApplicationStatus.MATERIALS_READY
+            record_status_change(session, app_obj, ApplicationStatus.MATERIALS_READY, source="dashboard")
         session.commit()
         new_status = app_obj.status.value
     finally:
