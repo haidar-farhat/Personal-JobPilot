@@ -78,6 +78,10 @@ app.include_router(applied_router)
 from server.companies import router as companies_router, fail_orphaned_drafts
 app.include_router(companies_router)
 
+# Advisor report — since-date event aggregation for Vantage Point meetings
+from server.advisor import router as advisor_router
+app.include_router(advisor_router)
+
 # Initialize DB
 init_db()
 
