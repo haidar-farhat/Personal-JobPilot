@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from db.company_linking import link_unlinked_jobs
 from db.database import get_session
 from db.models import Application, ApplicationEvent, Company, Job
 from utils.company_names import normalize_company_name
@@ -40,6 +41,13 @@ def advisor_report(since: str):
 
     session = get_session()
     try:
+        # Lazy-link: jobs found by scanners since the last Companies-tab read
+        # attach to their Company row here too, so a "Brex, Inc." job rolls
+        # up under the canonical "Brex" section instead of splitting off as
+        # an unlinked name-key group (shared matcher — db/company_linking.py).
+        if link_unlinked_jobs(session):
+            session.commit()
+
         rows = (session.query(ApplicationEvent, Application, Job, Company)
                 .join(Application, ApplicationEvent.application_id == Application.id)
                 .join(Job, Application.job_id == Job.id)

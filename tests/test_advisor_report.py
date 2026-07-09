@@ -135,3 +135,32 @@ def test_reapply_counts_distinct_apps(session_factory):
     r = client.get("/api/advisor/report?since=2026-07-01")
     assert r.json()["stats"] == {"applied": 1, "responses": 0, "interviews": 0,
                                  "closed": 1}
+
+
+def test_lazy_link_attaches_unlinked_job_to_company(session_factory):
+    """advisor_report runs the shared linker (db.company_linking) before
+    building the report, same as companies.py's _lazy_link — an unlinked
+    "Brex, Inc." job rolls up under the existing "Brex" Company's canonical
+    name, and its company_id is set for subsequent reads."""
+    s = session_factory()
+    c = Company(name="Brex", name_normalized="brex")
+    s.add(c); s.flush()
+    j = Job(title="Platform Eng", company="Brex, Inc.", url="https://brex.test/1",
+            source="test", dedup_hash="brex1")   # unlinked: no company_id set
+    s.add(j); s.flush()
+    a = Application(job_id=j.id, status=ApplicationStatus.APPLIED)
+    s.add(a); s.flush()
+    s.add(ApplicationEvent(application_id=a.id,
+                           occurred_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+                           from_status="scored", to_status="applied", source="dashboard"))
+    company_id, job_id = c.id, j.id
+    s.commit(); s.close()
+
+    r = client.get("/api/advisor/report?since=2026-07-01")
+    assert r.status_code == 200
+    body = r.json()
+    assert [sec["company"] for sec in body["companies"]] == ["Brex"]
+
+    check = session_factory()
+    assert check.query(Job).get(job_id).company_id == company_id
+    check.close()

@@ -468,6 +468,21 @@
   .jevents{font-size:12px;color:var(--muted);padding:4px 12px 8px 28px}
   .jevents .approx{opacity:.7}
 
+  /* ===== Advisor tab ===== */
+  .adv-controls{display:flex;gap:12px;align-items:center;padding:0 18px 12px}
+  .adv-stats{display:flex;gap:14px;padding:0 18px 14px}
+  .adv-stat{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 20px;text-align:center}
+  .adv-stat b{font-size:22px;display:block;color:var(--text)}
+  .adv-co{padding:8px 18px}
+  .adv-co h3{margin:14px 0 6px;color:var(--text)}
+  .adv-app{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:10px 14px;margin:8px 0}
+  .adv-app .ahead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .adv-app .ahead .t{font-weight:700;flex:1;color:var(--text)}
+  .adv-status{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);border:1px solid var(--border)}
+  .adv-src{font-size:12px;color:var(--muted)}
+  .adv-ev{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .adv-hdr{display:none}
+
   /* global toast — status-change feedback */
   .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);z-index:200;
     background:#0b1220;color:#fff;font-weight:600;font-size:13px;padding:12px 16px;border-radius:12px;
@@ -483,6 +498,19 @@
     .topnav,.topicons{display:none}
     .resultsbar{top:var(--head-h)}
   }
+
+  /* ===== Print (Advisor report → PDF) ===== */
+  @media print{
+    body{background:#fff;color:#000}
+    header,.hero,.topnav,.topicons,main,.resultsbar,#boardView,#companiesView,#insights,
+    .modal-backdrop,.toast,.no-print{display:none!important}
+    #advisorView{display:block!important}
+    #advisorView[hidden]{display:none!important}
+    .adv-hdr{display:block;font-size:18px;font-weight:800;margin:0 0 4px}
+    .adv-stat,.adv-app{border:1px solid #999;background:#fff;color:#000;break-inside:avoid}
+    .adv-ev,.board-sub{color:#333}
+    a{color:#000;text-decoration:none}
+  }
 </style>
 </head>
 <body>
@@ -493,6 +521,7 @@
     <a data-view="board" id="navBoard">Board</a>
     <a data-view="insights" id="navInsights">Insights</a>
     <a data-view="companies">Companies</a>
+    <a data-view="advisor">Advisor</a>
   </nav>
   <div class="header-spacer"></div>
   <div class="health" id="health">
@@ -583,6 +612,21 @@
   <div id="companiesGrid" class="cgrid"></div>
   <div id="companyDetail" hidden></div>
   <div id="companiesOther"></div>
+</section>
+
+<section id="advisorView" hidden>
+  <div class="board-head">
+    <div>
+      <div class="board-title">Advisor report</div>
+      <div class="board-sub no-print">For Vantage Point check-ins — pick your last meeting date, review, print.</div>
+    </div>
+  </div>
+  <div class="adv-controls no-print">
+    <label>Since <input type="date" id="advSince"></label>
+    <button class="btn sm" id="advRun">Run report</button>
+    <button class="btn sec sm" id="advPrint">🖨 Print / PDF</button>
+  </div>
+  <div id="advBody"><div class="empty">Pick a date and run the report.</div></div>
 </section>
 
 <div class="modal-backdrop" id="trackerModal" hidden>
@@ -1250,6 +1294,7 @@ function showView(v){
   $("#insights").classList.toggle("open", v==="insights");
   if(board) renderBoard();
   if(companies) renderCompanies();
+  if(advisor && av && !av.querySelector(".adv-stats")) runAdvisorReport();
 }
 document.querySelectorAll(".topnav a").forEach(el=>el.onclick=()=>showView(el.dataset.view));
 
@@ -1381,10 +1426,45 @@ async function openCompany(cid){
   };
   if(c.draft_status==="drafting"){
     _companiesPollTimer=setTimeout(()=>{
-      if(!$("#companyDetail").hidden) openCompany(cid);
+      if(!$("#companiesView").hidden && !$("#companyDetail").hidden) openCompany(cid);
     }, 5000);
   }
 }
+
+// ============================================================
+// Advisor report
+// ============================================================
+function advisorInit(){
+  const saved=localStorage.getItem("jp_adv_since");
+  $("#advSince").value = saved || new Date(Date.now()-14*864e5).toISOString().slice(0,10);
+  $("#advRun").onclick=runAdvisorReport;
+  $("#advPrint").onclick=()=>window.print();
+}
+async function runAdvisorReport(){
+  const since=$("#advSince").value; if(!since) return;
+  localStorage.setItem("jp_adv_since", since);
+  $("#advBody").innerHTML=`<div class="empty">Building report…</div>`;
+  const d=await fetch(`/api/advisor/report?since=${since}`).then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!d){ $("#advBody").innerHTML=`<div class="empty">Backend unreachable.</div>`; return; }
+  $("#advBody").innerHTML=`
+    <div class="adv-hdr">Matthew Cromaz — application report, ${esc(d.since)} → ${esc(d.generated_at.slice(0,10))}</div>
+    <div class="adv-stats">
+      <div class="adv-stat"><b>${d.stats.applied}</b>applied</div>
+      <div class="adv-stat"><b>${d.stats.responses}</b>responses</div>
+      <div class="adv-stat"><b>${d.stats.interviews}</b>interviews</div>
+      <div class="adv-stat"><b>${d.stats.closed}</b>closed</div>
+    </div>
+    ${d.companies.map(sec=>`<div class="adv-co"><h3>${esc(sec.company)}</h3>
+      ${sec.applications.map(a=>`<div class="adv-app">
+        <div class="ahead"><span class="t">${esc(a.title)}</span>
+          <span class="adv-status">${esc(a.status)}</span>
+          ${a.lead_source?`<span class="adv-src">via ${esc(a.lead_source)}</span>`:""}</div>
+        <div class="adv-ev">${a.events.map(e=>
+          `${esc(e.occurred_at.slice(0,10))} ${e.from?esc(e.from)+" → ":""}${esc(e.to)}${e.approx?" ≈":""}`).join(" · ")}</div>
+        ${a.next_action?`<div class="adv-ev"><b>Next:</b> ${esc(a.next_action)}</div>`:""}
+      </div>`).join("")}</div>`).join("") || `<div class="empty">Nothing in this window.</div>`}`;
+}
+advisorInit();
 
 // ============================================================
 // Google Sheet application tracker (compare + add)
