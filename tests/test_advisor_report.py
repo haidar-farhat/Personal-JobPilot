@@ -40,6 +40,14 @@ def _seed(session_factory):
     a2 = Application(job_id=j2.id, status=ApplicationStatus.APPLIED)
     s.add(a2); s.flush()
     ev(a2.id, 1, None, "applied", source="backfill")   # before the window
+    # pipeline-only app: its ONLY in-window event is a non-milestone
+    # (scored) — must never surface in the companies sections
+    j3 = Job(title="Watcher role", company="Plaid", url="https://p.test/3",
+             source="test", dedup_hash="p3", company_id=c.id)
+    s.add(j3); s.flush()
+    a3 = Application(job_id=j3.id, status=ApplicationStatus.SCORED)
+    s.add(a3); s.flush()
+    ev(a3.id, 3, None, "scored", source="backfill")
     s.commit(); s.close()
 
 
@@ -69,3 +77,61 @@ def test_backfill_events_marked_approx(session_factory):
     plaid = next(sec for sec in body["companies"] if sec["company"] == "Plaid")
     old = next(a for a in plaid["applications"] if a["title"] == "Old role")
     assert old["events"][0]["approx"] is True
+
+
+def test_non_milestone_apps_excluded(session_factory):
+    """Apps whose only in-window events are pipeline churn (found/scored/...)
+    stay out of the sections — hundreds of backfilled scored events must not
+    drown the advisor report. Stats are untouched by their exclusion."""
+    _seed(session_factory)
+    r = client.get("/api/advisor/report?since=2026-07-02")
+    body = r.json()
+    assert body["stats"] == {"applied": 1, "responses": 1, "interviews": 1,
+                             "closed": 0}
+    all_titles = [a["title"] for sec in body["companies"]
+                  for a in sec["applications"]]
+    assert "Watcher role" not in all_titles
+
+
+def test_name_variants_group_to_one_section(session_factory):
+    """Unlinked jobs whose company strings normalize identically ("Brex" /
+    "Brex, Inc.") land in ONE section, not two."""
+    s = session_factory()
+    def mk(title, company, dh, day):
+        j = Job(title=title, company=company, url=f"https://b.test/{dh}",
+                source="test", dedup_hash=dh)
+        s.add(j); s.flush()
+        a = Application(job_id=j.id, status=ApplicationStatus.APPLIED)
+        s.add(a); s.flush()
+        s.add(ApplicationEvent(application_id=a.id,
+                               occurred_at=datetime(2026, 7, day, tzinfo=timezone.utc),
+                               from_status="scored", to_status="applied",
+                               source="dashboard"))
+    mk("Role A", "Brex", "b1", 3)
+    mk("Role B", "Brex, Inc.", "b2", 4)
+    s.commit(); s.close()
+    r = client.get("/api/advisor/report?since=2026-07-01")
+    body = r.json()
+    assert len(body["companies"]) == 1
+    assert len(body["companies"][0]["applications"]) == 2
+
+
+def test_reapply_counts_distinct_apps(session_factory):
+    """Stats count distinct applications, not events — an app that re-enters
+    applied (applied -> rejected -> applied) is ONE application sent."""
+    s = session_factory()
+    j = Job(title="Boomerang", company="Ramp", url="https://r.test/1",
+            source="test", dedup_hash="r1")
+    s.add(j); s.flush()
+    a = Application(job_id=j.id, status=ApplicationStatus.APPLIED)
+    s.add(a); s.flush()
+    for day, frm, to in ((2, "scored", "applied"),
+                         (3, "applied", "rejected"),
+                         (4, "rejected", "applied")):
+        s.add(ApplicationEvent(application_id=a.id,
+                               occurred_at=datetime(2026, 7, day, tzinfo=timezone.utc),
+                               from_status=frm, to_status=to, source="dashboard"))
+    s.commit(); s.close()
+    r = client.get("/api/advisor/report?since=2026-07-01")
+    assert r.json()["stats"] == {"applied": 1, "responses": 0, "interviews": 0,
+                                 "closed": 1}
