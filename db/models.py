@@ -59,6 +59,7 @@ class Job(Base):
     seniority_level = Column(String(100), nullable=True)
     dedup_hash = Column(String(64), nullable=False, unique=True)
     extra_urls = Column(JSON, nullable=True)  # Additional URLs from other sources
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
 
     # Hourly comp + employment type (added in migration 005) — Behavioral Technician track
     pay_period = Column(String(20), nullable=True)       # hourly | annual | unknown
@@ -74,6 +75,7 @@ class Job(Base):
         Index("idx_jobs_dedup_hash", "dedup_hash"),
         Index("idx_jobs_date_found", "date_found"),
         Index("idx_jobs_company", "company"),
+        Index("idx_jobs_company_id", "company_id"),
     )
 
     def __repr__(self):
@@ -124,6 +126,8 @@ class Application(Base):
     response_date = Column(DateTime, nullable=True)
     interview_date = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
+    lead_source = Column(String(100), nullable=True)   # "Bianca / Vantage Point", "scanner", ...
+    next_action = Column(Text, nullable=True)
 
     # Auto-apply tracking (added in migration 002)
     auto_applied = Column(Boolean, default=False, nullable=False)
@@ -133,6 +137,8 @@ class Application(Base):
 
     # Relationships
     job = relationship("Job", back_populates="application")
+    events = relationship("ApplicationEvent", back_populates="application",
+                          order_by="ApplicationEvent.occurred_at")
 
     __table_args__ = (
         Index("idx_applications_status", "status"),
@@ -141,6 +147,66 @@ class Application(Base):
 
     def __repr__(self):
         return f"<Application(job_id={self.job_id}, status='{self.status.value}', auto_applied={self.auto_applied})>"
+
+
+class Company(Base):
+    """A target company with a tailored profile (Companies tab)."""
+
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(300), nullable=False, unique=True)
+    name_normalized = Column(String(300), nullable=False)
+    careers_url = Column(String(2000), nullable=True)
+    ats_platform = Column(String(50), nullable=True)   # greenhouse|ashby|lever|workday|radancy|custom
+    priority = Column(String(20), nullable=True)       # high | medium | low
+    status = Column(String(20), default="target")      # target | watch | paused
+
+    # Profile fields — LLM/seed-owned except notes_md (user-owned, never
+    # written by the LLM or seed refresh).
+    overview_md = Column(Text, nullable=True)
+    why_fit_md = Column(Text, nullable=True)
+    hiring_bar_md = Column(Text, nullable=True)
+    notes_md = Column(Text, nullable=True)
+
+    profile_source = Column(String(20), default="manual")  # seeded | llm | manual
+    profile_backup = Column(JSON, nullable=True)   # pre-refresh snapshot (one-step undo)
+    draft_status = Column(String(20), nullable=True)  # drafting | failed | None=idle
+    suggested = Column(Boolean, default=False, nullable=False)
+    last_refreshed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_companies_name_normalized", "name_normalized"),
+    )
+
+    def __repr__(self):
+        return f"<Company(id={self.id}, name='{self.name}')>"
+
+
+class ApplicationEvent(Base):
+    """Historized status change — one row per transition (advisor timeline)."""
+
+    __tablename__ = "application_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    occurred_at = Column(DateTime, nullable=False)
+    from_status = Column(String(50), nullable=True)   # null for creation/backfill
+    to_status = Column(String(50), nullable=False)
+    note = Column(Text, nullable=True)
+    # dashboard | extension | auto_applier | review_ui | quick_add | backfill
+    source = Column(String(30), nullable=False)
+
+    application = relationship("Application", back_populates="events")
+
+    __table_args__ = (
+        Index("idx_application_events_app_id", "application_id"),
+        Index("idx_application_events_occurred", "occurred_at"),
+    )
+
+    def __repr__(self):
+        return f"<ApplicationEvent(app_id={self.application_id}, to='{self.to_status}')>"
 
 
 class ScanLog(Base):
