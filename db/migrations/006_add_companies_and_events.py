@@ -43,7 +43,9 @@ def _naive_utc(dt: datetime) -> datetime:
     Legacy DB datetimes round-trip through SQLite as naive values, but
     synthesized "current status" stamps are built fresh with
     datetime.now(timezone.utc). Normalizing everything to naive UTC before
-    sorting avoids a naive-vs-aware TypeError.
+    sorting avoids a naive-vs-aware TypeError. Naive inputs are assumed to
+    already be UTC (this codebase writes UTC datetimes) and pass through
+    unchanged.
     """
     if dt.tzinfo is not None:
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -51,12 +53,17 @@ def _naive_utc(dt: datetime) -> datetime:
 
 
 def _add_columns(engine) -> list[str]:
+    # One fresh column snapshot per table, read before the loop. (The
+    # Inspector caches get_columns per table anyway, so an in-loop re-read
+    # would see the cache, not fresh state; cross-run idempotency comes from
+    # building a new inspector each run().)
     inspector = inspect(engine)
+    existing = {table: {c["name"] for c in inspector.get_columns(table)}
+                for table in {t for t, _, _ in ALTERS}}
     added = []
     with engine.begin() as conn:
         for table, col, coltype in ALTERS:
-            existing = {c["name"] for c in inspector.get_columns(table)}
-            if col not in existing:
+            if col not in existing[table]:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
                 added.append(f"{table}.{col}")
     return added
@@ -83,6 +90,9 @@ def _backfill_events(session) -> int:
         if current not in {s for _, s in stamps}:
             stamps.append((_naive_utc(datetime.now(timezone.utc)), current))
         prev = None
+        # Chains are time-sorted only, not status-order-validated: dirty
+        # legacy dates yield time-true but logically-backward chains —
+        # accepted for an approximate backfill.
         for occurred_at, to_status in sorted(stamps, key=lambda t: t[0]):
             session.add(ApplicationEvent(
                 application_id=app.id, occurred_at=occurred_at,
@@ -93,7 +103,11 @@ def _backfill_events(session) -> int:
 
 
 def _link_jobs(session) -> int:
-    by_norm = {c.name_normalized: c.id for c in session.query(Company).all()}
+    # If two companies normalize to the same key, the first-created (lowest
+    # id) deterministically wins.
+    by_norm: dict[str, int] = {}
+    for c in session.query(Company).order_by(Company.id).all():
+        by_norm.setdefault(c.name_normalized, c.id)
     linked = 0
     for job in session.query(Job).filter(Job.company_id.is_(None)).all():
         cid = by_norm.get(normalize_company_name(job.company))
