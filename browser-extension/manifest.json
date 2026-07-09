@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobPilot Autofill",
-  "version": "1.7.3",
+  "version": "1.8.0",
   "description": "Agentically autofill job-application fields from your resume via the local JobPilot backend. You review and click Apply.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [

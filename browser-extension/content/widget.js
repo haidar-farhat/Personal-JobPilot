@@ -77,12 +77,13 @@
         .dock{ display:flex; flex-direction:column-reverse; align-items:flex-end; gap:8px; }
         .bar{ display:flex; align-items:center; gap:8px; background:#0b1220; color:#fff;
           border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:6px 8px 6px 12px;
-          box-shadow:0 16px 44px -12px rgba(0,0,0,.6); }
+          box-shadow:0 16px 44px -12px rgba(0,0,0,.6); flex-wrap:wrap; justify-content:flex-end; }
         .dot{ width:8px; height:8px; border-radius:50%; background:#94a3b8; flex:none; }
         .dot.up{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.22); }
         .dot.down{ background:#ef4444; }
         .go{ border:0; cursor:pointer; color:#fff; font-weight:700; font-size:13px;
-          background:linear-gradient(135deg,#3b82f6,#6d28d9); border-radius:999px; padding:8px 15px; }
+          background:linear-gradient(135deg,#3b82f6,#6d28d9); border-radius:999px; padding:8px 15px;
+          white-space:nowrap; }
         .go:hover{ filter:brightness(1.08); }
         .go:disabled{ opacity:.65; cursor:default; }
         .more{ border:0; cursor:pointer; background:rgba(255,255,255,.10); color:#fff; font-size:12px;
@@ -133,6 +134,7 @@
         <div class="bar">
           <span class="dot" id="dot" title="JobPilot status"></span>
           <button class="go" id="go">⚡ Autofill</button>
+          <button class="go" id="applied" title="Record that you submitted this application in JobPilot">✓ Mark applied</button>
           <button class="more" id="more" title="Options">⌄</button>
         </div>
         <div class="panel" id="panel" hidden>
@@ -160,6 +162,23 @@
     document.documentElement.appendChild(hostEl);
 
     root.getElementById("go").onclick = run;
+    const appliedBtn = root.getElementById("applied");
+    appliedBtn.onclick = async () => {
+      appliedBtn.disabled = true;
+      appliedBtn.textContent = "Recording…";
+      const res = await send({ cmd: "mark_applied",
+                               url: location.href, title: document.title });
+      if (res && res.ok) {
+        appliedBtn.textContent = res.already ? "✓ Already recorded" : "✓ Recorded";
+      } else {
+        appliedBtn.textContent = "⚠ Retry — backend offline?";
+        appliedBtn.disabled = false;
+        setTimeout(() => {
+          if (root.getElementById("applied") === appliedBtn)
+            appliedBtn.textContent = "✓ Mark applied";
+        }, 4000);
+      }
+    };
     root.getElementById("more").onclick = () => {
       const p = root.getElementById("panel");
       p.hidden = !p.hidden;

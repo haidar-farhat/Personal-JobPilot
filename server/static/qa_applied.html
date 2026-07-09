@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>QA — Mark Applied</title></head>
+<body>
+<h1>QA fixture: Mark-applied widget button</h1>
+<p>Load this page at http://127.0.0.1:7777/static/qa_applied.html with the
+extension enabled. The JobPilot pill should appear (bottom-right). Open it,
+click <b>✓ Mark applied</b> with a REAL mouse click, and verify:</p>
+<ol>
+  <li>Button shows "Recording…" then "✓ Recorded".</li>
+  <li>A second click shows "✓ Already recorded".</li>
+  <li><code>sqlite3 jobpilot.db "SELECT to_status, source FROM application_events ORDER BY id DESC LIMIT 1;"</code> → <code>applied|extension</code></li>
+  <li>Delete the QA rows afterwards:
+      <code>sqlite3 jobpilot.db "DELETE FROM application_events WHERE application_id IN (SELECT id FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source='applied_manual' AND url LIKE '%qa_applied%')); DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source='applied_manual' AND url LIKE '%qa_applied%'); DELETE FROM jobs WHERE source='applied_manual' AND url LIKE '%qa_applied%';"</code></li>
+</ol>
+<form><label>Decoy field <input type="text" name="email"></label></form>
+</body>
+</html>

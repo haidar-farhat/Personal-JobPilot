@@ -9,7 +9,7 @@
 // bump SW_BUILD together with manifest.json's version; a stale worker then
 // sees the mismatch on wake and runtime.reload() re-reads the whole extension
 // from disk (same as the chrome://extensions ↻ button).
-const SW_BUILD = "1.7.3";
+const SW_BUILD = "1.8.0";
 try {
   if (chrome.runtime.getManifest().version !== SW_BUILD) chrome.runtime.reload();
 } catch (e) { /* never block startup on the self-check */ }
@@ -461,6 +461,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                                  filename: msg.filename || "", b64: msg.b64 }),
         });
         sendResponse(await r.json());
+      } catch (e) { sendResponse({ error: String(e && e.message || e) }); }
+    }
+    else if (msg.cmd === "mark_applied") {
+      try {
+        const r = await fetch(`${BACKEND}/api/applied/record`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: msg.url, title: msg.title || "",
+                                 company: msg.company || "",
+                                 source: "extension" }),
+        });
+        sendResponse(r.ok ? await r.json() : { error: `HTTP ${r.status}` });
       } catch (e) { sendResponse({ error: String(e && e.message || e) }); }
     }
     else sendResponse({ error: "unknown cmd" });
