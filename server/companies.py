@@ -164,3 +164,117 @@ def company_detail(company_id: int):
         return d
     finally:
         session.close()
+
+
+class CompanyCreate(BaseModel):
+    name: str
+    careers_url: str = ""
+
+
+class CompanyPatch(BaseModel):
+    # all optional — patch semantics
+    name: str | None = None
+    careers_url: str | None = None
+    ats_platform: str | None = None
+    priority: str | None = None
+    status: str | None = None
+    overview_md: str | None = None
+    why_fit_md: str | None = None
+    hiring_bar_md: str | None = None
+    notes_md: str | None = None
+
+
+_PROFILE_FIELDS = {"overview_md", "why_fit_md", "hiring_bar_md"}
+
+
+def draft_profile_task(company_id: int) -> None:
+    """Phase-3 hook (agents/company_profiler.py). Until the profiler lands,
+    clear draft_status so cards don't hang in 'drafting'."""
+    session = get_session()
+    try:
+        c = session.query(Company).get(company_id)
+        if c and c.draft_status == "drafting":
+            c.draft_status = None
+            session.commit()
+    finally:
+        session.close()
+
+
+@router.post("/companies")
+def create_company(payload: CompanyCreate, background_tasks: BackgroundTasks):
+    norm = normalize_company_name(payload.name)
+    if not norm:
+        raise HTTPException(status_code=400, detail="Company name required")
+    session = get_session()
+    try:
+        if session.query(Company).filter_by(name_normalized=norm).first():
+            raise HTTPException(status_code=409, detail="Company already exists")
+        c = Company(name=payload.name.strip(), name_normalized=norm,
+                    careers_url=payload.careers_url or None,
+                    profile_source="manual", draft_status="drafting")
+        session.add(c)
+        # adopt any unlinked jobs that match
+        session.flush()
+        for job in session.query(Job).filter(Job.company_id.is_(None)).all():
+            if normalize_company_name(job.company) == norm:
+                job.company_id = c.id
+        session.commit()
+        background_tasks.add_task(draft_profile_task, c.id)
+        return {"id": c.id, "draft_status": "drafting"}
+    finally:
+        session.close()
+
+
+@router.patch("/company/{company_id}")
+def patch_company(company_id: int, payload: CompanyPatch):
+    session = get_session()
+    try:
+        c = session.query(Company).get(company_id)
+        if not c:
+            raise HTTPException(status_code=404, detail="Company not found")
+        data = payload.model_dump(exclude_unset=True)
+        for field, value in data.items():
+            setattr(c, field, value)
+        if data.keys() & _PROFILE_FIELDS:
+            c.profile_source = "manual"
+        if "name" in data:
+            c.name_normalized = normalize_company_name(data["name"])
+        session.commit()
+        return {"ok": True}
+    finally:
+        session.close()
+
+
+@router.delete("/company/{company_id}")
+def delete_company(company_id: int):
+    session = get_session()
+    try:
+        c = session.query(Company).get(company_id)
+        if not c:
+            raise HTTPException(status_code=404, detail="Company not found")
+        for job in session.query(Job).filter(Job.company_id == company_id).all():
+            job.company_id = None
+        session.delete(c)
+        session.commit()
+        return {"ok": True}
+    finally:
+        session.close()
+
+
+@router.post("/company/{company_id}/refresh")
+def refresh_company(company_id: int, background_tasks: BackgroundTasks):
+    session = get_session()
+    try:
+        c = session.query(Company).get(company_id)
+        if not c:
+            raise HTTPException(status_code=404, detail="Company not found")
+        c.profile_backup = {"overview_md": c.overview_md,
+                            "why_fit_md": c.why_fit_md,
+                            "hiring_bar_md": c.hiring_bar_md,
+                            "profile_source": c.profile_source}
+        c.draft_status = "drafting"
+        session.commit()
+        background_tasks.add_task(draft_profile_task, company_id)
+        return {"ok": True, "draft_status": "drafting"}
+    finally:
+        session.close()

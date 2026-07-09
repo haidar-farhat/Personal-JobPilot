@@ -95,3 +95,54 @@ def test_lazy_link_attaches_new_scanned_jobs(seeded, session_factory):
     s = session_factory()
     assert s.query(Job).filter_by(dedup_hash="hnew").one().company_id is not None
     s.close()
+
+
+def test_create_edit_delete_company(session_factory):
+    r = client.post("/api/companies", json={"name": "SoFi",
+                                            "careers_url": "https://sofi.com/careers"})
+    assert r.status_code == 200
+    cid = r.json()["id"]
+
+    r2 = client.patch(f"/api/company/{cid}", json={"notes_md": "call recruiter",
+                                                   "priority": "high"})
+    assert r2.status_code == 200
+    s = session_factory()
+    c = s.query(Company).get(cid)
+    assert (c.notes_md, c.priority) == ("call recruiter", "high")
+    s.close()
+
+    # editing a profile field by hand flips profile_source to manual
+    client.patch(f"/api/company/{cid}", json={"why_fit_md": "hand-written"})
+    s = session_factory()
+    assert s.query(Company).get(cid).profile_source == "manual"
+    s.close()
+
+    assert client.delete(f"/api/company/{cid}").status_code == 200
+    s = session_factory()
+    assert s.query(Company).get(cid) is None
+    s.close()
+
+
+def test_create_duplicate_name_conflicts(session_factory):
+    client.post("/api/companies", json={"name": "SoFi"})
+    r = client.post("/api/companies", json={"name": "SoFi Technologies, Inc."})
+    assert r.status_code == 409   # same normalized name
+
+
+def test_delete_unlinks_jobs(seeded, session_factory):
+    client.delete(f"/api/company/{seeded}")
+    s = session_factory()
+    assert all(j.company_id is None for j in s.query(Job).all())
+    s.close()
+
+
+def test_create_adopts_matching_unlinked_jobs(session_factory):
+    s = session_factory()
+    job = Job(title="AE", company="SoFi Technologies", url="https://s.test/1",
+              source="test", dedup_hash="hs1")
+    s.add(job); s.commit(); s.close()
+    r = client.post("/api/companies", json={"name": "SoFi"})
+    cid = r.json()["id"]
+    s = session_factory()
+    assert s.query(Job).one().company_id == cid
+    s.close()
