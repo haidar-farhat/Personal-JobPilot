@@ -13,12 +13,15 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from db.company_linking import link_unlinked_jobs  # noqa: E402
 from db.database import get_session  # noqa: E402
-from db.models import Company, Job  # noqa: E402
+from db.models import Company  # noqa: E402
 from utils.company_names import normalize_company_name  # noqa: E402
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "config" / "companies_seed.yaml"
 
+# intentionally NOT in PROFILE_FIELDS: suggested is a creation-time fact;
+# notes_md is user-owned
 PROFILE_FIELDS = ("careers_url", "ats_platform", "priority", "status",
                   "overview_md", "why_fit_md", "hiring_bar_md")
 
@@ -30,7 +33,7 @@ def load_seed() -> list[dict]:
 
 def run(close: bool = True) -> dict:
     session = get_session()
-    created = updated = skipped = 0
+    created = updated = skipped = skipped_drafting = 0
     try:
         for entry in load_seed():
             norm = normalize_company_name(entry["name"])
@@ -44,6 +47,11 @@ def run(close: bool = True) -> dict:
             elif c.profile_source == "manual":
                 skipped += 1
                 continue
+            elif c.draft_status == "drafting":
+                # A LLM draft is in flight (Task 14+): overwriting now would be
+                # clobbered when the draft lands — skip, rerun the seeder later.
+                skipped_drafting += 1
+                continue
             else:
                 updated += 1
                 c.profile_source = "seeded"
@@ -52,18 +60,15 @@ def run(close: bool = True) -> dict:
                     setattr(c, field, entry[field])
         session.flush()
         # link any unlinked jobs to the (possibly new) companies
-        by_norm = {}
-        for c in session.query(Company).order_by(Company.id).all():
-            by_norm.setdefault(c.name_normalized, c.id)
-        for job in session.query(Job).filter(Job.company_id.is_(None)).all():
-            cid = by_norm.get(normalize_company_name(job.company))
-            if cid:
-                job.company_id = cid
+        link_unlinked_jobs(session)
         session.commit()
     finally:
+        # close() without commit discards the whole batch — intentional:
+        # a bad seed entry must not half-apply.
         if close:
             session.close()
-    return {"created": created, "updated": updated, "skipped_manual": skipped}
+    return {"created": created, "updated": updated, "skipped_manual": skipped,
+            "skipped_drafting": skipped_drafting}
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import case
 
+from db.company_linking import link_unlinked_jobs
 from db.database import get_session
 from db.models import Application, ApplicationStatus, Company, Job
 from utils.company_names import normalize_company_name
@@ -50,17 +51,9 @@ def _lazy_link(session) -> None:
     Runs at the top of both GET endpoints so jobs found by scanners AFTER
     seeding attach to their company without touching scanner code. Cheap:
     only scans company_id IS NULL rows (a few hundred max, local SQLite).
+    Matching rule lives in db.company_linking (shared with the seeder).
     """
-    by_norm = {}
-    for c in session.query(Company).order_by(Company.id).all():
-        by_norm.setdefault(c.name_normalized, c.id)
-    dirty = False
-    for job in session.query(Job).filter(Job.company_id.is_(None)).all():
-        cid = by_norm.get(normalize_company_name(job.company))
-        if cid:
-            job.company_id = cid
-            dirty = True
-    if dirty:
+    if link_unlinked_jobs(session):
         session.commit()
 
 

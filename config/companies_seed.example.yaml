@@ -1,0 +1,46 @@
+# Companies Seed — target-company profiles for the Companies tab
+# ============================================================================
+# Copy this file to `companies_seed.yaml` and add your own companies.
+# `companies_seed.yaml` is gitignored so your research never leaves your
+# machine. Apply it with:  venv/bin/python scripts/seed_companies.py
+#
+# The seeder upserts by normalized company name (idempotent — rerun any
+# time). Rows whose profile_source is "manual" are never overwritten, and
+# notes_md is user-owned (never touched by the seeder).
+#
+# Schema per entry:
+#   name          (required) display name; also the upsert key after
+#                 normalization ("Chime Financial, Inc" == "Chime")
+#   careers_url   careers page or ATS board URL
+#   ats_platform  greenhouse | ashby | lever | workday | radancy | custom
+#   priority      high | medium | low   (drives dashboard sort order)
+#   status        target | watch | paused
+#   overview_md   Markdown: what they do, size, stage (3-6 sentences)
+#   why_fit_md    Markdown: why YOU fit + top target roles w/ YOE + comp
+#   hiring_bar_md Markdown: bars, comp bands, gotchas, traps to avoid
+#   suggested     bool, default false — set at creation time only;
+#                 re-seeding an existing row does not change it
+
+companies:
+  - name: "Acme Fintech"
+    careers_url: "https://boards.greenhouse.io/acmefintech"
+    ats_platform: "greenhouse"
+    priority: "high"
+    status: "target"
+    overview_md: |
+      Series C payments infrastructure startup, ~800 employees, SF HQ.
+      Card issuing and spend-management APIs for mid-market companies;
+      raised $150M in 2025. Engineering org is Python/Go with a growing
+      applied-ML team focused on fraud and credit decisioning.
+    why_fit_md: |
+      Fraud/credit decisioning sits exactly on the econ + data + ML
+      profile. Top target: ML Engineer, Risk (req 1234567) — 2+ YOE,
+      $140k–180k, SF hybrid; JD names LLM-tooling fluency as a plus.
+      Secondary: Analytics Engineer (req 1234568) — 2+ YOE, SQL/Python,
+      $130k–160k, remote-friendly.
+    hiring_bar_md: |
+      Transparent bands on all postings. Backend interviews lean Go —
+      prep basics or steer toward the data/ML loops. TRAP: "Platform
+      Engineer" postings hide a 5+ YOE bar behind mid-level titles;
+      read requirements, not titles.
+    suggested: false
