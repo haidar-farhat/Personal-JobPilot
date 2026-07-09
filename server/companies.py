@@ -2,7 +2,7 @@
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException

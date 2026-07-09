@@ -4,9 +4,11 @@ New TABLES (companies, application_events) come from Base.metadata.create_all
 at engine init. This migration:
   1. ALTERs existing tables:  applications.lead_source, applications.next_action,
      jobs.company_id
-  2. Backfills approximate ApplicationEvents from existing date fields
+  2. Creates idx_jobs_company_id (create_all skips indexes on pre-existing
+     tables, so the model-declared index must be created here).
+  3. Backfills approximate ApplicationEvents from existing date fields
      (source="backfill") — only for applications with zero events.
-  3. Links jobs.company_id by normalized company name.
+  4. Links jobs.company_id by normalized company name.
 
 Idempotent. Run from the project root:
     python -m db.migrations.006_add_companies_and_events
@@ -69,6 +71,22 @@ def _add_columns(engine) -> list[str]:
     return added
 
 
+def _add_indexes(engine) -> list[str]:
+    # Base.metadata.create_all only creates indexes for tables it creates —
+    # the pre-existing jobs table got the company_id COLUMN from _add_columns
+    # but not the model-declared idx_jobs_company_id, so create it here.
+    added = []
+    with engine.begin() as conn:
+        exists = conn.execute(text(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='idx_jobs_company_id'")).fetchone()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_company_id ON jobs(company_id)"))
+        if exists is None:
+            added.append("idx_jobs_company_id")
+    return added
+
+
 def _backfill_events(session) -> int:
     """Synthesize approximate events from legacy date fields (once)."""
     count = 0
@@ -120,6 +138,7 @@ def _link_jobs(session) -> int:
 def run() -> dict:
     engine = get_engine()   # create_all makes the new tables
     added = _add_columns(engine)
+    indexes = _add_indexes(engine)
     session = get_session_factory()()
     try:
         events = _backfill_events(session)
@@ -127,7 +146,8 @@ def run() -> dict:
         session.commit()
     finally:
         session.close()
-    return {"columns_added": added, "events_backfilled": events, "jobs_linked": linked}
+    return {"columns_added": added, "indexes_added": indexes,
+            "events_backfilled": events, "jobs_linked": linked}
 
 
 if __name__ == "__main__":
