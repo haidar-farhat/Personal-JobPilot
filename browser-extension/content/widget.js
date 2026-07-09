@@ -167,7 +167,8 @@
       appliedBtn.disabled = true;
       appliedBtn.textContent = "Recording…";
       const res = await send({ cmd: "mark_applied",
-                               url: location.href, title: document.title });
+                               url: location.href, title: document.title,
+                               company: companyFromPage() });
       if (res && res.ok) {
         appliedBtn.textContent = res.already ? "✓ Already recorded" : "✓ Recorded";
       } else {
@@ -477,6 +478,17 @@
   });
   try { obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* noop */ }
   // Belt-and-suspenders: some wipes don't fire useful mutations by the time we
-  // observe. A cheap periodic check guarantees the pill comes back.
-  setInterval(maybeShow, 2000);
+  // observe. A cheap periodic check guarantees the pill comes back. The same
+  // tick catches SPA route changes (the host lives on documentElement, so
+  // isConnected never flips on client-side navigation) — a new URL means the
+  // applied button's "✓ Recorded" state belongs to the PREVIOUS job; reset it.
+  let lastHref = location.href;
+  setInterval(() => {
+    if (location.href !== lastHref) {
+      lastHref = location.href;
+      const b = root && root.getElementById("applied");
+      if (b) { b.disabled = false; b.textContent = "✓ Mark applied"; }
+    }
+    maybeShow();
+  }, 2000);
 })();
