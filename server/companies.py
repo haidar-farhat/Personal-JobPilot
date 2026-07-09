@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import case
 
 from db.company_linking import link_unlinked_jobs
@@ -160,12 +160,26 @@ def company_detail(company_id: int):
         session.close()
 
 
-class CompanyCreate(BaseModel):
+class _CareersUrlGuard(BaseModel):
+    """careers_url renders into an href in the dashboard — esc() blocks
+    attribute breakout but not javascript: URIs, and the Task-14 LLM
+    profiler will write this field from untrusted page content. Both
+    write models inherit this scheme check ("" / None pass through)."""
+
+    @field_validator("careers_url", check_fields=False)
+    @classmethod
+    def _http_only(cls, v):
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("careers_url must be http(s)")
+        return v
+
+
+class CompanyCreate(_CareersUrlGuard):
     name: str
     careers_url: str = ""
 
 
-class CompanyPatch(BaseModel):
+class CompanyPatch(_CareersUrlGuard):
     # all optional — patch semantics
     name: str | None = None
     careers_url: str | None = None

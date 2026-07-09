@@ -455,6 +455,7 @@
   .cdetail .backlink{cursor:pointer;color:var(--brand2);font-weight:600}
   .cprofile h4{margin:18px 0 6px;color:var(--text)}
   .cprofile .pbody{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:14px;color:var(--text)}
+  #cnotes{white-space:pre-wrap}  /* notes are plain text with real \n — profile pbodies render mdLite HTML and must NOT pre-wrap */
   .ctree{margin-top:20px}
   .cstage{margin:10px 0}
   .cstage>summary{cursor:pointer;font-weight:700;padding:6px 0;color:var(--text)}
@@ -1319,7 +1320,7 @@ async function openCompany(cid){
     <h2>${esc(c.name)}</h2>
     <div class="cmeta">
       ${c.ats_platform?`<span class="chip">${esc(c.ats_platform)}</span>`:""}
-      ${c.careers_url?`<a class="chip" href="${esc(c.careers_url)}" target="_blank">careers ↗</a>`:""}
+      ${c.careers_url&&c.careers_url.startsWith("http")?`<a class="chip" href="${esc(c.careers_url)}" target="_blank">careers ↗</a>`:""}
       <button class="chip" id="crefresh" title="Re-draft profile with the local LLM (your Notes are never touched)">↻ refresh profile</button>
     </div>
     <div class="cprofile">

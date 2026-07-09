@@ -190,6 +190,27 @@ def test_patch_blank_careers_url_clears(session_factory):
     s.close()
 
 
+def test_careers_url_scheme_guard(session_factory):
+    """careers_url renders into an href — javascript: URIs must 422.
+
+    The Task-14 LLM profiler will write this field from untrusted page
+    content, so the scheme check has to live server-side, on BOTH write
+    models (the dashboard's startsWith("http") render guard is only
+    belt-and-braces).
+    """
+    cid = client.post("/api/companies", json={"name": "SoFi"}).json()["id"]
+    r = client.patch(f"/api/company/{cid}",
+                     json={"careers_url": "javascript:alert(1)"})
+    assert r.status_code == 422
+    r = client.patch(f"/api/company/{cid}",
+                     json={"careers_url": "https://sofi.com/careers"})
+    assert r.status_code == 200
+    # POST inherits the same guard
+    assert client.post("/api/companies",
+                       json={"name": "Evil Co",
+                             "careers_url": "javascript:alert(1)"}).status_code == 422
+
+
 def test_refresh_reentrant_noop(session_factory):
     cid = client.post("/api/companies", json={"name": "SoFi"}).json()["id"]
     # first refresh works (stub clears draft_status synchronously under TestClient)
