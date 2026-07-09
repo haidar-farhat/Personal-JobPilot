@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import case
 
 from db.database import get_session
 from db.models import Application, ApplicationStatus, Company, Job
@@ -14,6 +15,13 @@ from utils.company_names import normalize_company_name
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["companies"])
+
+# Company.priority is a STRING — a plain .desc() sorts alphabetically
+# (medium > low > high), burying high-priority companies. Rank explicitly.
+_PRIORITY_RANK = case((Company.priority == "high", 0),
+                      (Company.priority == "medium", 1),
+                      (Company.priority == "low", 2),
+                      else_=3)
 
 # Pipeline stage groups (spec §4).
 STAGE_GROUPS = {
@@ -79,39 +87,36 @@ def list_companies():
         rows = (session.query(Job, Application)
                 .outerjoin(Application, Application.job_id == Job.id)
                 .all())
-        counts: dict[int | None, dict] = defaultdict(
-            lambda: {"watching": 0, "applied": 0, "in_play": 0, "closed": 0})
+        _zero = lambda: {"watching": 0, "applied": 0, "in_play": 0, "closed": 0}
+        counts: dict[int, dict] = defaultdict(_zero)
         last_activity: dict[int | None, datetime] = {}
+        # Unlinked jobs rolled up by normalized name so nothing is invisible.
+        other_counts: dict[str, dict] = defaultdict(_zero)
         other_names: dict[str, str] = {}
         for job, app in rows:
             status = app.status if app else ApplicationStatus.FOUND
-            counts[job.company_id][_stage_of(status)] += 1
+            stage = _stage_of(status)
+            if job.company_id is None:
+                norm = normalize_company_name(job.company)
+                other_names.setdefault(norm, job.company)
+                other_counts[norm][stage] += 1
+            else:
+                counts[job.company_id][stage] += 1
             stamp = (app.date_applied or job.date_found) if app else job.date_found
             if stamp and (job.company_id not in last_activity or stamp > last_activity[job.company_id]):
                 last_activity[job.company_id] = stamp
-            if job.company_id is None:
-                other_names.setdefault(normalize_company_name(job.company), job.company)
 
         companies = []
-        for c in session.query(Company).order_by(Company.priority.desc().nullslast(),
-                                                 Company.name).all():
+        for c in session.query(Company).order_by(_PRIORITY_RANK, Company.name).all():
             d = _company_dict(c)
-            d["counts"] = counts.get(c.id, {"watching": 0, "applied": 0,
-                                            "in_play": 0, "closed": 0})
+            d["counts"] = counts.get(c.id, _zero())
             la = last_activity.get(c.id)
             d["last_activity"] = la.isoformat() if la else None
             d["why_fit_teaser"] = _teaser(c.why_fit_md)
             companies.append(d)
 
-        # Unlinked jobs rolled up by normalized name so nothing is invisible.
-        other = []
-        if None in counts:
-            for norm, display in sorted(other_names.items()):
-                per = {"watching": 0, "applied": 0, "in_play": 0, "closed": 0}
-                for job, app in rows:
-                    if job.company_id is None and normalize_company_name(job.company) == norm:
-                        per[_stage_of(app.status if app else ApplicationStatus.FOUND)] += 1
-                other.append({"name": display, "counts": per})
+        other = [{"name": other_names[norm], "counts": other_counts[norm]}
+                 for norm in sorted(other_counts)]
         return {"companies": companies, "other": other}
     finally:
         session.close()

@@ -49,6 +49,24 @@ def test_list_rollups(seeded):
     assert body["other"][0]["name"] == "SoFi"
 
 
+def test_list_orders_high_priority_first(session_factory):
+    """priority is a STRING — a plain desc() sorts medium > low > high.
+
+    Insert in low/high/medium order to prove the result isn't insertion
+    order either.
+    """
+    s = session_factory()
+    s.add(Company(name="Lowco", name_normalized="lowco", priority="low"))
+    s.add(Company(name="Highco", name_normalized="highco", priority="high"))
+    s.add(Company(name="Midco", name_normalized="midco", priority="medium"))
+    s.commit(); s.close()
+
+    r = client.get("/api/companies")
+    assert r.status_code == 200
+    names = [c["name"] for c in r.json()["companies"]]
+    assert names == ["Highco", "Midco", "Lowco"]
+
+
 def test_detail_tree_groups_by_stage(seeded):
     r = client.get(f"/api/company/{seeded}")
     assert r.status_code == 200
