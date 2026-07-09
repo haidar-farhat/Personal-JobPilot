@@ -398,6 +398,13 @@
   .btn.ghost{background:var(--surface);color:var(--muted);border:1px solid var(--border);box-shadow:none}
   .btn.ghost:hover{background:var(--panel);filter:none}
 
+  /* Quick-add modal (Log an application) form fields */
+  .la-field{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:14px}
+  .la-field:last-child{margin-bottom:0}
+  .la-field input,.la-field select{font:inherit;font-weight:500;font-size:14px;color:var(--text);background:var(--surface);
+    border:1px solid var(--border);border-radius:10px;padding:9px 12px;outline:none;transition:border-color .12s,box-shadow .12s}
+  .la-field input:focus,.la-field select:focus{border-color:var(--brand2);box-shadow:var(--focus-ring)}
+
   /* ===== Kanban application board (additive view) ===== */
   #boardView{padding:16px clamp(16px,4vw,48px) 56px}
   .board-head{display:flex;align-items:flex-start;gap:12px;margin:8px 0 16px}
@@ -501,6 +508,10 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
       Sync to Sheet<span class="track-badge" id="trackerBadge" hidden></span>
     </button>
+    <button class="track-btn" id="logApplyBtn" title="Record an application you made outside JobPilot (paste the job URL)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      + Log apply
+    </button>
     <label class="sortlbl">Sort by
       <select id="sort">
         <option value="relevance">Relevance</option>
@@ -542,6 +553,42 @@
     </div>
     <div class="modal-body" id="trackerBody"><div class="empty">Loading…</div></div>
     <div class="modal-foot" id="trackerFoot"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="logApplyModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Log an application">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Log an application</div>
+        <div class="modal-sub">Paste the job posting URL. If JobPilot already knows the job it just marks it applied; otherwise it creates a record you can edit.</div>
+      </div>
+      <button class="modal-x" id="laClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="la-field">Job URL
+        <input type="url" id="laUrl" placeholder="https://…" required>
+      </label>
+      <label class="la-field">Title
+        <input type="text" id="laTitle" placeholder="(optional)">
+      </label>
+      <label class="la-field">Company
+        <input type="text" id="laCompany" placeholder="(optional)">
+      </label>
+      <label class="la-field">Lead source
+        <select id="laSource">
+          <option>Bianca / Vantage Point</option>
+          <option>Self-found</option>
+          <option>JobRight</option>
+          <option>Simplify</option>
+          <option>Referral</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost sm" id="laCancel">Cancel</button>
+      <button class="btn sm" id="laSave">Record applied</button>
+    </div>
   </div>
 </div>
 
@@ -1285,6 +1332,44 @@ $("#trackerBtn").onclick=openTracker;
 $("#trackerClose").onclick=closeTracker;
 $("#trackerModal").addEventListener("click",e=>{ if(e.target===$("#trackerModal")) closeTracker(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#trackerModal").hidden) closeTracker(); });
+
+// ============================================================
+// Quick-add: log an externally-made application
+// ============================================================
+function openLogApply(){
+  $("#logApplyModal").hidden=false;
+  $("#laSource").value = localStorage.getItem("jp_lead_source") || "Bianca / Vantage Point";
+  $("#laUrl").focus();
+}
+function closeLogApply(){ $("#logApplyModal").hidden=true; }
+
+$("#logApplyBtn").onclick=openLogApply;
+$("#laCancel").onclick=closeLogApply;
+$("#laClose").onclick=closeLogApply;
+$("#logApplyModal").addEventListener("click",e=>{ if(e.target===$("#logApplyModal")) closeLogApply(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#logApplyModal").hidden) closeLogApply(); });
+
+$("#laSave").onclick=async ()=>{
+  const url=$("#laUrl").value.trim();
+  if(!url){ $("#laUrl").focus(); return; }
+  const lead=$("#laSource").value;
+  localStorage.setItem("jp_lead_source", lead);
+  const btn=$("#laSave"); btn.disabled=true;
+  try{
+    const r=await fetch("/api/applied/record",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ url, title:$("#laTitle").value.trim(), company:$("#laCompany").value.trim(),
+                             lead_source:lead, source:"dashboard" })});
+    const d=await r.json();
+    closeLogApply();
+    $("#laUrl").value=$("#laTitle").value=$("#laCompany").value="";
+    toast(d.already ? "Already recorded as applied"
+          : d.created ? "Recorded — new job created (edit title/company in its drawer)"
+          : "Recorded ✓");
+    loadAll();
+  }catch(e){
+    toast("Backend error — application NOT recorded", true);
+  }finally{ btn.disabled=false; }
+};
 
 const _tt=$("#themeToggle"); if(_tt) _tt.onclick=toggleTheme; applyThemeIcon();
 loadAll(); connectSSE(); refreshTrackerBadge();
