@@ -3,6 +3,7 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -176,8 +177,8 @@ class CompanyPatch(BaseModel):
     name: str | None = None
     careers_url: str | None = None
     ats_platform: str | None = None
-    priority: str | None = None
-    status: str | None = None
+    priority: Literal["high", "medium", "low"] | None = None
+    status: Literal["target", "watch", "paused"] | None = None
     overview_md: str | None = None
     why_fit_md: str | None = None
     hiring_bar_md: str | None = None
@@ -185,6 +186,20 @@ class CompanyPatch(BaseModel):
 
 
 _PROFILE_FIELDS = {"overview_md", "why_fit_md", "hiring_bar_md"}
+
+
+def _conflict(session, norm: str, exclude_id: int | None = None) -> Company | None:
+    """First Company already holding this normalized name (uniqueness guard).
+
+    name_normalized has no DB constraint — _lazy_link and the rollups assume
+    one Company per key, so BOTH write paths (POST + PATCH rename) must check
+    here before committing. exclude_id lets a company rename to a variant of
+    its own name.
+    """
+    q = session.query(Company).filter_by(name_normalized=norm)
+    if exclude_id is not None:
+        q = q.filter(Company.id != exclude_id)
+    return q.first()
 
 
 def draft_profile_task(company_id: int) -> None:
@@ -207,7 +222,7 @@ def create_company(payload: CompanyCreate, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Company name required")
     session = get_session()
     try:
-        if session.query(Company).filter_by(name_normalized=norm).first():
+        if _conflict(session, norm):
             raise HTTPException(status_code=409, detail="Company already exists")
         c = Company(name=payload.name.strip(), name_normalized=norm,
                     careers_url=payload.careers_url or None,
@@ -233,12 +248,24 @@ def patch_company(company_id: int, payload: CompanyPatch):
         if not c:
             raise HTTPException(status_code=404, detail="Company not found")
         data = payload.model_dump(exclude_unset=True)
+        if "name" in data:
+            # renames go through the same guards as POST — a bypassed 409
+            # here would silently break the one-Company-per-normalized-key
+            # invariant that _lazy_link and the rollups depend on
+            name = (data["name"] or "").strip()
+            norm = normalize_company_name(name)
+            if not norm:
+                raise HTTPException(status_code=400, detail="Company name required")
+            if _conflict(session, norm, exclude_id=company_id):
+                raise HTTPException(status_code=409, detail="Company already exists")
+            data["name"] = name
+            c.name_normalized = norm
+        if "careers_url" in data:
+            data["careers_url"] = data["careers_url"] or None   # "" -> None, matches POST
         for field, value in data.items():
             setattr(c, field, value)
         if data.keys() & _PROFILE_FIELDS:
             c.profile_source = "manual"
-        if "name" in data:
-            c.name_normalized = normalize_company_name(data["name"])
         session.commit()
         return {"ok": True}
     finally:
@@ -268,6 +295,10 @@ def refresh_company(company_id: int, background_tasks: BackgroundTasks):
         c = session.query(Company).get(company_id)
         if not c:
             raise HTTPException(status_code=404, detail="Company not found")
+        if c.draft_status == "drafting":
+            # a draft is already in flight — re-snapshotting here would
+            # clobber profile_backup (the one-step undo) mid-draft
+            return {"ok": True, "draft_status": "drafting"}
         c.profile_backup = {"overview_md": c.overview_md,
                             "why_fit_md": c.why_fit_md,
                             "hiring_bar_md": c.hiring_bar_md,

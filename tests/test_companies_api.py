@@ -146,3 +146,65 @@ def test_create_adopts_matching_unlinked_jobs(session_factory):
     s = session_factory()
     assert s.query(Job).one().company_id == cid
     s.close()
+
+
+def test_patch_rename_conflict_409(session_factory):
+    sid = client.post("/api/companies", json={"name": "SoFi"}).json()["id"]
+    cid = client.post("/api/companies", json={"name": "Chime"}).json()["id"]
+
+    # renaming Chime to a variant that normalizes to "sofi" must conflict —
+    # PATCH may not bypass the POST uniqueness guard
+    r = client.patch(f"/api/company/{cid}", json={"name": "SoFi Technologies, Inc."})
+    assert r.status_code == 409
+
+    # blank / whitespace-only name rejected
+    assert client.patch(f"/api/company/{cid}", json={"name": "   "}).status_code == 400
+
+    # self-rename to a variant of its OWN name is allowed (exclude_id)
+    r = client.patch(f"/api/company/{sid}", json={"name": "SoFi, Inc."})
+    assert r.status_code == 200
+    s = session_factory()
+    c = s.query(Company).get(sid)
+    assert (c.name, c.name_normalized) == ("SoFi, Inc.", "sofi")
+    # Chime untouched by the failed renames
+    assert s.query(Company).get(cid).name == "Chime"
+    s.close()
+
+
+def test_patch_invalid_priority_422(session_factory):
+    cid = client.post("/api/companies", json={"name": "SoFi"}).json()["id"]
+    assert client.patch(f"/api/company/{cid}",
+                        json={"priority": "urgent"}).status_code == 422
+    assert client.patch(f"/api/company/{cid}",
+                        json={"status": "zombie"}).status_code == 422
+
+
+def test_patch_blank_careers_url_clears(session_factory):
+    cid = client.post("/api/companies",
+                      json={"name": "SoFi",
+                            "careers_url": "https://sofi.com/careers"}).json()["id"]
+    r = client.patch(f"/api/company/{cid}", json={"careers_url": ""})
+    assert r.status_code == 200
+    s = session_factory()
+    assert s.query(Company).get(cid).careers_url is None   # "" -> None, matches POST
+    s.close()
+
+
+def test_refresh_reentrant_noop(session_factory):
+    cid = client.post("/api/companies", json={"name": "SoFi"}).json()["id"]
+    # first refresh works (stub clears draft_status synchronously under TestClient)
+    assert client.post(f"/api/company/{cid}/refresh").status_code == 200
+
+    # simulate a draft in flight with a meaningful backup already captured
+    s = session_factory()
+    c = s.query(Company).get(cid)
+    c.draft_status = "drafting"
+    c.profile_backup = {"sentinel": True}
+    s.commit(); s.close()
+
+    r = client.post(f"/api/company/{cid}/refresh")
+    assert r.status_code == 200
+    assert r.json()["draft_status"] == "drafting"
+    s = session_factory()
+    assert s.query(Company).get(cid).profile_backup == {"sentinel": True}   # NOT overwritten
+    s.close()
