@@ -46,3 +46,32 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     return engine
+
+
+def record_status_change(session, application, new_status, *, source, note=None):
+    """THE single write-path for Application.status.
+
+    Sets the status, stamps the matching date field (preserving the logic
+    previously inlined in dashboard.py / review_app.py / runner.py), and
+    appends an ApplicationEvent. Same-status calls are no-ops so callers
+    can be idempotent for free. Caller commits.
+    """
+    from datetime import datetime, timezone
+
+    from db.models import ApplicationEvent, ApplicationStatus
+
+    if application.status == new_status:
+        return
+    old = application.status.value if application.status else None
+    application.status = new_status
+    now = datetime.now(timezone.utc)
+    if new_status == ApplicationStatus.APPLIED and not application.date_applied:
+        application.date_applied = now
+    elif new_status == ApplicationStatus.RESPONSE_RECEIVED and not application.response_date:
+        application.response_date = now
+    elif new_status == ApplicationStatus.INTERVIEW and not application.interview_date:
+        application.interview_date = now
+    session.add(ApplicationEvent(
+        application_id=application.id, occurred_at=now,
+        from_status=old, to_status=new_status.value,
+        note=note, source=source))
