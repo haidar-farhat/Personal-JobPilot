@@ -437,6 +437,36 @@
   .ring::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--surface)}
   .ring span{position:relative;z-index:1}
   .col-empty{color:var(--subtle);font-size:13px;text-align:center;padding:16px 8px;border:1px dashed var(--divider);border-radius:10px}
+
+  /* ===== Companies tab ===== */
+  .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;padding:18px 0}
+  .ccard{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;cursor:pointer;transition:border-color .12s ease}
+  .ccard:hover{border-color:var(--brand2)}
+  .ccard h3{margin:0 0 4px;font-size:16px;color:var(--text)}
+  .ccard .cmeta{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+  .chip{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);border:1px solid var(--border);cursor:default}
+  button.chip{cursor:pointer;font-family:inherit}
+  .chip.hi{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-border)}
+  .chip.sug{background:var(--accent-tint);color:var(--brand2);border-color:transparent}
+  .ccounts{display:flex;gap:10px;font-size:12.5px;color:var(--muted);margin-top:8px}
+  .ccounts b{color:var(--text)}
+  .cteaser{font-size:13px;color:var(--muted);margin-top:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .cdetail{padding:18px 0;max-width:980px}
+  .cdetail .backlink{cursor:pointer;color:var(--brand2);font-weight:600}
+  .cprofile h4{margin:18px 0 6px;color:var(--text)}
+  .cprofile .pbody{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:14px;color:var(--text)}
+  .ctree{margin-top:20px}
+  .cstage{margin:10px 0}
+  .cstage>summary{cursor:pointer;font-weight:700;padding:6px 0;color:var(--text)}
+  .cstage.applied>summary{color:var(--success)}
+  .cjob{display:flex;gap:10px;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:10px;margin:6px 0;background:var(--surface)}
+  .cjob .jtitle{flex:1;font-weight:600}
+  .cjob .jscore{font-size:12px;color:var(--muted)}
+  .cjob .jstatus{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted)}
+  .cjob.applied .jstatus{background:var(--success-bg);color:var(--success-fg)}
+  .jevents{font-size:12px;color:var(--muted);padding:4px 12px 8px 28px}
+  .jevents .approx{opacity:.7}
+
   /* global toast — status-change feedback */
   .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);z-index:200;
     background:#0b1220;color:#fff;font-weight:600;font-size:13px;padding:12px 16px;border-radius:12px;
@@ -540,6 +570,18 @@
     </div>
   </div>
   <div class="board" id="board"></div>
+</section>
+
+<section id="companiesView" hidden>
+  <div class="board-head">
+    <div>
+      <div class="board-title">Companies</div>
+      <div class="board-sub">Tailored targets — profiles, hiring bars, and your full pipeline at each.</div>
+    </div>
+  </div>
+  <div id="companiesGrid" class="cgrid"></div>
+  <div id="companyDetail" hidden></div>
+  <div id="companiesOther"></div>
 </section>
 
 <div class="modal-backdrop" id="trackerModal" hidden>
@@ -1196,15 +1238,136 @@ function wireBoard(){
 
 function showView(v){
   document.querySelectorAll(".topnav a").forEach(x=>x.classList.toggle("active", x.dataset.view===v));
-  const board=v==="board";
-  const m=document.querySelector("main"); if(m) m.style.display=board?"none":"";
-  const hero=document.querySelector(".hero"); if(hero) hero.style.display=board?"none":"";
-  const rb=document.querySelector(".resultsbar"); if(rb) rb.style.display=board?"none":"";
+  const board=v==="board", companies=v==="companies", advisor=v==="advisor";
+  const hideMain=board||companies||advisor;
+  const m=document.querySelector("main"); if(m) m.style.display=hideMain?"none":"";
+  const hero=document.querySelector(".hero"); if(hero) hero.style.display=hideMain?"none":"";
+  const rb=document.querySelector(".resultsbar"); if(rb) rb.style.display=hideMain?"none":"";
   $("#boardView").hidden=!board;
+  $("#companiesView").hidden=!companies;
+  const av=$("#advisorView"); if(av) av.hidden=!advisor;   // Task 16 adds the section
   $("#insights").classList.toggle("open", v==="insights");
   if(board) renderBoard();
+  if(companies) renderCompanies();
 }
 document.querySelectorAll(".topnav a").forEach(el=>el.onclick=()=>showView(el.dataset.view));
+
+// ============================================================
+// Companies tab
+// ============================================================
+function mdLite(md){
+  // headings/bold/links/bullets only — matches profile content; all input escaped first
+  let h = esc(md||"");
+  h = h.replace(/^### (.*)$/gm,"<h5>$1</h5>").replace(/^## (.*)$/gm,"<h4>$1</h4>");
+  h = h.replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  h = h.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+  h = h.replace(/^- (.*)$/gm,"<li>$1</li>").replace(/(<li>.*<\/li>\n?)+/g, m=>`<ul>${m}</ul>`);
+  return h.split(/\n{2,}/).map(p=>p.match(/^<(h4|h5|ul)/)?p:`<p>${p.replace(/\n/g,"<br>")}</p>`).join("");
+}
+
+async function renderCompanies(){
+  const grid=$("#companiesGrid"); $("#companyDetail").hidden=true; grid.style.display="";
+  grid.innerHTML=`<div class="empty">Loading…</div>`;
+  const d=await fetch("/api/companies").then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!d){ grid.innerHTML=`<div class="empty">Backend unreachable.</div>`; return; }
+  grid.innerHTML=d.companies.map(c=>`
+    <div class="ccard" data-cid="${c.id}">
+      <h3>${esc(c.name)}</h3>
+      <div class="cmeta">
+        ${c.priority?`<span class="chip ${c.priority==="high"?"hi":""}">${esc(c.priority)}</span>`:""}
+        ${c.ats_platform?`<span class="chip">${esc(c.ats_platform)}</span>`:""}
+        ${c.suggested?`<span class="chip sug">suggested</span>`:""}
+        ${c.draft_status==="drafting"?`<span class="chip">drafting…</span>`:""}
+        ${c.draft_status==="failed"?`<span class="chip" style="background:var(--danger-bg);color:var(--danger-fg)">draft failed</span>`:""}
+      </div>
+      <div class="ccounts">
+        <span>👁 <b>${c.counts.watching}</b></span><span>📨 <b>${c.counts.applied}</b></span>
+        <span>💬 <b>${c.counts.in_play}</b></span><span>🗄 <b>${c.counts.closed}</b></span>
+      </div>
+      <div class="cteaser">${esc(c.why_fit_teaser||"")}</div>
+    </div>`).join("") || `<div class="empty">No companies yet — run scripts/seed_companies.py</div>`;
+  $("#companiesOther").innerHTML = d.other.length ? `
+    <div class="cdetail"><h4>Other companies in the pipeline</h4>
+    ${d.other.map(o=>`<div class="cjob"><span class="jtitle">${esc(o.name)}</span>
+      <span class="jscore">👁 ${o.counts.watching} · 📨 ${o.counts.applied} · 💬 ${o.counts.in_play} · 🗄 ${o.counts.closed}</span>
+      <button class="chip trackco" data-name="${esc(o.name)}" title="Create a tracked company profile — its jobs link automatically and the LLM drafts the profile">+ track</button></div>`).join("")}</div>` : "";
+  grid.querySelectorAll(".ccard").forEach(el=>el.onclick=()=>openCompany(+el.dataset.cid));
+  $("#companiesOther").querySelectorAll(".trackco").forEach(btn=>btn.onclick=async(e)=>{
+    e.stopPropagation();
+    btn.disabled=true; btn.textContent="adding…";
+    try{
+      const r=await fetch("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name:btn.dataset.name})});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+    }catch(err){
+      console.error(err);
+      toast("Could not create company — backend error", true);
+    }
+    renderCompanies();
+  });
+}
+
+async function openCompany(cid){
+  const det=$("#companyDetail"); $("#companiesGrid").style.display="none";
+  $("#companiesOther").innerHTML=""; det.hidden=false;
+  det.innerHTML=`<div class="cdetail"><div class="empty">Loading…</div></div>`;
+  const c=await fetch(`/api/company/${cid}`).then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!c){ det.innerHTML=`<div class="cdetail"><div class="empty">Failed to load.</div></div>`; return; }
+  const stageLabel={watching:"👁 Watching / scored",applied:"📨 Applied",in_play:"💬 In play",closed:"🗄 Closed"};
+  det.innerHTML=`<div class="cdetail">
+    <span class="backlink" id="cback">← All companies</span>
+    <h2>${esc(c.name)}</h2>
+    <div class="cmeta">
+      ${c.ats_platform?`<span class="chip">${esc(c.ats_platform)}</span>`:""}
+      ${c.careers_url?`<a class="chip" href="${esc(c.careers_url)}" target="_blank">careers ↗</a>`:""}
+      <button class="chip" id="crefresh" title="Re-draft profile with the local LLM (your Notes are never touched)">↻ refresh profile</button>
+    </div>
+    <div class="cprofile">
+      <h4>Overview</h4><div class="pbody">${mdLite(c.overview_md)||"<i>empty</i>"}</div>
+      <h4>Why it fits you</h4><div class="pbody">${mdLite(c.why_fit_md)||"<i>empty</i>"}</div>
+      <h4>Hiring bar</h4><div class="pbody">${mdLite(c.hiring_bar_md)||"<i>empty</i>"}</div>
+      <h4>Notes (yours)</h4><div class="pbody" contenteditable="true" id="cnotes">${esc(c.notes_md||"")}</div>
+    </div>
+    <div class="ctree">
+      ${c.tree.map(g=>`<details class="cstage ${g.stage}" ${g.jobs.length&&g.stage!=="closed"?"open":""}>
+        <summary>${stageLabel[g.stage]} (${g.jobs.length})</summary>
+        ${g.jobs.map(j=>`
+          <div class="cjob ${g.stage==="applied"?"applied":""}">
+            <span class="jtitle"><a href="${esc(j.url)}" target="_blank">${esc(j.title)}</a></span>
+            ${j.fit_score!=null?`<span class="jscore">${j.fit_score}%</span>`:""}
+            ${j.lead_source?`<span class="jscore">via ${esc(j.lead_source)}</span>`:""}
+            <span class="jstatus">${esc(j.status)}</span>
+          </div>
+          ${j.events.length?`<div class="jevents">${j.events.map(e=>
+            `<div class="${e.source==="backfill"?"approx":""}">${e.occurred_at.slice(0,10)} — ${e.from?esc(e.from)+" → ":""}${esc(e.to)}${e.source==="backfill"?" ≈":""}</div>`).join("")}</div>`:""}
+        `).join("") || `<div class="empty">none</div>`}
+      </details>`).join("")}
+    </div></div>`;
+  $("#cback").onclick=renderCompanies;
+  $("#crefresh").onclick=async()=>{
+    const btn=$("#crefresh"); btn.disabled=true;
+    try{
+      const r=await fetch(`/api/company/${cid}/refresh`,{method:"POST"});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+    }catch(err){
+      console.error(err);
+      toast("Refresh failed — backend error", true);
+    }
+    openCompany(cid);
+  };
+  $("#cnotes").onblur=async()=>{
+    try{
+      const r=await fetch(`/api/company/${cid}`,{method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({notes_md:$("#cnotes").innerText})});
+      const d=await r.json();
+      if(!r.ok || !d.ok) throw new Error("HTTP "+r.status);
+    }catch(err){
+      console.error(err);
+      toast("Note not saved — backend error", true);
+    }
+  };
+}
 
 // ============================================================
 // Google Sheet application tracker (compare + add)
