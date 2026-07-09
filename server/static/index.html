@@ -1341,13 +1341,18 @@ function openLogApply(){
   $("#laSource").value = localStorage.getItem("jp_lead_source") || "Bianca / Vantage Point";
   $("#laUrl").focus();
 }
-function closeLogApply(){ $("#logApplyModal").hidden=true; }
+function closeLogApply(){
+  $("#logApplyModal").hidden=true;
+  $("#laUrl").value=$("#laTitle").value=$("#laCompany").value="";
+}
 
 $("#logApplyBtn").onclick=openLogApply;
 $("#laCancel").onclick=closeLogApply;
 $("#laClose").onclick=closeLogApply;
 $("#logApplyModal").addEventListener("click",e=>{ if(e.target===$("#logApplyModal")) closeLogApply(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#logApplyModal").hidden) closeLogApply(); });
+["#laUrl","#laTitle","#laCompany"].forEach(s=>
+  $(s).addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#laSave").click(); } }));
 
 $("#laSave").onclick=async ()=>{
   const url=$("#laUrl").value.trim();
@@ -1360,13 +1365,14 @@ $("#laSave").onclick=async ()=>{
       body:JSON.stringify({ url, title:$("#laTitle").value.trim(), company:$("#laCompany").value.trim(),
                              lead_source:lead, source:"dashboard" })});
     const d=await r.json();
+    if(!r.ok || !d.ok) throw new Error("record failed: HTTP " + r.status);
     closeLogApply();
-    $("#laUrl").value=$("#laTitle").value=$("#laCompany").value="";
     toast(d.already ? "Already recorded as applied"
           : d.created ? "Recorded — new job created (edit title/company in its drawer)"
           : "Recorded ✓");
     loadAll();
   }catch(e){
+    console.error(e);
     toast("Backend error — application NOT recorded", true);
   }finally{ btn.disabled=false; }
 };
