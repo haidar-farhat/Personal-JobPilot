@@ -1,13 +1,14 @@
 """Database connection and session management for JobPilot."""
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-from db.models import Base
+from db.models import ApplicationEvent, ApplicationStatus, Base
 
 
 _engine = None
@@ -51,15 +52,13 @@ def init_db():
 def record_status_change(session, application, new_status, *, source, note=None):
     """THE single write-path for Application.status.
 
-    Sets the status, stamps the matching date field (preserving the logic
-    previously inlined in dashboard.py / review_app.py / runner.py), and
-    appends an ApplicationEvent. Same-status calls are no-ops so callers
-    can be idempotent for free. Caller commits.
+    Sets the status and appends an ApplicationEvent. Stamps the matching
+    date field the FIRST time a status is reached (later re-entries keep
+    the original timestamp — new behavior vs the old inline writes, which
+    overwrote dates unconditionally and never wrote response_date).
+    Same-status calls are no-ops (any note passed is dropped). Caller
+    commits.
     """
-    from datetime import datetime, timezone
-
-    from db.models import ApplicationEvent, ApplicationStatus
-
     if application.status == new_status:
         return
     old = application.status.value if application.status else None
@@ -72,6 +71,6 @@ def record_status_change(session, application, new_status, *, source, note=None)
     elif new_status == ApplicationStatus.INTERVIEW and not application.interview_date:
         application.interview_date = now
     session.add(ApplicationEvent(
-        application_id=application.id, occurred_at=now,
+        application=application, occurred_at=now,
         from_status=old, to_status=new_status.value,
         note=note, source=source))

@@ -41,6 +41,18 @@ def test_interview_and_response_stamp_their_dates(tmp_session):
     assert tmp_session.query(ApplicationEvent).count() == 2
 
 
+def test_date_applied_survives_status_regression_and_reentry(tmp_session):
+    app = _mk_app(tmp_session)
+    record_status_change(tmp_session, app, ApplicationStatus.APPLIED, source="dashboard")
+    tmp_session.commit()   # persist; reload is naive (SQLite drops tzinfo)
+    first_stamp = app.date_applied
+    record_status_change(tmp_session, app, ApplicationStatus.REJECTED, source="dashboard")
+    record_status_change(tmp_session, app, ApplicationStatus.APPLIED, source="dashboard")
+    tmp_session.commit()
+    assert app.date_applied == first_stamp          # original timestamp preserved
+    assert tmp_session.query(ApplicationEvent).count() == 3
+
+
 def test_same_status_is_noop(tmp_session):
     app = _mk_app(tmp_session, ApplicationStatus.APPLIED)
     record_status_change(tmp_session, app, ApplicationStatus.APPLIED,
