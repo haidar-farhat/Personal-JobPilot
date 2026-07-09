@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import agents.company_profiler as profiler_mod
 import server.companies as companies_mod
 import server.dashboard as dash
 from db.models import Application, ApplicationStatus, Company, Job
@@ -13,6 +14,19 @@ client = TestClient(dash.app)
 @pytest.fixture(autouse=True)
 def _isolate_db(monkeypatch, session_factory):
     monkeypatch.setattr(companies_mod, "get_session", session_factory)
+    # companies_mod now schedules the REAL agents.company_profiler.draft_profile
+    # as a background task, and TestClient runs background tasks synchronously
+    # before the request call returns. Left unstubbed, every CRUD test in this
+    # file (not just the one below that cares about the profiler) would fire a
+    # real Ollama call and — worse — since these tmp-DB company ids start at 1
+    # just like the real seeded companies, an unpatched draft_profile would
+    # write LLM output straight over production rows in jobpilot.db. Default
+    # to a no-op here (fast, offline-safe); test_create_triggers_profiler
+    # below overrides this per-test to assert it's actually invoked. The
+    # get_session patch is kept too as defense in depth for any test that
+    # overrides draft_profile back to the real function.
+    monkeypatch.setattr(companies_mod, "draft_profile", lambda cid: None)
+    monkeypatch.setattr(profiler_mod, "get_session", session_factory)
 
 
 @pytest.fixture()
@@ -228,4 +242,24 @@ def test_refresh_reentrant_noop(session_factory):
     assert r.json()["draft_status"] == "drafting"
     s = session_factory()
     assert s.query(Company).get(cid).profile_backup == {"sentinel": True}   # NOT overwritten
+    s.close()
+
+
+def test_create_triggers_profiler(monkeypatch, session_factory):
+    calls = []
+    monkeypatch.setattr(companies_mod, "draft_profile", lambda cid: calls.append(cid))
+    r = client.post("/api/companies", json={"name": "Mercury"})
+    assert r.status_code == 200
+    assert calls == [r.json()["id"]]
+
+
+def test_startup_sweep_fails_orphaned_drafts(session_factory):
+    s = session_factory()
+    c = Company(name="Orphan", name_normalized="orphan", draft_status="drafting")
+    s.add(c); s.commit(); cid = c.id; s.close()
+    from server.companies import fail_orphaned_drafts
+    n = fail_orphaned_drafts()
+    assert n == 1
+    s = session_factory()
+    assert s.query(Company).get(cid).draft_status == "failed"
     s.close()

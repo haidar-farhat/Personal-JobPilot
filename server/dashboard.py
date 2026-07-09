@@ -75,11 +75,19 @@ from server.applied import router as applied_router
 app.include_router(applied_router)
 
 # Companies — tailored profiles + per-company pipeline trees
-from server.companies import router as companies_router
+from server.companies import router as companies_router, fail_orphaned_drafts
 app.include_router(companies_router)
 
 # Initialize DB
 init_db()
+
+
+@app.on_event("startup")
+def _recover_orphaned_drafts():
+    """Drafts run as in-process background tasks — any left 'drafting' when
+    the server last stopped are orphans that will hang forever. Sweep them
+    to 'failed' on boot so the UI offers retry instead of a stuck spinner."""
+    fail_orphaned_drafts()
 
 
 # ============================================================

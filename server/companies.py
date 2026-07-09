@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import case
 
+from agents.company_profiler import draft_profile
 from db.company_linking import link_unlinked_jobs
 from db.database import get_session
 from db.models import Application, ApplicationStatus, Company, Job
@@ -209,15 +210,21 @@ def _conflict(session, norm: str, exclude_id: int | None = None) -> Company | No
     return q.first()
 
 
-def draft_profile_task(company_id: int) -> None:
-    """Phase-3 hook (agents/company_profiler.py). Until the profiler lands,
-    clear draft_status so cards don't hang in 'drafting'."""
+def fail_orphaned_drafts() -> int:
+    """Startup sweep: any company still 'drafting' at boot is an orphan —
+    drafts run as in-process background tasks and don't survive restarts.
+    Flip to 'failed' so the UI shows retry instead of hanging forever
+    (and the refresh re-entrancy guard doesn't block recovery)."""
     session = get_session()
     try:
-        c = session.query(Company).get(company_id)
-        if c and c.draft_status == "drafting":
-            c.draft_status = None
+        n = 0
+        for c in session.query(Company).filter(Company.draft_status == "drafting").all():
+            c.draft_status = "failed"
+            n += 1
+        if n:
             session.commit()
+            logger.warning(f"[companies] failed {n} orphaned draft(s) at startup")
+        return n
     finally:
         session.close()
 
@@ -241,7 +248,7 @@ def create_company(payload: CompanyCreate, background_tasks: BackgroundTasks):
             if normalize_company_name(job.company) == norm:
                 job.company_id = c.id
         session.commit()
-        background_tasks.add_task(draft_profile_task, c.id)
+        background_tasks.add_task(draft_profile, c.id)
         return {"id": c.id, "draft_status": "drafting"}
     finally:
         session.close()
@@ -312,7 +319,7 @@ def refresh_company(company_id: int, background_tasks: BackgroundTasks):
                             "profile_source": c.profile_source}
         c.draft_status = "drafting"
         session.commit()
-        background_tasks.add_task(draft_profile_task, company_id)
+        background_tasks.add_task(draft_profile, company_id)
         return {"ok": True, "draft_status": "drafting"}
     finally:
         session.close()

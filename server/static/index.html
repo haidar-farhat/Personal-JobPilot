@@ -1266,7 +1266,12 @@ function mdLite(md){
   return h.split(/\n{2,}/).map(p=>p.match(/^<(h4|h5|ul)/)?p:`<p>${p.replace(/\n/g,"<br>")}</p>`).join("");
 }
 
+// Single in-flight poll timer for the Companies tab (grid or detail view) —
+// cleared before every reschedule so switching views/companies can't stack timers.
+let _companiesPollTimer = null;
+
 async function renderCompanies(){
+  clearTimeout(_companiesPollTimer);
   const grid=$("#companiesGrid"); $("#companyDetail").hidden=true; grid.style.display="";
   grid.innerHTML=`<div class="empty">Loading…</div>`;
   const d=await fetch("/api/companies").then(r=>r.ok?r.json():null).catch(()=>null);
@@ -1306,9 +1311,15 @@ async function renderCompanies(){
     }
     renderCompanies();
   });
+  if(d.companies.some(c=>c.draft_status==="drafting")){
+    _companiesPollTimer=setTimeout(()=>{
+      if(!$("#companiesView").hidden && $("#companyDetail").hidden) renderCompanies();
+    }, 5000);
+  }
 }
 
 async function openCompany(cid){
+  clearTimeout(_companiesPollTimer);
   const det=$("#companyDetail"); $("#companiesGrid").style.display="none";
   $("#companiesOther").innerHTML=""; det.hidden=false;
   det.innerHTML=`<div class="cdetail"><div class="empty">Loading…</div></div>`;
@@ -1368,6 +1379,11 @@ async function openCompany(cid){
       toast("Note not saved — backend error", true);
     }
   };
+  if(c.draft_status==="drafting"){
+    _companiesPollTimer=setTimeout(()=>{
+      if(!$("#companyDetail").hidden) openCompany(cid);
+    }, 5000);
+  }
 }
 
 // ============================================================
