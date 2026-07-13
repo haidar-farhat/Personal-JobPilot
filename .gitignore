@@ -30,6 +30,7 @@ config/applicant_profile.yaml
 config/base_resume.yaml
 config/base_resume_bt.yaml
 config/companies_seed.yaml
+config/agent_preferences.yaml
 
 # ─── Credentials & secrets ──────────────────────────────
 credentials.json

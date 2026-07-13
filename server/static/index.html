@@ -401,9 +401,29 @@
   /* Quick-add modal (Log an application) form fields */
   .la-field{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:14px}
   .la-field:last-child{margin-bottom:0}
-  .la-field input,.la-field select{font:inherit;font-weight:500;font-size:14px;color:var(--text);background:var(--surface);
-    border:1px solid var(--border);border-radius:10px;padding:9px 12px;outline:none;transition:border-color .12s,box-shadow .12s}
-  .la-field input:focus,.la-field select:focus{border-color:var(--brand2);box-shadow:var(--focus-ring)}
+  .la-field input,.la-field select,.la-field textarea{font:inherit;font-weight:500;font-size:14px;color:var(--text);background:var(--surface);
+    border:1px solid var(--border);border-radius:10px;padding:9px 12px;outline:none;transition:border-color .12s,box-shadow .12s;resize:vertical}
+  .la-field input:focus,.la-field select:focus,.la-field textarea:focus{border-color:var(--brand2);box-shadow:var(--focus-ring)}
+  .la-field .hint{font-weight:500;color:var(--muted);font-size:11.5px}
+
+  /* ===== Top picks (agent shortlist) ===== */
+  .picks{margin-bottom:18px}
+  .picks-head{font-weight:800;font-size:14px;color:var(--text);margin:0 0 10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .picks-head .muted{font-size:12px;font-weight:500;color:var(--muted)}
+  .picks-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+  .pick{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px;cursor:pointer;
+    transition:transform .12s,box-shadow .12s,border-color .12s}
+  .pick:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--brand2)}
+  .pick:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+  .pick .title{font-weight:700;font-size:13.5px;color:var(--brand);margin:0 46px 2px 0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .pick .co{font-size:12.5px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pick-why{font-size:11.5px;color:var(--muted);margin-top:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .pick-score{position:absolute;top:10px;right:10px;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
+  .pick-score.strong{background:var(--match-strong);color:var(--match-strong-fg)}
+  .pick-score.maybe{background:var(--match-maybe);color:var(--match-maybe-fg)}
+  .pick-score.stretch{background:var(--match-stretch);color:var(--match-stretch-fg)}
+  .pick-actions{display:flex;gap:8px;margin-top:10px}
 
   /* ===== Kanban application board (additive view) ===== */
   #boardView{padding:16px clamp(16px,4vw,48px) 56px}
@@ -437,6 +457,37 @@
   .ring::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--surface)}
   .ring span{position:relative;z-index:1}
   .col-empty{color:var(--subtle);font-size:13px;text-align:center;padding:16px 8px;border:1px dashed var(--divider);border-radius:10px}
+
+  /* ===== Applied tab (JobRight-style) ===== */
+  #appliedView{padding:16px clamp(16px,4vw,48px) 56px}
+  .nav-ct{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:5px;
+    border-radius:999px;background:var(--accent-tint);color:var(--brand2);font-size:11px;font-weight:800}
+  .ap-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+  .ap-tab{font:inherit;font-size:13px;font-weight:700;color:var(--muted);background:var(--surface);border:1px solid var(--border);
+    border-radius:999px;padding:7px 14px;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+  .ap-tab:hover{border-color:var(--brand2);color:var(--brand2)}
+  .ap-tab.on{background:var(--accent-tint);border-color:var(--brand2);color:var(--brand2)}
+  .ap-tab .ct{opacity:.75;font-weight:800;margin-left:5px}
+  .ap-list{display:flex;flex-direction:column;gap:10px;max-width:1080px}
+  .ap-row{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:14px 16px;cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
+  .ap-row:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg);border-color:var(--border-strong)}
+  .ap-row:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+  .ap-main{flex:1;min-width:0}
+  .ap-title{font-weight:700;color:var(--brand);font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ap-co{font-size:13px;color:var(--text);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ap-meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .ap-side{display:flex;align-items:center;gap:10px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+  .ap-date{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ap-row select{font:inherit;font-size:12.5px;font-weight:600;color:var(--text);background:var(--surface-2);border:1px solid var(--border);
+    border-radius:8px;padding:5px 8px}
+  .ap-status{font-size:11px;font-weight:800;letter-spacing:.3px;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .ap-status.st-applied{background:var(--accent-tint);color:var(--brand2)}
+  .ap-status.st-response_received{background:var(--warn-bg);color:var(--warn-fg)}
+  .ap-status.st-interview{background:var(--success-bg);color:var(--success-fg)}
+  .ap-status.st-rejected{background:var(--danger-bg);color:var(--danger-fg)}
+  .ap-status.st-no_response{background:var(--surface-2);color:var(--muted)}
+  .pill.followup{background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-border)}
 
   /* ===== Companies tab ===== */
   .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;padding:18px 0}
@@ -522,6 +573,7 @@
   <div class="brand">Job<span>Pilot</span></div>
   <nav class="topnav">
     <a class="active" data-view="jobs">Home</a>
+    <a data-view="applied" id="navApplied">Applied<span class="nav-ct" id="navAppliedCt" hidden></span></a>
     <a data-view="board" id="navBoard">Board</a>
     <a data-view="insights" id="navInsights">Insights</a>
     <a data-view="companies">Companies</a>
@@ -568,6 +620,9 @@
 <div class="resultsbar">
   <span id="resultCount"></span>
   <div class="bar-right">
+    <button class="track-btn" id="prefsBtn" title="A 2-minute interview — your answers re-rank every match">
+      🧭 <span id="prefsBtnLabel">Set your preferences</span>
+    </button>
     <button class="track-btn" id="trackerBtn" title="Compare &amp; add your applied jobs to your Google Sheet">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
       Sync to Sheet<span class="track-badge" id="trackerBadge" hidden></span>
@@ -604,6 +659,17 @@
     </div>
   </div>
   <div class="board" id="board"></div>
+</section>
+
+<section id="appliedView" hidden>
+  <div class="board-head">
+    <div>
+      <div class="board-title">Applied</div>
+      <div class="board-sub" id="appliedSub">Everything you've applied to: responses, interviews, and follow-ups in one place.</div>
+    </div>
+  </div>
+  <div class="ap-tabs" id="apTabs"></div>
+  <div class="ap-list" id="appliedList"></div>
 </section>
 
 <section id="companiesView" hidden>
@@ -647,6 +713,39 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="prefsModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Agent preferences interview">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Tell JobPilot what you want</div>
+        <div class="modal-sub">A 2-minute interview. Your answers re-rank every match, and every save or skip keeps teaching it.</div>
+      </div>
+      <button class="modal-x" id="prefsClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="la-field">What kind of work do you enjoy most? <span class="hint">comma-separated — these roles get boosted</span>
+        <input type="text" id="prefLove" placeholder="e.g. LLM agents, evaluation, forecasting, Python">
+      </label>
+      <label class="la-field">What won't you do again? <span class="hint">these get demoted</span>
+        <input type="text" id="prefAvoid" placeholder="e.g. cold calling, on-call rotation, Java">
+      </label>
+      <label class="la-field">Locations that work for you
+        <input type="text" id="prefLoc" placeholder="e.g. San Francisco, East Bay, Remote">
+      </label>
+      <label class="la-field">Hourly pay floor <span class="hint">$/hr — roles paying under this sink; blank for none</span>
+        <input type="number" id="prefFloor" min="0" step="1" placeholder="30">
+      </label>
+      <label class="la-field">Anything else your agent should know
+        <textarea id="prefNotes" rows="3" placeholder="Dealbreakers, culture, schedule constraints…"></textarea>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost sm" id="prefsCancel">Cancel</button>
+      <button class="btn sm" id="prefsSave">Save preferences</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="logApplyModal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-label="Log an application">
     <div class="modal-head">
@@ -686,12 +785,17 @@
 <script>
 const AI_THRESHOLD = 60;
 const state = {
-  apps: [], stats: {}, archetypes: {},
+  apps: [], stats: {}, archetypes: {}, prefs: {},
   selectedId: null, lastTotal: -1,
   filters: { what:"", where:"", categories:new Set(), tiers:new Set(), aiForward:false,
              jobTypes:new Set(), sources:new Set(), statuses:new Set(), datePosted:"any", minScore:0 },
   sort: "relevance",
 };
+
+// JobRight-style split: once you apply, a job leaves Home and lives in the Applied tab.
+const APPLIED_TRACK=new Set(["applied","response_received","interview","rejected","no_response"]);
+const homeApps=()=>state.apps.filter(a=>!APPLIED_TRACK.has(a.status));
+const appliedApps=()=>state.apps.filter(a=>APPLIED_TRACK.has(a.status));
 
 const $ = s => document.querySelector(s);
 const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -795,7 +899,7 @@ function dateOK(a){
 function filterApps(skip){
   const f=state.filters;
   const what=f.what.trim().toLowerCase(), where=f.where.trim().toLowerCase();
-  return state.apps.filter(a=>{
+  return homeApps().filter(a=>{
     if(what){ const hay=`${a.title||""} ${a.company||""} ${(a.ats_keywords||[]).join(" ")}`.toLowerCase(); if(!hay.includes(what)) return false; }
     if(where){ const isRemoteQ=where.includes("remote"); const loc=(a.location||"").toLowerCase();
       if(isRemoteQ){ if(!(a.is_remote||loc.includes("remote"))) return false; } else if(!loc.includes(where)) return false; }
@@ -810,13 +914,51 @@ function filterApps(skip){
     return true;
   });
 }
+// ============================================================
+// Agent ranking (Jack & Jill-style): fit score blended with
+// (a) yes/no learning from your saves & skips, and
+// (b) the preferences you told the agent in the intake interview.
+// ============================================================
+const POS_STATUSES=new Set(["approved","queued","materials_ready","applied","response_received","interview"]);
+let _aff=null;   // cached per render pass
+function buildAffinity(){
+  const arch={}, co={};
+  for(const a of state.apps){
+    const pos=POS_STATUSES.has(a.status), neg=a.status==="skipped";
+    if(!pos&&!neg) continue;
+    const k=a.archetype||"unknown";
+    if(!arch[k]) arch[k]={p:0,n:0};
+    arch[k][pos?"p":"n"]++;
+    const c=(a.company||"").toLowerCase();
+    if(c){ if(!co[c]) co[c]={p:0,n:0}; co[c][pos?"p":"n"]++; }
+  }
+  return {arch,co};
+}
+function affinityBoost(a){
+  if(!_aff) _aff=buildAffinity();
+  let b=0;
+  const s=_aff.arch[a.archetype||"unknown"]; if(s) b+=10*(s.p-s.n)/(s.p+s.n+3);   // smoothed, capped by construction
+  const c=_aff.co[(a.company||"").toLowerCase()]; if(c) b+=5*(c.p-c.n)/(c.p+c.n+2);
+  return b;
+}
+function prefAdjust(a){
+  const p=state.prefs||{}; let b=0, pen=0;
+  const hay=`${a.title||""} ${(a.ats_keywords||[]).join(" ")} ${(a.description||"").slice(0,2000)}`.toLowerCase();
+  for(const w of (p.love_keywords||[])){ if(w && hay.includes(w.toLowerCase())){ b+=4; if(b>=8) break; } }
+  for(const w of (p.avoid_keywords||[])){ if(w && hay.includes(w.toLowerCase())){ pen+=6; if(pen>=12) break; } }
+  const floor=+p.min_hourly||0, top=a.hourly_max||a.hourly_min;
+  if(floor && top && top<floor) pen+=15;
+  return b-pen;
+}
+function agentRank(a){ return (a.fit_score||0)+affinityBoost(a)+prefAdjust(a); }
+
 function sortApps(list){
   const by=state.sort, c=[...list];
   if(by==="fit") c.sort((a,b)=>(b.fit_score||0)-(a.fit_score||0));
   else if(by==="ai") c.sort((a,b)=>(b.ai_intensity||0)-(a.ai_intensity||0)||(b.fit_score||0)-(a.fit_score||0));
   else if(by==="date") c.sort((a,b)=>(a.age_hours??1e9)-(b.age_hours??1e9));
   else if(by==="pay") c.sort((a,b)=>((b.hourly_max||b.hourly_min||0))-((a.hourly_max||a.hourly_min||0)));
-  else c.sort((a,b)=>(b.fit_score||0)-(a.fit_score||0));
+  else c.sort((a,b)=>agentRank(b)-agentRank(a));
   return c;
 }
 
@@ -847,7 +989,7 @@ function checkboxFacet(title, key, options){
 
 function uniqueOptions(getKey, getLabel){
   const seen=new Map();
-  for(const a of state.apps){ const k=getKey(a); if(k==null||k==="") continue; if(!seen.has(k)) seen.set(k,getLabel(a,k)); }
+  for(const a of homeApps()){ const k=getKey(a); if(k==null||k==="") continue; if(!seen.has(k)) seen.set(k,getLabel(a,k)); }
   return [...seen.entries()].map(([val,label])=>({val,label})).sort((a,b)=>a.label.localeCompare(b.label));
 }
 
@@ -920,12 +1062,51 @@ function cardHTML(a){
   </div>`;
 }
 
+// Two-pass curation, Jack-style: the feed is pass one; this strip is the
+// "closer review" — the few roles most likely to be a mutual match right now.
+const PICK_STATUSES=new Set(["found","scored"]);   // not yet acted on
+function pickWhy(a){
+  const why=[];
+  if(a.key_matches&&a.key_matches.length) why.push("matches "+a.key_matches.slice(0,2).join(", ").toLowerCase());
+  const s=_aff&&_aff.arch[a.archetype||"unknown"];
+  if(s&&s.p>=2&&s.p>s.n) why.push(`you saved ${s.p} similar roles`);
+  const hay=`${a.title||""} ${(a.ats_keywords||[]).join(" ")}`.toLowerCase();
+  const loved=((state.prefs||{}).love_keywords||[]).filter(w=>hay.includes(w.toLowerCase()));
+  if(loved.length) why.push("your interests: "+loved.slice(0,2).join(", "));
+  return why.slice(0,2).join(" · ");
+}
+function topPicksHTML(){
+  if(!_aff) _aff=buildAffinity();
+  const picks=homeApps().filter(a=>PICK_STATUSES.has(a.status)&&(a.fit_score||0)>=60)
+    .sort((a,b)=>agentRank(b)-agentRank(a)).slice(0,5);
+  if(picks.length<3) return "";
+  return `<div class="picks"><div class="picks-head">🎯 Top picks for you
+      <span class="muted">curated from ${homeApps().length} live roles · learns from every save &amp; skip</span></div>
+    <div class="picks-row">`+picks.map(a=>{
+      const why=pickWhy(a);
+      return `<div class="pick" data-id="${a.id}" role="button" tabindex="0"
+          aria-label="${esc((a.title||"Untitled")+" at "+(a.company||"")+(a.fit_score!=null?", "+a.fit_score+"% match":"")+". Press Enter to open.")}">
+        ${a.fit_score!=null?`<div class="pick-score ${fitTier(a.fit_score)}">${a.fit_score}%</div>`:""}
+        <p class="title">${esc(a.title||"Untitled")}</p>
+        <div class="co">${esc(a.company||"")}</div>
+        ${why?`<div class="pick-why">${esc(why)}</div>`:""}
+        <div class="pick-actions"><button class="btn sec sm" data-save="${a.id}">Save</button>
+          <button class="btn ghost sm" data-skip="${a.id}">Pass</button></div>
+      </div>`;}).join("")+`</div></div>`;
+}
 function renderList(){
   const list=sortApps(filterApps(null));
-  $("#resultCount").textContent=`${list.length} of ${state.apps.length} jobs`;
-  if(!list.length){ $("#results").innerHTML=`<div class="empty">No jobs match these filters.</div>`; return; }
-  $("#results").innerHTML=`<div class="feed-head">Related to your search · ${list.length} jobs</div>`+list.map(cardHTML).join("");
+  $("#resultCount").textContent=`${list.length} of ${homeApps().length} jobs`;
+  const picks=topPicksHTML();
+  const feed=list.length
+    ? `<div class="feed-head">Related to your search · ${list.length} jobs</div>`+list.map(cardHTML).join("")
+    : `<div class="empty">No jobs match these filters.</div>`;
+  $("#results").innerHTML=picks+feed;
   $("#results").querySelectorAll(".card").forEach(c=>c.onclick=()=>selectApp(+c.dataset.id));
+  $("#results").querySelectorAll(".pick").forEach(c=>{
+    c.onclick=e=>{ if(e.target.closest("button")) return; selectApp(+c.dataset.id); };
+    c.onkeydown=e=>{ if(e.key==="Enter"){ selectApp(+c.dataset.id); } };
+  });
   $("#results").querySelectorAll("[data-save]").forEach(b=>b.onclick=e=>{e.stopPropagation(); changeStatus(+b.dataset.save,"approved");});
   $("#results").querySelectorAll("[data-skip]").forEach(b=>b.onclick=e=>{e.stopPropagation(); changeStatus(+b.dataset.skip,"skipped");});
 }
@@ -1129,9 +1310,11 @@ async function changeStatus(id, status){
     const r=await fetch(`/api/application/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
     if(!r.ok) throw new Error("HTTP "+r.status);
     const a=state.apps.find(x=>x.id===id);
+    const wasApplied=a?APPLIED_TRACK.has(a.status):false;
     if(a){ a.status=status; a.status_meta=STATUS_META[status]||{label:status.toUpperCase()}; }
     render();                                   // refresh cards + rail facet counts
     if(state.selectedId===id) selectApp(id);    // keep detail (status select) in sync
+    if(!wasApplied && APPLIED_TRACK.has(status)) toast("Moved to your Applied tab ✓");
   }catch(e){ console.error("status update failed:", e); toast("Couldn't update stage — try again", true); }
 }
 async function doAction(act, id){
@@ -1142,8 +1325,8 @@ async function doAction(act, id){
 }
 
 function renderWelcome(){
-  const cats=new Set(state.apps.map(a=>a.archetype).filter(Boolean));
-  const ai=state.apps.filter(isAIForward).length;
+  const cats=new Set(homeApps().map(a=>a.archetype).filter(Boolean));
+  const ai=homeApps().filter(isAIForward).length;
   const icon=p=>`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${p}</svg>`;
   $("#welcome").innerHTML=`<div class="chips-row">
       <span class="pref">${icon('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/>')} ${cats.size} role categories</span>
@@ -1169,18 +1352,22 @@ function renderInsights(){
   </div><div class="funnel">${order.map(([k,l])=>`<span class="pill">${l}: ${p[k]??0}</span>`).join("")}</div>`;
 }
 
-function render(){ renderWelcome(); renderRail(); renderList(); renderInsights(); if($("#boardView") && !$("#boardView").hidden) renderBoard(); }
+function render(){ _aff=null; renderWelcome(); renderRail(); renderList(); renderInsights(); updateAppliedBadge();
+  if($("#boardView") && !$("#boardView").hidden) renderBoard();
+  if($("#appliedView") && !$("#appliedView").hidden) renderApplied(); }
 
 function setLastUpdate(){ $("#lastUpdate").textContent="updated "+new Date().toLocaleTimeString(); }
 
 async function loadAll(){
   try{
-    const [stats, apps, arch] = await Promise.all([
+    const [stats, apps, arch, prefs] = await Promise.all([
       fetch("/api/stats").then(r=>r.json()),
       fetch("/api/applications?limit=500").then(r=>r.json()),
       fetch("/api/archetypes").then(r=>r.json()).catch(()=>({})),
+      fetch("/api/agent/preferences").then(r=>r.json()).catch(()=>({})),
     ]);
-    state.stats=stats; state.apps=apps; state.archetypes=arch; state.lastTotal=stats.total_jobs;
+    state.stats=stats; state.apps=apps; state.archetypes=arch; state.prefs=prefs||{}; state.lastTotal=stats.total_jobs;
+    updatePrefsBtn();
     $("#dot-dash").className="dot up"; $("#dot-ollama").className="dot up";
     setLastUpdate(); render();
   }catch(e){ $("#dot-dash").className="dot down"; $("#results").innerHTML=`<div class="empty">Could not load data: ${esc(e.message||e)}</div>`; }
@@ -1285,18 +1472,85 @@ function wireBoard(){
   });
 }
 
+// ============================================================
+// Applied tab (JobRight-style) — life of a job after you apply
+// ============================================================
+const AP_TABS=[["all","All"],["applied","Applied"],["response_received","Response"],["interview","Interview"],["rejected","Rejected"],["no_response","No response"]];
+const AP_STATUSES=["applied","response_received","interview","rejected","no_response","approved"];
+let apTab="all";
+
+function updateAppliedBadge(){
+  const n=appliedApps().length, b=$("#navAppliedCt");
+  if(b){ b.textContent=n; b.hidden=!n; }
+}
+
+function apDate(a){
+  if(!a.date_applied) return "";
+  const d=new Date(a.date_applied);
+  return isNaN(d)?"":d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+}
+
+function appliedRowHTML(a){
+  const days=a.days_since_applied;
+  const follow=a.status==="applied" && days!=null && days>=7;
+  const pay=payLabel(a);
+  const stLabel=(a.status_meta&&a.status_meta.label)||a.status;
+  return `<div class="ap-row" data-id="${a.id}" role="button" tabindex="0"
+      aria-label="${esc((a.title||"Untitled")+" at "+(a.company||"")+", "+stLabel+". Press Enter to open.")}">
+    <div class="ap-main">
+      <div class="ap-title">${esc(a.title||"Untitled")}</div>
+      <div class="ap-co">${esc(a.company||"")}</div>
+      <div class="ap-meta">${esc(a.location||"—")}${pay?" · "+esc(pay):""}${a.fit_score!=null?` · ${a.fit_score}% match`:""}</div>
+    </div>
+    <div class="ap-side">
+      ${a.auto_applied?`<span class="pill ai" title="JobPilot applied for you">🤖 Auto-applied</span>`:""}
+      ${follow?`<span class="pill followup" title="Applied ${days} days ago with no response">⏰ Follow up</span>`:""}
+      <span class="ap-status st-${esc(a.status)}">${esc(stLabel)}</span>
+      <span class="ap-date">${apDate(a)}${days!=null?` · ${days}d ago`:""}</span>
+      <select data-st="${a.id}" title="Update stage" aria-label="Update stage">
+        ${AP_STATUSES.map(s=>`<option value="${s}" ${a.status===s?"selected":""}>${s==="approved"?"back to saved":s.replace(/_/g," ")}</option>`).join("")}
+      </select>
+    </div>
+  </div>`;
+}
+
+function renderApplied(){
+  const all=appliedApps().slice().sort((a,b)=>(b.date_applied||"").localeCompare(a.date_applied||""));
+  const counts={all:all.length};
+  for(const [k] of AP_TABS) if(k!=="all") counts[k]=all.filter(a=>a.status===k).length;
+  $("#apTabs").innerHTML=AP_TABS.map(([k,l])=>
+    `<button class="ap-tab ${apTab===k?"on":""}" data-tab="${k}">${l}<span class="ct">${counts[k]||0}</span></button>`).join("");
+  $("#apTabs").querySelectorAll(".ap-tab").forEach(b=>b.onclick=()=>{ apTab=b.dataset.tab; renderApplied(); });
+  const list=apTab==="all"?all:all.filter(a=>a.status===apTab);
+  const follow=all.filter(a=>a.status==="applied"&&a.days_since_applied!=null&&a.days_since_applied>=7).length;
+  $("#appliedSub").textContent=all.length
+    ? `${all.length} application${all.length===1?"":"s"}${follow?` · ${follow} waiting 7+ days (follow up)`:""}`
+    : "Apply to a job from Home and it moves here automatically.";
+  $("#appliedList").innerHTML=list.length?list.map(appliedRowHTML).join("")
+    :`<div class="empty">${all.length?"No applications in this stage.":"Nothing here yet — go apply to something great."}</div>`;
+  $("#appliedList").querySelectorAll(".ap-row").forEach(r=>{
+    r.onclick=e=>{ if(e.target.closest("select")) return; selectApp(+r.dataset.id); showView("jobs"); };
+    r.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); selectApp(+r.dataset.id); showView("jobs"); } };
+  });
+  $("#appliedList").querySelectorAll("select[data-st]").forEach(sel=>{
+    sel.onchange=()=>changeStatus(+sel.dataset.st, sel.value);
+  });
+}
+
 function showView(v){
   document.querySelectorAll(".topnav a").forEach(x=>x.classList.toggle("active", x.dataset.view===v));
-  const board=v==="board", companies=v==="companies", advisor=v==="advisor";
-  const hideMain=board||companies||advisor;
+  const board=v==="board", companies=v==="companies", advisor=v==="advisor", applied=v==="applied";
+  const hideMain=board||companies||advisor||applied;
   const m=document.querySelector("main"); if(m) m.style.display=hideMain?"none":"";
   const hero=document.querySelector(".hero"); if(hero) hero.style.display=hideMain?"none":"";
   const rb=document.querySelector(".resultsbar"); if(rb) rb.style.display=hideMain?"none":"";
   $("#boardView").hidden=!board;
+  $("#appliedView").hidden=!applied;
   $("#companiesView").hidden=!companies;
   const av=$("#advisorView"); if(av) av.hidden=!advisor;   // Task 16 adds the section
   $("#insights").classList.toggle("open", v==="insights");
   if(board) renderBoard();
+  if(applied) renderApplied();
   if(companies) renderCompanies();
   if(advisor && av && !av.querySelector(".adv-stats")) runAdvisorReport();
 }
@@ -1639,6 +1893,48 @@ $("#laSave").onclick=async ()=>{
     console.error(e);
     toast("Backend error — application NOT recorded", true);
   }finally{ btn.disabled=false; }
+};
+
+// ============================================================
+// Agent preferences interview (Jack & Jill-style intake)
+// ============================================================
+const splitKw=s=>s.split(",").map(x=>x.trim()).filter(Boolean);
+function updatePrefsBtn(){
+  const p=state.prefs||{};
+  const has=(p.love_keywords||[]).length||(p.avoid_keywords||[]).length||p.min_hourly||p.locations;
+  const el=$("#prefsBtnLabel"); if(el) el.textContent=has?"Preferences":"Set your preferences";
+}
+function openPrefs(){
+  const p=state.prefs||{};
+  $("#prefLove").value=(p.love_keywords||[]).join(", ");
+  $("#prefAvoid").value=(p.avoid_keywords||[]).join(", ");
+  $("#prefLoc").value=p.locations||"";
+  $("#prefFloor").value=p.min_hourly??"";
+  $("#prefNotes").value=p.notes||"";
+  $("#prefsModal").hidden=false;
+  $("#prefLove").focus();
+}
+function closePrefs(){ $("#prefsModal").hidden=true; }
+$("#prefsBtn").onclick=openPrefs;
+$("#prefsClose").onclick=closePrefs;
+$("#prefsCancel").onclick=closePrefs;
+$("#prefsModal").addEventListener("click",e=>{ if(e.target===$("#prefsModal")) closePrefs(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#prefsModal").hidden) closePrefs(); });
+$("#prefsSave").onclick=async ()=>{
+  const btn=$("#prefsSave"); btn.disabled=true;
+  try{
+    const r=await fetch("/api/agent/preferences",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        love_keywords:splitKw($("#prefLove").value), avoid_keywords:splitKw($("#prefAvoid").value),
+        locations:$("#prefLoc").value.trim(), min_hourly:$("#prefFloor").value||null,
+        notes:$("#prefNotes").value.trim(),
+      })});
+    const d=await r.json();
+    if(!r.ok||!d.ok) throw new Error("HTTP "+r.status);
+    state.prefs=d; updatePrefsBtn(); closePrefs(); render();
+    toast("Preferences saved — your ranking just got smarter ✓");
+  }catch(e){ console.error(e); toast("Couldn't save preferences", true); }
+  finally{ btn.disabled=false; }
 };
 
 const _tt=$("#themeToggle"); if(_tt) _tt.onclick=toggleTheme; applyThemeIcon();

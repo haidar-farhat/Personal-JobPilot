@@ -390,6 +390,48 @@ async def api_stats():
     return _get_stats()
 
 
+# ============================================================
+# Agent preferences — Jack & Jill-style intake answers.
+# The Home ranking blends these with save/skip feedback client-side.
+# ============================================================
+PREFS_PATH = PROJECT_ROOT / "config" / "agent_preferences.yaml"
+
+
+def _clean_keyword_list(v):
+    if not isinstance(v, list):
+        return []
+    return [str(x).strip() for x in v if str(x).strip()][:30]
+
+
+@app.get("/api/agent/preferences")
+async def get_agent_preferences():
+    if PREFS_PATH.exists():
+        try:
+            return yaml.safe_load(PREFS_PATH.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+    return {}
+
+
+@app.post("/api/agent/preferences")
+async def set_agent_preferences(request: Request):
+    body = await request.json()
+    try:
+        min_hourly = float(body.get("min_hourly")) if body.get("min_hourly") not in (None, "") else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="min_hourly must be a number")
+    prefs = {
+        "love_keywords": _clean_keyword_list(body.get("love_keywords")),
+        "avoid_keywords": _clean_keyword_list(body.get("avoid_keywords")),
+        "locations": str(body.get("locations") or "").strip()[:200],
+        "min_hourly": min_hourly,
+        "notes": str(body.get("notes") or "").strip()[:2000],
+    }
+    # ponytail: whole-file overwrite, no merge — single-user tool
+    PREFS_PATH.write_text(yaml.safe_dump(prefs, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return {"ok": True, **prefs}
+
+
 @app.get("/api/applications")
 async def api_applications(status: str = None, search: str = None, limit: int = 500):
     return _get_applications(status_filter=status, search=search, limit=limit)
