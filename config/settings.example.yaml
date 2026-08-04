@@ -1,3 +1,6 @@
+# Sanitized example. Copy to config/settings.yaml and fill in the `user:`
+# block with your own details — the real file is gitignored so personal
+# contact info never reaches this public repo.
 # JobPilot Configuration
 # =====================
 
@@ -382,9 +385,9 @@ output:
 
 # User info (for cover letters and applications)
 user:
-  name: "Matthew Cromaz"
-  email: "matthewcromaz37@gmail.com"
-  phone: "415-745-5603"
-  linkedin: "linkedin.com/in/matthew-cromaz"
-  github: "github.com/TheCromazone"
+  name: "Your Name"
+  email: "you@example.com"
+  phone: "555-0142"
+  linkedin: "linkedin.com/in/your-handle"
+  github: "github.com/your-handle"
   location: "San Francisco, CA"

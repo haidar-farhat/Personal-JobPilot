@@ -9,8 +9,8 @@ from agents.autofill_mapper import map_standard_field
 
 PROFILE = {
     "identity": {"first_name": "Matthew", "last_name": "Cromaz", "full_name": "Matthew Cromaz",
-                 "email": "m@x.com", "phone": "415-745-5603"},
-    "address": {"street": "1342 36th Avenue", "city": "San Francisco", "state": "CA",
+                 "email": "m@x.com", "phone": "555-0142"},
+    "address": {"street": "1 Example Street", "city": "San Francisco", "state": "CA",
                 "state_full": "California", "postal_code": "94122", "country": "United States",
                 "location_line": "San Francisco, California, United States"},
     "links": {"linkedin": "https://www.linkedin.com/in/matthew-cromaz",
@@ -132,9 +132,9 @@ def test_legally_authorized_and_sponsorship():
 
 
 def test_street_address_variants():
-    assert m("Address Line 1")["value"] == "1342 36th Avenue"
-    assert m("Street Address")["value"] == "1342 36th Avenue"
-    assert m("Address 1")["value"] == "1342 36th Avenue"
+    assert m("Address Line 1")["value"] == "1 Example Street"
+    assert m("Street Address")["value"] == "1 Example Street"
+    assert m("Address 1")["value"] == "1 Example Street"
 
 
 def test_address_line_2_stays_empty():
@@ -147,7 +147,7 @@ def test_address_line_2_stays_empty():
 
 
 def test_bare_home_address_gets_full_line():
-    assert m("Home Address")["value"] == "1342 36th Avenue, San Francisco, CA 94122"
+    assert m("Home Address")["value"] == "1 Example Street, San Francisco, CA 94122"
 
 
 def test_zip_code_maps_real_zip():
@@ -161,7 +161,7 @@ def test_phone_extension_stays_empty():
     got = m("Phone Extension")
     assert got["value"] is None
     assert got["needs_review"] is False
-    assert m("Phone")["value"] == "415-745-5603"     # the real phone rule still fires
+    assert m("Phone")["value"] == "555-0142"         # the real phone rule still fires
 
 
 def test_right_to_work_phrasings():

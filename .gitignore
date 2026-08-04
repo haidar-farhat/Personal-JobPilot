@@ -26,6 +26,10 @@ output/
 *.docx.bak
 
 # ─── Personal data (sanitized examples committed) ──────
+# settings.yaml carries the `user:` block printed on résumé/cover-letter
+# letterheads — real name, email and phone. Tune settings here; the committed
+# copy is config/settings.example.yaml.
+config/settings.yaml
 config/applicant_profile.yaml
 config/base_resume.yaml
 config/base_resume_bt.yaml

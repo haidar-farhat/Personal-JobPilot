@@ -74,8 +74,10 @@
   <div class="panel">
     <!-- formatted value pre-filled: strict tenants (Cisco) reject it — the
          engine must rewrite to bare national digits -->
-    <label>Phone Number*</label><input type="text" data-automation-id="formField-phoneNumber" id="mi-phone" value="(415) 745-5603">
-    <label>Phone Extension</label><input type="text" data-automation-id="formField-extension" id="mi-ext" value="415-745-5603">
+    <label>Phone Number*</label><input type="text" data-automation-id="formField-phoneNumber" id="mi-phone" value="(555) 010-0142">
+    <!-- poisoned with the applicant's own phone by the test at runtime (that
+         value is personal, so it is not baked into this public fixture) -->
+    <label>Phone Extension</label><input type="text" data-automation-id="formField-extension" id="mi-ext" value="">
   </div>
 </div>
 
