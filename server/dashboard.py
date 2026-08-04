@@ -82,6 +82,10 @@ app.include_router(companies_router)
 from server.advisor import router as advisor_router
 app.include_router(advisor_router)
 
+# Extension features (company board scan / find-or-import for the tailor chain)
+from server.extension_api import router as extension_router
+app.include_router(extension_router)
+
 # Initialize DB
 init_db()
 
@@ -256,8 +260,16 @@ def _get_stats():
         session.close()
 
 
-def _get_applications(status_filter=None, search=None, limit=500):
-    """Get applications with optional filtering."""
+def _get_applications(status_filter=None, search=None, limit=2000):
+    """Get applications with optional filtering.
+
+    The limit was 500 until 2026-08-03. The UI filters facets (location, status,
+    fit) client-side over whatever this returns, and the result set is ordered by
+    fit_score — so once the corpus outgrew 500, any job below the cut was
+    invisible to the location filter no matter what the user selected. Unscored
+    jobs sort last (nullslast), so freshly-scanned out-of-metro roles were
+    exactly the ones being hidden. 838 jobs serialise to ~4 MB in ~0.1s locally.
+    """
     session = get_session()
     try:
         query = (
@@ -433,7 +445,7 @@ async def set_agent_preferences(request: Request):
 
 
 @app.get("/api/applications")
-async def api_applications(status: str = None, search: str = None, limit: int = 500):
+async def api_applications(status: str = None, search: str = None, limit: int = 2000):
     return _get_applications(status_filter=status, search=search, limit=limit)
 
 

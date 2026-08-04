@@ -134,10 +134,9 @@ _DEGREE_LABELS = {
 }
 
 
-def _load_work_entries(resume_pref: str = "auto") -> list[dict]:
-    """Structured work-history entries from the routed base résumé YAML."""
-    with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
-        resume = yaml.safe_load(f) or {}
+def _work_entries_from(resume: dict) -> list[dict]:
+    """Structured work-history entries from a résumé dict (base YAML or a
+    tailored sidecar — both share the title/organization/dates/bullets shape)."""
     work = []
     for w in resume.get("work_experience", []) or []:
         d = _parse_date_range(w.get("dates", ""))
@@ -151,14 +150,35 @@ def _load_work_entries(resume_pref: str = "auto") -> list[dict]:
     return work
 
 
+def _load_work_entries(resume_pref: str = "auto") -> list[dict]:
+    """Structured work-history entries from the routed base résumé YAML."""
+    with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
+        return _work_entries_from(yaml.safe_load(f) or {})
+
+
+def _load_history_resume(resume_pref: str, company: str, job_title: str) -> dict:
+    """The résumé dict the history entries must mirror: the tailored sidecar
+    JSON for this company/role when one exists (so wizard panels match the
+    attached tailored .docx), else the routed base YAML."""
+    if company:
+        p = _tailored_resume_path(company, job_title)
+        side = p.with_suffix(".json") if p else None
+        if side and side.exists():
+            try:
+                return json.loads(side.read_text(encoding="utf-8")) or {}
+            except Exception as e:
+                logger.warning(f"[autofill] tailored sidecar unreadable ({side.name}): {e}")
+    with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 @router.get("/history")
-def get_history(resume_pref: str = "auto"):
+def get_history(resume_pref: str = "auto", company: str = "", job_title: str = ""):
     """Work/education/skills as structured entries for multi-entry ATS wizards."""
     profile = load_profile()
-    with open(_resume_yaml_path(resume_pref), encoding="utf-8") as f:
-        resume = yaml.safe_load(f) or {}
+    resume = _load_history_resume(resume_pref, company, job_title)
 
-    work = _load_work_entries(resume_pref)
+    work = _work_entries_from(resume)
 
     education = []
     for e in resume.get("education", []) or []:
@@ -202,15 +222,13 @@ def get_history(resume_pref: str = "auto"):
 _BASE_DOCX_CACHE = Path(__file__).parent.parent / "output" / "autofill"
 
 
-@router.get("/resume_file")
-def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = ""):
-    """Best résumé file for the extension to attach: the tailored .docx for a
-    matching application if one exists, otherwise a rendered base résumé."""
-    # 1. tailored materials for this company/title, newest first. Without a
-    #    company to match on, skip straight to the base résumé — the newest
-    #    tailored file could be for a totally unrelated role.
-    if company:
-      try:
+def _tailored_resume_path(company: str, job_title: str = "") -> Path | None:
+    """Tailored .docx for the best-matching application at this company, or
+    None. Without a company to match on there's nothing safe to return — the
+    newest tailored file could be for a totally unrelated role."""
+    if not company:
+        return None
+    try:
         from db.database import get_session
         from db.models import Application, Job
 
@@ -240,11 +258,21 @@ def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = "
             # a same-company résumé tailored to an unrelated role is worse than
             # the base résumé — require at least one meaningful title word
             if best is not None and (not jt or best_score >= 1):
-                return FileResponse(best, filename=best.name)
+                return best
         finally:
             s.close()
-      except Exception as e:
+    except Exception as e:
         logger.warning(f"[autofill] tailored-resume lookup failed: {e}")
+    return None
+
+
+@router.get("/resume_file")
+def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = ""):
+    """Best résumé file for the extension to attach: the tailored .docx for a
+    matching application if one exists, otherwise a rendered base résumé."""
+    tailored = _tailored_resume_path(company, job_title)
+    if tailored is not None:
+        return FileResponse(tailored, filename=tailored.name)
 
     # 2. user-provided résumé file (the polished PDF), if configured in the profile.
     #    Attach under its ORIGINAL filename (what the widget pill shows) — the
@@ -420,7 +448,11 @@ def health():
         profile_loaded = bool(load_profile())
     except Exception:
         profile_loaded = False
-    return {"ok": True, "ollama_up": check_ollama_health(), "profile_loaded": profile_loaded}
+    from utils.ollama_client import llm_status
+    st = llm_status()
+    return {"ok": True, "ollama_up": check_ollama_health(),
+            "llm_provider": st["provider"], "llm_model": st["model"],
+            "fallback_llm": st["openai_ready"], "profile_loaded": profile_loaded}
 
 
 def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: str,
@@ -475,8 +507,11 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
 @router.post("/plan")
 def plan(req: AutofillRequest):
     profile = dict(load_profile())
-    try:  # employment entries let the mapper fill work-history sections
-        profile["employment"] = _load_work_entries(req.resume_pref or "auto")
+    try:  # employment entries let the mapper fill work-history sections —
+        # from the tailored sidecar when one exists for this company/role,
+        # so inline experience blocks match the attached résumé
+        profile["employment"] = _work_entries_from(
+            _load_history_resume(req.resume_pref or "auto", req.company or "", req.job_title or ""))
     except Exception as e:
         logger.warning(f"[autofill] employment enrichment failed: {e}")
     archetypes = _archetype_config().get("archetypes", {})

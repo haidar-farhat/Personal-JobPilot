@@ -26,6 +26,14 @@ EXT = _ROOT / "browser-extension"
 BACKEND = "http://127.0.0.1:7777"
 FIXTURE = f"{BACKEND}/static/qa_greenhouse.html"
 
+
+def _profile():
+    """Live profile — expected values are read from it, never hardcoded here."""
+    r = httpx.get(f"{BACKEND}/api/autofill/profile", timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 # greenhouse.js + fill.js talk to the service worker; stub it onto the live API.
 CHROME_STUB = """
 window.chrome = window.chrome || {};
@@ -118,10 +126,12 @@ def test_greenhouse_react_select_commit_and_attach(page):
     assert chip("start-month--0") == "June"
     assert v("#start-year--0") == "2026"
     assert chip("w-end-month--0") is None                  # current role: end date skipped
-    assert v("#company--1") == "Rithum"
-    assert v("#title--1") == "Economic Consultant (Graduate Capstone)"
-    assert chip("start-month--1") == "March"
-    assert v("#w-end-year--1") == "2025"
+    assert v("#company--1") == "Behavioral Intervention Associates (BIA)"
+    assert v("#title--1") == "Behavioral Technician"
+    assert v("#company--2") == "Rithum"
+    assert v("#title--2") == "Economic Consultant (Graduate Capstone)"
+    assert chip("start-month--2") == "March"
+    assert v("#w-end-year--2") == "2025"
     assert v("#company--3") == "Reed College Finance & Investment Club"
 
     # ---- 2. flat pass: scan → live plan → apply ----
@@ -138,11 +148,14 @@ def test_greenhouse_react_select_commit_and_attach(page):
         [plan, fields],
     )
 
-    assert v("#first_name") == "Matthew"
-    assert v("#last_name") == "Cromaz"
-    assert v("#email") == "matthewcromaz37@gmail.com"
-    assert v("#phone") == "415-745-5603"
-    assert "linkedin.com/in/matthew-cromaz" in v("#question_linkedin")
+    # Expected values come from the live profile — this repo is public, so a
+    # real email or phone number must never be hardcoded into an assertion.
+    ident = _profile()["identity"]
+    assert v("#first_name") == ident["first_name"]
+    assert v("#last_name") == ident["last_name"]
+    assert v("#email") == ident["email"]
+    assert v("#phone") == ident["phone"]
+    assert v("#question_linkedin") == _profile()["links"]["linkedin"]
 
     # react-select COMMITS (chips), including the async location picker
     assert chip("country") == "United States"

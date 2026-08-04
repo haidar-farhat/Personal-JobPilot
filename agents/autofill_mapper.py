@@ -18,6 +18,26 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 # Free-text field types that should be routed to the essay/LLM path.
 ESSAY_TYPES = {"textarea"}
 
+# Fields asking for the CONTACT DETAILS OF SOMEONE WHO IS NOT THE APPLICANT.
+# Both halves are required. A question can name a relative without asking for
+# their details — "Are you a close relative of a government official (i.e.
+# child/step-child, spouse/partner, parent/guardian…)?" is a yes/no about HIM,
+# and blocking it on the word "spouse" alone would leave a required question
+# unanswered. Deliberately NOT "referral" (that is "how did you hear about us").
+_THIRD_PARTY = (
+    "emergency contact", "emergency", "next of kin", "spouse", "guardian",
+    "beneficiary", "dependent", "reference", "references", "referee",
+    "supervisor", "previous manager", "parent guardian",
+)
+_THIRD_PARTY_DETAIL = (
+    "name", "email", "e mail", "phone", "mobile", "telephone", "address",
+    "relationship", "contact number",
+)
+
+# Deterministic "leave this empty" — a repeat block beyond our history must
+# stay blank, never inherit entry 0's values or reach the LLM path.
+_SKIP = {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
+
 
 def normalize(s: str | None) -> str:
     """Lowercase, replace runs of non-alphanumerics with a single space, trim."""
@@ -54,8 +74,14 @@ def _match_option(desired: str, options: list[str]) -> str | None:
     return best[1] if best else None
 
 
-_DECLINE_HINTS = ("decline", "do not wish", "dont wish", "prefer not", "not to answer",
-                  "not wish", "choose not", "rather not", "not answer")
+# NB: normalize() turns "don't" into "don t", so "dont wish" can never fire —
+# "wish to answer" / "want to answer" are what actually catch the most common
+# EEO wording, "I don't wish to answer". Until 2026-08-03 that option only ever
+# matched via the loose token-overlap tier, which is now gated.
+_DECLINE_HINTS = ("decline", "do not wish", "prefer not", "not to answer",
+                  "not wish", "choose not", "rather not", "not answer",
+                  "wish to answer", "want to answer", "wish to disclose",
+                  "not to disclose", "not to identify", "not specified")
 
 # How ATSes spell "Yes"/"No" on consent questions: "Confirmed", "I acknowledge",
 # "No, I am not a current or former Government Official", …
@@ -76,6 +102,56 @@ _CHOICE_SYNONYMS = {
     "heterosexual": ["straight", "heterosexual straight"],
     "two or more races": ["two or more", "multiracial", "multiple races"],
 }
+
+
+def _is_anchored(short: str, long: str) -> bool:
+    """True when `long` is `short` plus a trailing qualifier, on a word boundary.
+
+    "asian" -> "asian not hispanic or latino"   yes, same answer, spelled longer
+    "economics" -> "home economics"             NO, a different subject
+    """
+    return long == short or long.startswith(short + " ")
+
+
+def _anchored_match(c: str, options: list[str]) -> str | None:
+    """The one option that is `c` plus a qualifier (either direction), or None.
+
+    Two equally-close candidates is a coin flip ("Bachelor of Science" against
+    both "…in Physics" and "…in Economics") — we refuse rather than pick a major
+    for him.
+    """
+    hits = [o for o in options
+            if _is_anchored(c, normalize(o)) or _is_anchored(normalize(o), c)]
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0]
+    # Tightest = fewest extra WORDS. Character length would rank
+    # "…in Physics" above "…in Economics" and quietly pick him a major.
+    hits.sort(key=lambda o: len(normalize(o).split()))
+    n0, n1 = (len(normalize(h).split()) for h in hits[:2])
+    return hits[0] if n0 != n1 else None
+
+
+def _token_overlap(nd: str, options: list[str]) -> str | None:
+    """Last tier, and the only one that can be confidently wrong — so it is gated.
+
+    An option qualifies only if it contains EVERY distinctive (>2 char) word of
+    the target. "Master of Science" shares just "science" with "Bachelor of
+    Science", so it no longer qualifies. Among qualifiers the tightest wins, and
+    a tie returns None so the field is flagged for review.
+    """
+    dwords = [w for w in nd.split() if len(w) > 2]
+    if not dwords:
+        return None
+    covering = [o for o in options if set(dwords) <= set(normalize(o).split())]
+    if not covering:
+        return None
+    if len(covering) == 1:
+        return covering[0]
+    covering.sort(key=lambda o: len(normalize(o).split()))
+    n0, n1 = (len(normalize(c).split()) for c in covering[:2])
+    return covering[0] if n0 != n1 else None
 
 
 def _match_choice(desired: str, options: list[str]) -> str | None:
@@ -108,19 +184,11 @@ def _match_choice(desired: str, options: list[str]) -> str | None:
             no = normalize(o)
             if any(no == h.strip() or no.startswith(h.strip() + " ") for h in hints):
                 return o
-    for c in cands:                                      # substring either way
-        for o in options:
-            no = normalize(o)
-            if c and (c in no or no in c):
-                return o
-    dwords = [w for w in nd.split() if len(w) > 2]       # best token overlap
-    best, best_n = None, 0
-    for o in options:
-        ow = set(normalize(o).split())
-        n = sum(1 for w in dwords if w in ow)
-        if n > best_n:
-            best, best_n = o, n
-    return best
+    for c in cands:                                      # substring, anchored only
+        hit = _anchored_match(c, options)
+        if hit:
+            return hit
+    return _token_overlap(nd, options)
 
 
 def choose_archetype(title, page_text, archetypes, resume_pref: str = "auto") -> str | None:
@@ -144,8 +212,12 @@ def choose_archetype(title, page_text, archetypes, resume_pref: str = "auto") ->
     return None
 
 
-def map_standard_field(field: dict, profile: dict) -> dict | None:
-    """Map a single field to a profile value deterministically, or None if unknown."""
+def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict | None:
+    """Map a single field to a profile value deterministically, or None if unknown.
+
+    entry_ord: which repeat of this field this is (build_plan counts label
+    repeats in DOM order) — entry N of an inline multi-entry section (Apple-
+    style experience/education blocks) maps to history entry N."""
     ftype = (field.get("type") or "text").lower()
     options = field.get("options") or []
 
@@ -160,6 +232,17 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
 
     nsection = normalize(field.get("section") or "")
 
+    # --- Whose details are these? ---
+    # "Emergency contact phone number" contains "phone"; "Reference's email
+    # address" contains "email". Every identity rule below keys off exactly
+    # those words, so without this guard the applicant's OWN contact details get
+    # written into fields asking about a DIFFERENT PERSON — a wrong answer that
+    # reads as perfectly filled-in. We hold no data about third parties, so the
+    # honest result is an empty box flagged for him to complete.
+    if _has_sub(norm + " " + nsection, *_THIRD_PARTY) and _has_sub(norm, *_THIRD_PARTY_DETAIL):
+        return {"value": None, "source": "deterministic", "confidence": 1.0,
+                "needs_review": True}
+
     ident = profile.get("identity", {})
     addr = profile.get("address", {})
     links = profile.get("links", {})
@@ -169,7 +252,9 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     ref = profile.get("referral", {})
     eeoc = profile.get("eeoc", {})
     edu = profile.get("education") or []
-    e0 = edu[0] if edu else {}
+    # entry_ord beyond our history → None (matched rules skip); no history at
+    # all → {} (rules fall through and return None, as before)
+    e0 = edu[entry_ord] if entry_ord < len(edu) else (None if edu else {})
     prefs = profile.get("preferences", {})
 
     def text(v):
@@ -306,6 +391,17 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     # Fills entry 0 (most recent). Multi-entry forms are handled by the
     # Greenhouse/Workday engines, which own their sections so we never clash.
     in_education = "education" in nsection or _has_sub(norm, "education")
+    # A repeat block beyond our education history: leave every field in it
+    # empty — duplicating entry 0 into it is worse than a blank.
+    if e0 is None:
+        if _has_tok(norm, "school", "university", "college", "institution", "institute",
+                    "gpa", "degree") \
+                or _has_sub(norm, "discipline", "major", "field of study", "area of study",
+                            "concentration", "grade point") \
+                or (in_education and (_has_tok(norm, "end", "graduation")
+                                      or _has_sub(norm, "date completed"))):
+            return dict(_SKIP)
+        e0 = {}
     # Token match, NOT substring: Coinbase's "were you referred … by a senior
     # leader at a prospective INSTITUTIONAL client?" must not become a school.
     if _has_tok(norm, "school", "university", "college", "institution", "institute") \
@@ -326,15 +422,26 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
     if in_education and (_has_tok(norm, "end", "graduation") or _has_sub(norm, "date completed")):
         return month_year(e0.get("end_month"), e0.get("end_year"))
 
-    # --- Employment / work-experience section (entry 0 = most recent role;
-    #     multi-entry sections are owned by the Greenhouse/Workday engines) ---
+    # --- Employment / work-experience section. Greenhouse/Workday multi-entry
+    #     sections are owned by their engines; inline repeats everywhere else
+    #     (Apple-style blocks) map entry N to history entry N via entry_ord ---
     work_hist = profile.get("employment") or []
-    w0 = work_hist[0] if work_hist else {}
+    w0 = work_hist[entry_ord] if entry_ord < len(work_hist) else None
     in_employment = _has_sub(nsection, "employment", "work experience", "work history", "experience") \
         or _has_sub(norm, "employment")
+    if in_employment and work_hist and w0 is None:
+        # repeat block beyond our history — leave the whole entry blank
+        if _has_tok(norm, "company", "employer", "organization", "title", "position",
+                    "role", "location", "start", "from", "end", "to") \
+                or _has_sub(norm, "currently work", "current position", "i currently",
+                            "present", "responsibilities", "duties", "description"):
+            return dict(_SKIP)
     if in_employment and w0:
         if _has_tok(norm, "company", "employer", "organization"):
             return option(w0.get("company")) if options else text(w0.get("company"))
+        # before title: "Role Description" / "Position Summary" carry title tokens
+        if _has_sub(norm, "responsibilities", "duties", "description", "summary"):
+            return text(w0.get("description"))
         if _has_tok(norm, "title", "position", "role"):
             return text(w0.get("title"))
         if _has_sub(norm, "currently work", "current position", "i currently", "present"):
@@ -343,8 +450,10 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
             return month_year(w0.get("start_month"), w0.get("start_year"))
         if _has_tok(norm, "end", "to") and not w0.get("current"):
             return month_year(w0.get("end_month"), w0.get("end_year"))
-        if _has_sub(norm, "responsibilities", "duties", "description"):
-            return text(w0.get("description"))
+        # the ROLE's location, not the applicant's home address (the generic
+        # location rule below would plant San Francisco on every entry)
+        if _has_tok(norm, "location") or _has_sub(norm, "city and state"):
+            return text(w0.get("location"))
 
     # --- Location (typeahead "Location (City)" / bare or "Current Location",
     #     plus phrasings that never say "location") ---
@@ -444,6 +553,13 @@ def map_standard_field(field: dict, profile: dict) -> dict | None:
         return yesno(prefs.get("privacy_acknowledged", True))
 
     # --- Source / referral ---
+    # A referral CODE / ID is an identifier the employee gave him, not a channel
+    # name. Answering "LinkedIn" here is a wrong answer in a field that gets
+    # checked against a real code, so leave it for him to paste in.
+    if _has_sub(norm, "referral", "referrer", "referred") and \
+            _has_tok(norm, "code", "id", "number", "token"):
+        return {"value": None, "source": "deterministic", "confidence": 1.0,
+                "needs_review": True}
     if _has_sub(norm, "how did you hear", "referral", "referred by") or _has_tok(norm, "source"):
         return option(ref.get("default_source"))
 
@@ -457,8 +573,17 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_es
     """
     out = []
     llm_used = 0
+    # Repeat counting for inline multi-entry sections: the Nth occurrence of
+    # the same (section, label, name-sans-digits) is entry N of that section.
+    # Digits are stripped so "Employer 2" / name="employer-2" count as repeats.
+    def _digitless(s):
+        return re.sub(r"\s+", " ", re.sub(r"\d+", " ", normalize(s))).strip()
+    seen: dict[tuple, int] = {}
     for f in fields:
-        m = map_standard_field(f, profile)
+        key = (_digitless(f.get("section")), _digitless(f.get("label")), _digitless(f.get("name")))
+        ord_ = seen.get(key, 0)
+        seen[key] = ord_ + 1
+        m = map_standard_field(f, profile, entry_ord=ord_)
         if m is not None:
             out.append({"id": f["id"], **m})
             continue
@@ -475,6 +600,14 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_es
                 val = essay_fn(f, {"archetype": archetype, "resume": resume_summary})
             except Exception:
                 val = None
+            # A field with a fixed vocabulary can only ever hold one of ITS
+            # options. The LLM answers in prose ("Hybrid, 3 days onsite"), so
+            # bind that answer back to a real option and drop it when it binds
+            # to nothing — an unbound value would be typed into the widget as
+            # free text, or matched loosely into whatever option looked close.
+            opts = f.get("options") or []
+            if val and opts:
+                val = _match_choice(val, opts)
             if val:
                 llm_used += 1
                 out.append({"id": f["id"], "value": val, "source": "llm",

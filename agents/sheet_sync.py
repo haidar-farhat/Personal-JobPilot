@@ -31,19 +31,29 @@ STATUS_LABELS = {
 
 # (field_key, header_label, [synonyms]) — order defines the canonical sheet layout
 # written to an empty sheet, and the priority when matching a field to a column.
+# Layout mirrors Bianca's "Job Log" workbook (2026-07-22).
+# NOTE: no bare "sent" synonym on date_applied — it would steal "Where it was sent".
 CANONICAL_COLUMNS = [
-    ("date_applied", "Date Applied", ["date applied", "applied", "date", "applied on", "application date"]),
-    ("company",      "Company",      ["company", "employer", "organization", "organisation", "org"]),
-    ("title",        "Title",        ["title", "role", "position", "job title", "job", "job role"]),
-    ("location",     "Location",     ["location", "city", "place", "where", "area"]),
-    ("pay",          "Pay",          ["pay", "salary", "comp", "compensation", "rate", "pay rate", "wage"]),
-    ("source",       "Source",       ["source", "via", "site", "board", "job board", "platform"]),
-    ("status",       "Status",       ["status", "stage", "result", "outcome", "progress"]),
-    ("fit",          "Fit",          ["fit", "score", "fit score", "match", "match score"]),
-    ("url",          "URL",          ["url", "link", "job link", "posting", "application link", "apply link", "job url", "listing"]),
-    ("notes",        "Notes",        ["notes", "note", "comments", "comment", "remarks"]),
+    ("date_applied", "Date Sent",           ["date sent", "date applied", "applied", "date", "applied on", "application date"]),
+    ("company",      "Company Name",        ["company", "company name", "employer", "organization", "organisation", "org"]),
+    ("title",        "Job Title",           ["job title", "title", "role", "position", "job", "job role"]),
+    ("source",       "Where it was sent",   ["where it was sent", "where", "source", "via", "site", "board", "job board", "platform"]),
+    ("url",          "Link to Application", ["link to application", "url", "link", "job link", "posting", "application link", "apply link", "job url", "listing"]),
+    ("interview",    "Interview?",          ["interview"]),
+    ("followup",     "Follow Up?",          ["follow up", "followup"]),
+    ("results",      "Results",             ["results", "result", "status", "stage", "outcome", "progress"]),
 ]
 
+# Match-only columns for sheets that still carry the old JobPilot layout —
+# recognized and filled when present, never written into a fresh header.
+LEGACY_COLUMNS = [
+    ("location", "Location", ["location", "city", "place", "area"]),
+    ("pay",      "Pay",      ["pay", "salary", "comp", "compensation", "rate", "pay rate", "wage"]),
+    ("fit",      "Fit",      ["fit", "score", "fit score", "match", "match score"]),
+    ("notes",    "Notes",    ["notes", "note", "comments", "comment", "remarks"]),
+]
+
+_ALL_COLUMNS = CANONICAL_COLUMNS + LEGACY_COLUMNS
 _FIELD_KEYS = [c[0] for c in CANONICAL_COLUMNS]
 
 
@@ -113,7 +123,7 @@ def map_headers(header_row):
         ht = _tokens(raw)
         if not ht:
             continue
-        for field, label, syns in CANONICAL_COLUMNS:
+        for field, label, syns in _ALL_COLUMNS:
             if field in used:
                 continue
             candidates = list(syns) + [label]
@@ -139,6 +149,7 @@ def build_row(app, header_map, ncols):
     value at ``header_map[field]`` and leaving unmapped columns blank."""
     row = [""] * ncols
     fit = app.get("fit")
+    status_key = app.get("status") or ""
     values = {
         "date_applied": app.get("date_applied") or "",
         "company": app.get("company") or "",
@@ -146,7 +157,12 @@ def build_row(app, header_map, ncols):
         "location": app.get("location") or "",
         "pay": app.get("pay") or "",
         "source": app.get("source") or "",
-        "status": app.get("status_label") or "",
+        # Bianca-style columns: Interview? flips to Yes once you reach that
+        # stage; Follow Up? is yours to fill by hand; Results stays blank
+        # while a fresh application is still pending.
+        "interview": "Yes" if status_key == "interview" else "",
+        "followup": "",
+        "results": "" if status_key == "applied" else (app.get("status_label") or ""),
         "fit": "" if fit is None else str(fit),
         "url": app.get("url") or "",
         "notes": app.get("notes") or "",

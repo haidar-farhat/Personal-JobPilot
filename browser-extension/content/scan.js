@@ -28,6 +28,17 @@
       const lab = par.querySelector("label, legend");
       if (lab && txt(lab.innerText)) return txt(lab.innerText);
     }
+    // Legacy table layouts (iCIMS, older Taleo) carry the label in the CELL TO
+    // THE LEFT with no <label> element at all: <td>Legal Name</td><td><input>.
+    // Without this the field falls back to its name ("fields[name]") and no
+    // rule matches, so the whole left column of an iCIMS form stays empty.
+    const cell = el.closest("td, th");
+    if (cell) {
+      const prev = cell.previousElementSibling;
+      // guard against a layout table whose left cell holds another input
+      if (prev && !prev.querySelector("input, select, textarea") && txt(prev.innerText))
+        return txt(prev.innerText).slice(0, 80);
+    }
     if (el.placeholder) return txt(el.placeholder);
     return el.name || el.id || "";
   }

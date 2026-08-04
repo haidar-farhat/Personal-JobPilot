@@ -21,6 +21,13 @@ EXT = _ROOT / "browser-extension"
 BACKEND = "http://127.0.0.1:7777"
 FIXTURE = f"{BACKEND}/static/qa_workday.html"
 
+
+def _profile():
+    """Live profile — expected values are read from it, never hardcoded here."""
+    r = httpx.get(f"{BACKEND}/api/autofill/profile", timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 CHROME_STUB = """
 window.chrome = window.chrome || {};
 window.chrome.runtime = {
@@ -70,6 +77,12 @@ def test_workday_multipage_advance_and_stop_at_submit(page):
         page.add_script_tag(path=str(EXT / "content" / f))
     # the hostname gate is environmental — the fixture serves from localhost
     page.evaluate("window.__jpafIsWorkday = () => true")
+
+    # Poison the Phone Extension field with the applicant's own number, the way
+    # a Workday résumé-parse does. Seeded here rather than in the fixture so the
+    # real number never lands in this public repo.
+    phone = _profile()["identity"]["phone"]
+    page.eval_on_selector("#mi-ext", "(e, v) => { e.value = v; }", phone)
 
     # ---- the widget's multi-page loop, driven explicitly ----
     pages, total, last_next = 1, 0, None
@@ -128,16 +141,17 @@ def test_workday_multipage_advance_and_stop_at_submit(page):
     assert wv(1, "companyName") == "Leasing Agent 415 (Compass)"
     assert wcur(1) is True
     assert (wdate(1, "startDate", "Month"), wdate(1, "startDate", "Year")) == ("06", "2026")
-    # slot 2: parser's "Rithum | Remote" mashup overwritten, end date landed
-    assert wv(2, "companyName") == "Rithum"
-    assert wv(2, "location") == "Remote"
-    assert (wdate(2, "endDate", "Month"), wdate(2, "endDate", "Year")) == ("06", "2025")
-    # slot 3: BIA demoted below the newer job; current → End Date group removed
-    assert wv(3, "companyName") == "Behavioral Intervention Associates (BIA)"
-    assert wv(3, "location") == "San Mateo, CA"
-    assert wcur(3) is True
+    # slot 2: BIA — the OTHER current job, right after the newest one
+    # (reverse-chron history order, 2026-07-22); current → End Date group removed
+    assert wv(2, "companyName") == "Behavioral Intervention Associates (BIA)"
+    assert wv(2, "location") == "San Mateo, CA"
+    assert wcur(2) is True
     assert page.eval_on_selector_all(
-        f"{wpanel(3)} [data-automation-id='formField-endDate']", "els => els.length") == 0
+        f"{wpanel(2)} [data-automation-id='formField-endDate']", "els => els.length") == 0
+    # slot 3: parser's "Rithum | Remote" mashup overwritten, end date landed
+    assert wv(3, "companyName") == "Rithum"
+    assert wv(3, "location") == "Remote"
+    assert (wdate(3, "endDate", "Month"), wdate(3, "endDate", "Year")) == ("06", "2025")
     # slot 4: ADDED via Add Another for the item the parser never created
     assert wv(4, "companyName").startswith("Reed College")
     assert (wdate(4, "endDate", "Month"), wdate(4, "endDate", "Year")) == ("12", "2023")
@@ -162,13 +176,14 @@ def test_workday_multipage_advance_and_stop_at_submit(page):
     assert "United States of America (+1)" in cpc_text
     assert "Afghanistan" not in cpc_text
     assert v("#mi-first") == "Matthew"
-    assert v("#mi-addr1") == "1342 36th Avenue"
+    assert v("#mi-addr1") == _profile()["address"]["street"]
     # stale full address parked in Line 2 must be CLEARED
     assert v("#mi-addr2") == ""
     assert v("#mi-city") == "San Francisco"
     assert v("#mi-postal") == "94122"
-    # pre-filled "(415) 745-5603" rewritten to bare national digits
-    assert v("#mi-phone") == "4157455603"
+    # the pre-filled formatted number is rewritten to bare national digits
+    import re as _re
+    assert v("#mi-phone") == _re.sub(r"\D", "", _profile()["identity"]["phone"])
     # the extension field ships pre-poisoned with the phone number — must be CLEARED
     assert v("#mi-ext") == ""
 

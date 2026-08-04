@@ -1,10 +1,18 @@
-"""Ollama API wrapper for JobPilot LLM calls."""
+"""LLM client for JobPilot: local Ollama first, optional OpenAI fallback.
+
+Every LLM consumer (autofill essays, cover letters, tailoring, ranking) routes
+through generate_json / generate_text here, so the fallback covers all of them.
+Fallback fires only when Ollama is unreachable or returns unusable output, and
+only when OPENAI_API_KEY is set (env var — never in the tracked settings.yaml).
+"""
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
+import requests
 import yaml
 import ollama
 
@@ -61,21 +69,7 @@ def _resolve_model(client, target: str) -> str:
     return resolved
 
 
-def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
-    """Send a prompt to Ollama and parse the JSON response.
-
-    Args:
-        prompt: The user prompt to send.
-        system_prompt: Optional system prompt for context.
-        max_retries: Number of retries if JSON parsing fails.
-
-    Returns:
-        Parsed JSON dict from the model response.
-
-    Raises:
-        ConnectionError: After all retries are exhausted on network failure.
-        ValueError: After all retries are exhausted on JSON parse failure.
-    """
+def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
@@ -136,16 +130,7 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
     )
 
 
-def generate_text(prompt: str, system_prompt: str = "") -> str:
-    """Send a prompt to Ollama and return plain text response.
-
-    Args:
-        prompt: The user prompt to send.
-        system_prompt: Optional system prompt for context.
-
-    Returns:
-        The model's text response.
-    """
+def _ollama_generate_text(prompt: str, system_prompt: str = "") -> str:
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
@@ -165,6 +150,124 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
         options={"temperature": 0.4, "num_predict": 4096, "num_ctx": num_ctx},
     )
     return response.message.content.strip()
+
+
+# ============================================================
+# OpenAI provider (official API, key from env — see settings.yaml `llm`)
+# ============================================================
+
+def _llm_cfg() -> dict:
+    return _load_config().get("llm", {}) or {}
+
+
+def _openai_ready() -> bool:
+    return bool(os.environ.get("OPENAI_API_KEY"))
+
+
+def _openai_primary() -> bool:
+    """OpenAI-first when configured AND the key is actually present."""
+    return _llm_cfg().get("provider", "ollama") == "openai" and _openai_ready()
+
+
+def llm_status() -> dict:
+    """What's actually serving requests right now (for /api/autofill/health)."""
+    primary = _openai_primary()
+    return {
+        "provider": "openai" if primary else "ollama",
+        "openai_ready": _openai_ready(),
+        "model": _llm_cfg().get("openai_model", "gpt-5.6-terra") if primary else None,
+    }
+
+
+def llm_fallback_available() -> bool:
+    """True when the *other* provider can catch a failure."""
+    return _openai_ready() if not _openai_primary() else True  # ollama is always installed here
+
+
+def _openai_chat(prompt: str, system_prompt: str, json_mode: bool,
+                 temperature: float) -> str:
+    cfg = _llm_cfg()
+    model = cfg.get("openai_model", "gpt-5.6-terra")
+    messages = []
+    sys_content = system_prompt or ""
+    if json_mode and "json" not in (sys_content + prompt).lower():
+        # OpenAI's json_object mode requires the word JSON in the messages
+        sys_content = (sys_content + "\nRespond with a single JSON object.").strip()
+    if sys_content:
+        messages.append({"role": "system", "content": sys_content})
+    messages.append({"role": "user", "content": prompt})
+    body = {"model": model, "messages": messages, "temperature": temperature,
+            "max_completion_tokens": 4096}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+        json=body, timeout=cfg.get("openai_timeout", 120),
+    )
+    if r.status_code != 200:
+        raise ConnectionError(f"OpenAI fallback HTTP {r.status_code}: {r.text[:300]}")
+    content = r.json()["choices"][0]["message"]["content"] or ""
+    logger.info(f"[llm] served by OpenAI fallback ({model})")
+    return content.strip()
+
+
+def _openai_json(prompt: str, system_prompt: str) -> dict:
+    content = _openai_chat(prompt, system_prompt, json_mode=True, temperature=0.3)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start, end = content.find("{"), content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+        raise
+
+
+def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
+    """JSON completion via the configured provider chain (settings.yaml `llm`).
+
+    provider "openai" + key set: GPT-5.6 first, Ollama catches failures.
+    Otherwise: Ollama first, OpenAI catches failures when a key is set.
+    Raises ConnectionError/ValueError only after the whole chain failed.
+    """
+    if _openai_primary():
+        try:
+            return _openai_json(prompt, system_prompt)
+        except Exception as e:
+            logger.warning(f"[llm] OpenAI primary failed ({e}) — falling back to Ollama")
+            return _ollama_generate_json(prompt, system_prompt, max_retries)
+    try:
+        return _ollama_generate_json(prompt, system_prompt, max_retries)
+    except (ConnectionError, ValueError) as ollama_err:
+        if not _openai_ready():
+            raise
+        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying OpenAI fallback")
+        try:
+            return _openai_json(prompt, system_prompt)
+        except Exception as e:
+            logger.error(f"[llm] OpenAI fallback also failed: {e}")
+            raise ollama_err
+
+
+def generate_text(prompt: str, system_prompt: str = "") -> str:
+    """Text completion via the configured provider chain (settings.yaml `llm`)."""
+    if _openai_primary():
+        try:
+            return _openai_chat(prompt, system_prompt, json_mode=False, temperature=0.4)
+        except Exception as e:
+            logger.warning(f"[llm] OpenAI primary failed ({e}) — falling back to Ollama")
+            return _ollama_generate_text(prompt, system_prompt)
+    try:
+        return _ollama_generate_text(prompt, system_prompt)
+    except Exception as ollama_err:
+        if not _openai_ready():
+            raise
+        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying OpenAI fallback")
+        try:
+            return _openai_chat(prompt, system_prompt, json_mode=False, temperature=0.4)
+        except Exception as e:
+            logger.error(f"[llm] OpenAI fallback also failed: {e}")
+            raise ollama_err
 
 
 def check_ollama_health() -> bool:

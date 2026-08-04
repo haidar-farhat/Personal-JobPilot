@@ -20,8 +20,13 @@
     "heterosexual": ["straight"],
     "two or more races": ["two or more", "multiracial"],
   };
-  const DECLINE_HINTS = ["decline", "do not wish", "dont wish", "prefer not",
-                         "not to answer", "not wish", "choose not", "rather not"];
+  // NB: norm() turns "don't" into "don t", so a "dont wish" hint can never fire.
+  // "wish to answer" is what actually catches "I don't wish to answer", the most
+  // common EEO decline wording.
+  const DECLINE_HINTS = ["decline", "do not wish", "prefer not",
+                         "not to answer", "not wish", "choose not", "rather not",
+                         "wish to answer", "want to answer", "wish to disclose",
+                         "not to disclose", "not to identify", "not specified"];
   // How consent questions spell Yes/No: ["Confirmed"], ["I acknowledge"],
   // ["No, I am not a current or former Government Official", …]
   const AFFIRM_HINTS = ["confirmed", "confirm", "i confirm", "i agree", "agree",
@@ -53,18 +58,50 @@
       if (o) return o.el;
     }
     for (const c of cands) {
-      const o = opts.find((x) => x.t && (x.t.includes(c) || c.includes(x.t)));
-      if (o) return o.el;
+      const o = anchoredMatch(c, opts);
+      if (o) return o;
     }
     if (strict) return null;
-    const dw = nv.split(" ").filter((w) => w.length > 2);  // best token overlap
-    let best = null, bn = 0;
-    for (const x of opts) {
+    return tokenOverlap(nv, opts);
+  }
+
+  // `long` is `short` plus a trailing qualifier, on a word boundary:
+  //   "asian" -> "asian not hispanic or latino"  yes — same answer, spelled longer
+  //   "economics" -> "home economics"            NO  — a different subject
+  const isAnchored = (short, long) => long === short || long.startsWith(short + " ");
+
+  // The one option that is `c` plus a qualifier (either direction), or null.
+  // Two equally-close candidates is a coin flip ("Bachelor of Science" against
+  // both "…in Physics" and "…in Economics") — refuse rather than pick a major.
+  function anchoredMatch(c, opts) {
+    if (!c) return null;
+    const hits = opts.filter((x) => x.t && (isAnchored(c, x.t) || isAnchored(x.t, c)));
+    if (!hits.length) return null;
+    if (hits.length === 1) return hits[0].el;
+    // tightest = fewest extra WORDS; character length would rank "…in Physics"
+    // above "…in Economics" and quietly commit a major he didn't study
+    hits.sort((a, b) => a.t.split(" ").length - b.t.split(" ").length);
+    const n0 = hits[0].t.split(" ").length, n1 = hits[1].t.split(" ").length;
+    return n0 !== n1 ? hits[0].el : null;
+  }
+
+  // Last tier, and the only one that can be confidently WRONG — so it is gated.
+  // An option qualifies only if it contains EVERY distinctive (>2 char) word of
+  // the target: "Master of Science" shares just "science" with "Bachelor of
+  // Science", so it no longer qualifies. Ties return null and the field is
+  // flagged for review instead of filled with a plausible wrong answer.
+  function tokenOverlap(nv, opts) {
+    const dw = nv.split(" ").filter((w) => w.length > 2);
+    if (!dw.length) return null;
+    const covering = opts.filter((x) => {
       const ow = new Set(x.t.split(" "));
-      const k = dw.filter((w) => ow.has(w)).length;
-      if (k > bn) { best = x.el; bn = k; }
-    }
-    return best;
+      return dw.every((w) => ow.has(w));
+    });
+    if (!covering.length) return null;
+    if (covering.length === 1) return covering[0].el;
+    covering.sort((a, b) => a.t.split(" ").length - b.t.split(" ").length);
+    const n0 = covering[0].t.split(" ").length, n1 = covering[1].t.split(" ").length;
+    return n0 !== n1 ? covering[0].el : null;
   }
 
   function bestOption(value) {
@@ -242,6 +279,34 @@
     }
   }
 
+  // "Select one" / "--" / "" are all the widget saying nothing is chosen yet.
+  const PLACEHOLDER = /^(|select|select one|select an option|choose|choose one|please select|none|n a)$/;
+
+  // Has the USER (or the ATS, from a résumé parse) already answered this?
+  // Autofill runs on half-completed forms constantly — Workday step 2, a page
+  // you started by hand — and silently replacing a deliberate "No" with "Yes"
+  // on a work-authorization question is the worst thing this extension could
+  // do. Their answer always wins; we only fill blanks.
+  function alreadyAnswered(el) {
+    const tag = el.tagName.toLowerCase();
+    const type = (el.type || "").toLowerCase();
+    if (type === "radio" || type === "checkbox") {
+      const group = el.name
+        ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      return group.some((r) => r.checked);
+    }
+    if (tag === "select") {
+      const opt = el.selectedOptions && el.selectedOptions[0];
+      return !PLACEHOLDER.test(norm(opt ? opt.text : el.value));
+    }
+    // ARIA dropdowns (Workday) render the choice as the control's own text
+    if (!["input", "textarea"].includes(tag)) return !PLACEHOLDER.test(norm(el.innerText || ""));
+    // react-select keeps transient typed text in the input — the chip is truth
+    if (el.getAttribute("role") === "combobox" ||
+        el.getAttribute("aria-autocomplete") === "list") return comboCommitted(el);
+    return !!(el.value || "").trim();
+  }
+
   function setNative(el, value) {
     const proto = el.tagName === "TEXTAREA"
       ? window.HTMLTextAreaElement.prototype
@@ -351,7 +416,7 @@
   }
 
   window.__jpafApply = async function (plan) {
-    let filled = 0, review = 0, fileFlags = 0, resumeAttached = 0, coverAttached = 0;
+    let filled = 0, review = 0, fileFlags = 0, resumeAttached = 0, coverAttached = 0, kept = 0;
     const metaById = new Map((plan._scanMeta || []).map((m) => [m.id, m]));
     const fileFieldCount = (plan.fields || []).filter((x) => x.source === "file").length;
     const comboRetries = [];
@@ -394,6 +459,8 @@
         if (f.needs_review) { mark(el, false); review++; noteReview(f, el); }
         continue;
       }
+      // their answer wins — never overwrite one that is already there
+      if (alreadyAnswered(el)) { kept++; continue; }
       try {
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
@@ -450,13 +517,14 @@
 
     toast(
       `JobPilot filled ${filled} field(s)` +
+      (kept ? ` · kept ${kept} you'd answered` : "") +
       (resumeAttached ? " · résumé attached ✓" : "") +
       (coverAttached ? " · cover letter attached ✓" : "") +
       (fileFlags ? " · attach file manually" : "") +
       (review ? ` · ${review} need review` : "") +
       " — review & click Apply"
     );
-    return { filled, needs_review: review, file_flags: fileFlags,
+    return { filled, needs_review: review, file_flags: fileFlags, kept,
              resume_attached: resumeAttached, cover_attached: coverAttached,
              review_fields: reviewFields.slice(0, 15) };
   };

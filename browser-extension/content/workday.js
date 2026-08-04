@@ -110,33 +110,12 @@
       .filter((o) => o.getClientRects().length > 0);
   }
 
-  // EEO-tolerant option matching (mirrors fill.js / autofill_mapper._match_choice)
-  const OPTION_SYNONYMS = {
-    "mobile": ["cellular", "cell"], "united states": ["united states of america", "usa"],
-    "male": ["man"], "female": ["woman"], "heterosexual": ["straight"],
-    "two or more races": ["two or more", "multiracial"],
-  };
-  const DECLINE_HINTS = ["decline", "do not wish", "dont wish", "prefer not",
-                         "not to answer", "not wish", "choose not", "rather not"];
-
-  function chooseChoice(value, opts) {  // opts: [{el, t:normText}]
-    const nv = norm(value);
-    const cands = [nv, ...(OPTION_SYNONYMS[nv] || [])];
-    for (const c of cands) { const o = opts.find((x) => x.t === c); if (o) return o.el; }
-    if (/^(decline|prefer not|do not wish|dont wish|i do not wish|i dont wish)/.test(nv)) {
-      const o = opts.find((x) => DECLINE_HINTS.some((h) => x.t.includes(h))); if (o) return o.el;
-    }
-    if (nv === "yes" || nv === "no") {
-      let o = opts.find((x) => x.t.split(" ")[0] === nv);
-      if (!o && nv === "no") o = opts.find((x) => x.t.startsWith("not "));
-      if (o) return o.el;
-    }
-    for (const c of cands) { const o = opts.find((x) => x.t && (x.t.includes(c) || c.includes(x.t))); if (o) return o.el; }
-    const dw = nv.split(" ").filter((w) => w.length > 2);
-    let best = null, bn = 0;
-    for (const x of opts) { const ow = new Set(x.t.split(" ")); const k = dw.filter((w) => ow.has(w)).length; if (k > bn) { best = x.el; bn = k; } }
-    return best;
-  }
+  // Option matching lives in fill.js and is shared by every engine — one gate,
+  // one place, one test table (tests/js/choice_matching.mjs). This file used to
+  // carry its own weaker copy that would commit "Master of Science" for a
+  // Bachelor's. Resolved at CALL time, not load time: the e2e harness injects
+  // workday.js before fill.js, and both are present by the time anything runs.
+  const chooseChoice = (value, opts) => window.__jpafHelpers.chooseChoice(value, opts);
 
   function bestOption(value) {
     return chooseChoice(value, visibleOptions().map((el) => ({ el, t: norm(el.innerText) })));
@@ -928,13 +907,15 @@
   window.__jpafWorkdayRun = async function () {
     const stats = { filled: 0, sections: {} };
     if (!window.__jpafIsWorkday()) return stats;
-    const history = await send({ cmd: "history" });
-    if (!history || history.error) { progress("wizard", "fail", "backend offline"); return stats; }
-    const profile = await send({ cmd: "profile" });
     const ctx = {
       company: (location.hostname.split(".")[0] || "").replace(/[^a-z0-9]/gi, " "),
       title: ((document.querySelector("h1, h2") || {}).innerText || document.title || "").slice(0, 120),
     };
+    // company/title let the backend serve the TAILORED resume's entries, so
+    // experience panels match the attached .docx
+    const history = await send({ cmd: "history", company: ctx.company, title: ctx.title });
+    if (!history || history.error) { progress("wizard", "fail", "backend offline"); return stats; }
+    const profile = await send({ cmd: "profile" });
     const steps = [
       ["contact", () => fillMyInfo(profile)],
       ["work", () => fillWork(history)],

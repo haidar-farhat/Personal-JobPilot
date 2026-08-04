@@ -73,75 +73,103 @@
     root = hostEl.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        *{ box-sizing:border-box; margin:0; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; }
-        .dock{ display:flex; flex-direction:column-reverse; align-items:flex-end; gap:8px; }
-        .bar{ display:flex; align-items:center; gap:8px; background:#0b1220; color:#fff;
-          border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:6px 8px 6px 12px;
-          box-shadow:0 16px 44px -12px rgba(0,0,0,.6); flex-wrap:wrap; justify-content:flex-end; }
-        .dot{ width:8px; height:8px; border-radius:50%; background:#94a3b8; flex:none; }
-        .dot.up{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.22); }
+        /* One light card, one green action. Everything secondary lives inside
+           the panel so the resting state is a single button, not a toolbar. */
+        *{ box-sizing:border-box; margin:0;
+           font-family:-apple-system,'Segoe UI',Inter,Roboto,system-ui,sans-serif; }
+        :host{ --g:#05a67a; --g2:#04916a; --bg:#fff; --fg:#0f172a; --mut:#64748b;
+               --bd:#e4e8ee; --sub:#f6f8fa; --amb:#b45309; --ambg:#fff8ec; --ambd:#fde3b8; }
+        @media (prefers-color-scheme:dark){
+          :host{ --bg:#151a22; --fg:#e9edf3; --mut:#98a3b3; --bd:#2a323d; --sub:#1d232c;
+                 --amb:#f0b45e; --ambg:#2a2113; --ambd:#4a3a1c; }
+        }
+        .dock{ display:flex; flex-direction:column-reverse; align-items:flex-end; gap:10px; }
+        .bar{ display:flex; align-items:center; gap:6px; background:var(--bg);
+          border:1px solid var(--bd); border-radius:999px; padding:5px 5px 5px 12px;
+          box-shadow:0 6px 24px -6px rgba(15,23,42,.18), 0 1px 3px rgba(15,23,42,.08); }
+        .dot{ width:7px; height:7px; border-radius:50%; background:#cbd5e1; flex:none; }
+        .dot.up{ background:var(--g); }
         .dot.down{ background:#ef4444; }
-        .go{ border:0; cursor:pointer; color:#fff; font-weight:700; font-size:13px;
-          background:linear-gradient(135deg,#3b82f6,#6d28d9); border-radius:999px; padding:8px 15px;
-          white-space:nowrap; }
-        .go:hover{ filter:brightness(1.08); }
-        .go:disabled{ opacity:.65; cursor:default; }
-        .more{ border:0; cursor:pointer; background:rgba(255,255,255,.10); color:#fff; font-size:12px;
-          width:26px; height:26px; border-radius:50%; line-height:1; }
-        .more:hover{ background:rgba(255,255,255,.2); }
-        .panel{ width:240px; background:#0b1220; color:#fff; border:1px solid rgba(255,255,255,.14);
-          border-radius:14px; padding:12px 13px; box-shadow:0 16px 44px -12px rgba(0,0,0,.6);
-          display:flex; flex-direction:column; gap:9px; }
+        .go{ border:0; cursor:pointer; color:#fff; font-weight:600; font-size:13px;
+          background:var(--g); border-radius:999px; padding:8px 16px; white-space:nowrap;
+          letter-spacing:-.1px; }
+        .go:hover{ background:var(--g2); }
+        .go:disabled{ opacity:.6; cursor:default; }
+        .more{ border:0; cursor:pointer; background:transparent; color:var(--mut); font-size:11px;
+          width:24px; height:24px; border-radius:50%; line-height:1; }
+        .more:hover{ background:var(--sub); color:var(--fg); }
+        .panel{ width:274px; background:var(--bg); color:var(--fg); border:1px solid var(--bd);
+          border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:12px;
+          box-shadow:0 12px 36px -8px rgba(15,23,42,.22), 0 1px 3px rgba(15,23,42,.08); }
         .panel[hidden]{ display:none; }
-        label{ font-size:11px; color:#9fb0cc; font-weight:600; }
-        select{ width:100%; padding:7px 9px; border-radius:9px; border:1px solid rgba(255,255,255,.16);
-          background:#111a2e; color:#fff; font-size:12.5px; outline:none; }
-        .res{ font-size:12px; color:#cdd8ec; min-height:16px; line-height:1.45; }
-        .res .amber{ color:#fbbf24; } .res .err{ color:#fca5a5; }
-        .steps{ display:flex; flex-direction:column; gap:5px; }
+        .head{ display:flex; align-items:center; gap:8px; }
+        .logo{ width:22px; height:22px; border-radius:7px; background:var(--g); color:#fff;
+          font-size:11px; font-weight:700; display:flex; align-items:center;
+          justify-content:center; flex:none; letter-spacing:-.3px; }
+        .ttl{ font-weight:650; font-size:13.5px; letter-spacing:-.2px; }
+        .head .dot{ margin-left:auto; }
+        label{ font-size:11px; color:var(--mut); font-weight:600; display:block; margin-bottom:5px; }
+        select{ width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--bd);
+          background:var(--sub); color:var(--fg); font-size:12.5px; outline:none; cursor:pointer; }
+        select:focus{ border-color:var(--g); }
+        .res{ font-size:12px; color:var(--mut); min-height:16px; line-height:1.5; }
+        .res .amber{ color:var(--amb); font-weight:600; } .res .err{ color:#dc2626; }
+        .res b{ color:var(--fg); }
+        .steps{ display:flex; flex-direction:column; gap:7px; }
         .steps[hidden]{ display:none; }
-        .step{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:#cdd8ec; }
+        .step{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--mut); }
         .step .ic{ width:16px; height:16px; border-radius:50%; flex:none; display:flex;
-          align-items:center; justify-content:center; font-size:10px; font-weight:800;
-          background:rgba(255,255,255,.12); color:#9fb0cc; }
-        .step.run .ic{ background:#1d4ed8; color:#fff; animation:jp-pulse 1s infinite; }
-        .step.done .ic{ background:#16a34a; color:#fff; }
-        .step.skip .ic{ background:rgba(255,255,255,.10); color:#7e8aa6; }
-        .step.fail .ic{ background:#b45309; color:#fff; }
-        .step .nt{ margin-left:auto; font-size:11px; color:#7e8aa6; max-width:90px;
+          align-items:center; justify-content:center; font-size:9px; font-weight:700;
+          background:var(--sub); color:var(--mut); border:1px solid var(--bd); }
+        .step.run .ic{ background:var(--g); color:#fff; border-color:var(--g);
+          animation:jp-pulse 1s infinite; }
+        .step.done{ color:var(--fg); }
+        .step.done .ic{ background:var(--g); color:#fff; border-color:var(--g); }
+        .step.skip .ic{ opacity:.6; }
+        .step.fail .ic{ background:var(--amb); color:#fff; border-color:var(--amb); }
+        .step .nt{ margin-left:auto; font-size:11px; color:var(--mut); max-width:96px;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        @keyframes jp-pulse{ 50%{ opacity:.55; } }
-        .hide{ border:0; background:transparent; color:#7e8aa6; cursor:pointer; font-size:11.5px;
-          text-align:left; padding:0; }
-        .hide:hover{ color:#cdd8ec; text-decoration:underline; }
-        .ttl{ font-weight:800; font-size:12.5px; letter-spacing:-.2px; }
-        .rev{ display:flex; flex-direction:column; gap:4px; border-top:1px solid rgba(255,255,255,.12);
-          padding-top:8px; max-height:150px; overflow-y:auto; }
+        @keyframes jp-pulse{ 50%{ opacity:.5; } }
+        .rev{ display:flex; flex-direction:column; gap:5px; border-top:1px solid var(--bd);
+          padding-top:11px; max-height:150px; overflow-y:auto; }
         .rev[hidden]{ display:none; }
-        .rttl{ font-size:11px; color:#fbbf24; font-weight:700; }
-        .rl{ border:0; cursor:pointer; background:rgba(251,191,36,.10); color:#fde68a; font-size:11.5px;
-          text-align:left; padding:5px 8px; border-radius:7px; overflow:hidden; text-overflow:ellipsis;
-          white-space:nowrap; }
-        .rl:hover{ background:rgba(251,191,36,.22); }
-        .rfile{ display:flex; align-items:center; gap:7px; font-size:11.5px; margin-top:5px; }
-        .rfname{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#cdd8ec; }
-        .rswap{ border:0; cursor:pointer; background:rgba(255,255,255,.10); color:#cdd8ec;
-          font-size:11px; padding:3px 9px; border-radius:7px; flex:none; }
-        .rswap:hover{ background:rgba(255,255,255,.2); }
+        .rttl{ font-size:11px; color:var(--amb); font-weight:700; }
+        .rl{ border:1px solid var(--ambd); cursor:pointer; background:var(--ambg); color:var(--amb);
+          font-size:11.5px; text-align:left; padding:6px 9px; border-radius:8px; overflow:hidden;
+          text-overflow:ellipsis; white-space:nowrap; }
+        .rl:hover{ filter:brightness(.97); }
+        .rfile{ display:flex; align-items:center; gap:7px; font-size:11.5px; margin-top:7px; }
+        .rfname{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--mut); }
+        .rswap{ border:1px solid var(--bd); cursor:pointer; background:var(--bg); color:var(--fg);
+          font-size:11px; padding:4px 10px; border-radius:8px; flex:none; font-weight:600; }
+        .rswap:hover{ background:var(--sub); }
         .rswap[hidden]{ display:none; }
+        /* footer: the secondary actions that used to crowd the resting pill */
+        .foot{ display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+          border-top:1px solid var(--bd); padding-top:11px; }
+        .lnk{ border:0; background:transparent; color:var(--mut); cursor:pointer; font-size:11.5px;
+          padding:2px 0; }
+        .lnk:hover{ color:var(--fg); text-decoration:underline; }
+        .lnk.sep{ color:var(--bd); cursor:default; }
+        .lnk.sep:hover{ color:var(--bd); text-decoration:none; }
+        .applied{ border:1px solid var(--bd); background:var(--bg); color:var(--fg); cursor:pointer;
+          font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:8px; }
+        .applied:hover{ background:var(--sub); }
       </style>
       <div class="dock">
         <div class="bar">
           <span class="dot" id="dot" title="JobPilot status"></span>
-          <button class="go" id="go">⚡ Autofill</button>
-          <button class="go" id="applied" title="Record that you submitted this application in JobPilot">✓ Mark applied</button>
-          <button class="more" id="more" title="Options">⌄</button>
+          <button class="go" id="go">Autofill</button>
+          <button class="more" id="more" title="Options" aria-label="Options">⌄</button>
         </div>
         <div class="panel" id="panel" hidden>
-          <div class="ttl">JobPilot Autofill</div>
+          <div class="head">
+            <span class="logo">JP</span>
+            <span class="ttl">JobPilot Autofill</span>
+          </div>
           <div class="steps" id="steps" hidden></div>
           <div>
-            <label>Résumé</label>
+            <label for="resume">Résumé</label>
             <select id="resume">
               <option value="auto">Auto (match the role)</option>
               <option value="ai">AI / data résumé</option>
@@ -155,8 +183,12 @@
           </div>
           <div class="res" id="res">Fills the form — never submits. You review &amp; click Apply.</div>
           <div class="rev" id="review" hidden></div>
-          <button class="hide" id="hide">Hide on this page</button>
-          <button class="hide" id="off" title="Stop the pill from appearing on any site — nothing fills until you re-enable it from the JobPilot toolbar popup.">Turn off autofill (all sites)</button>
+          <div class="foot">
+            <button class="applied" id="applied" title="Record that you submitted this application in JobPilot">Mark applied</button>
+            <button class="lnk" id="hide">Hide here</button>
+            <span class="lnk sep">·</span>
+            <button class="lnk" id="off" title="Stop the pill from appearing on any site — nothing fills until you re-enable it from the JobPilot toolbar popup.">Turn off</button>
+          </div>
         </div>
       </div>`;
     document.documentElement.appendChild(hostEl);
@@ -176,7 +208,7 @@
         appliedBtn.disabled = false;
         setTimeout(() => {
           if (root.getElementById("applied") === appliedBtn)
-            appliedBtn.textContent = "✓ Mark applied";
+            appliedBtn.textContent = "Mark applied";
         }, 4000);
       }
     };
@@ -364,6 +396,7 @@
       filled: (stats.filled || 0) + wizardFilled,
       needs_review: stats.needs_review || 0,
       file_flags: stats.file_flags || 0,
+      kept: stats.kept || 0,
       scanned: fields.length,
       offline: !!plan._offline,
       wizard: wizardFilled,
@@ -394,12 +427,12 @@
 
       // Fill this page; on Workday keep advancing (Next / Save and Continue —
       // NEVER Submit or the review step) and filling each new step.
-      let total = 0, review = 0, fileFlags = 0, offline = false, sawAny = 0, pages = 0;
+      let total = 0, review = 0, fileFlags = 0, kept = 0, offline = false, sawAny = 0, pages = 0;
       const reviewItems = [];
       const MAX_PAGES = 7;
       while (true) {
         const r = await fillCurrentPage(resumePref, mode);
-        total += r.filled; review += r.needs_review; fileFlags += r.file_flags;
+        total += r.filled; review += r.needs_review; fileFlags += r.file_flags; kept += r.kept || 0;
         reviewItems.push(...(r.review_fields || []));
         offline = offline || !!r.offline;
         sawAny += r.scanned + r.filled;
@@ -426,12 +459,13 @@
       setRes(
         `<b>Filled ${total}</b> field(s)` +
         (pages > 1 ? ` across ${pages} pages` : "") +
+        (kept ? ` · kept ${kept} you'd already answered` : "") +
         (fileFlags ? ` · attach file manually` : "") +
         (review ? ` · <span class="amber">${review} need review</span>` : "") +
         (offline ? ` · offline mode` : "")
       );
       renderReview(reviewItems);
-      setTimeout(() => { if (root.getElementById("go") === go) go.textContent = "⚡ Autofill"; }, 4000);
+      setTimeout(() => { if (root.getElementById("go") === go) go.textContent = "Autofill"; }, 4000);
     } catch (e) {
       root.getElementById("panel").hidden = false;
       setRes(`<span class="err">${e.message || e}</span>`);
@@ -487,7 +521,7 @@
     if (location.href !== lastHref) {
       lastHref = location.href;
       const b = root && root.getElementById("applied");
-      if (b) { b.disabled = false; b.textContent = "✓ Mark applied"; }
+      if (b) { b.disabled = false; b.textContent = "Mark applied"; }
     }
     maybeShow();
   }, 2000);

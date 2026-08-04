@@ -43,9 +43,17 @@ def test_map_headers_exact_user_layout():
     assert m["company"] == 0
     assert m["title"] == 1       # "Role" -> title
     assert m["date_applied"] == 2
-    assert m["status"] == 3
+    assert m["results"] == 3     # old "Status" column carries the Results value
     assert m["url"] == 4         # "Link" -> url
     assert m["notes"] == 5
+
+
+def test_map_headers_bianca_job_log_layout():
+    hdr = ["Date Sent", "Company Name", "Job Title", "Where it was sent",
+           "Link to Application", "Interview?", "Follow Up?", "Results"]
+    m = map_headers(hdr)
+    assert m == {"date_applied": 0, "company": 1, "title": 2, "source": 3,
+                 "url": 4, "interview": 5, "followup": 6, "results": 7}
 
 
 def test_map_headers_no_substring_false_match():
@@ -63,7 +71,10 @@ def test_map_headers_each_field_claimed_once():
 
 def test_default_header_matches_canonical():
     assert default_header() == [c[1] for c in CANONICAL_COLUMNS]
-    assert default_header()[0] == "Date Applied"
+    # Bianca's Job Log layout (2026-07-22)
+    assert default_header() == ["Date Sent", "Company Name", "Job Title",
+                                "Where it was sent", "Link to Application",
+                                "Interview?", "Follow Up?", "Results"]
 
 
 def test_canonical_header_map():
@@ -82,12 +93,27 @@ def test_build_row_aligns_to_user_columns():
 
 def test_build_row_blanks_unmapped_columns():
     hmap = canonical_header_map()
-    app = {"company": "Acme", "title": "Eng", "url": "u", "fit": 88,
-           "date_applied": "2026-06-30", "status_label": "Applied"}
+    app = {"company": "Acme", "title": "Eng", "url": "u",
+           "date_applied": "2026-06-30", "status": "applied", "status_label": "Applied"}
     row = build_row(app, hmap, len(hmap))
     assert row[hmap["company"]] == "Acme"
-    assert row[hmap["fit"]] == "88"
-    assert row[hmap["location"]] == ""   # not provided -> blank
+    assert row[hmap["source"]] == ""      # not provided -> blank
+    assert row[hmap["followup"]] == ""    # always manual
+
+
+def test_build_row_bianca_status_columns():
+    hmap = canonical_header_map()
+    pending = {"company": "A", "title": "T", "status": "applied", "status_label": "Applied"}
+    row = build_row(pending, hmap, len(hmap))
+    assert row[hmap["interview"]] == ""   # not interviewing yet
+    assert row[hmap["results"]] == ""     # still pending -> blank, not "Applied"
+    interviewing = {"company": "A", "title": "T", "status": "interview", "status_label": "Interview"}
+    row = build_row(interviewing, hmap, len(hmap))
+    assert row[hmap["interview"]] == "Yes"
+    assert row[hmap["results"]] == "Interview"
+    rejected = {"company": "A", "title": "T", "status": "rejected", "status_label": "Rejected"}
+    row = build_row(rejected, hmap, len(hmap))
+    assert row[hmap["results"]] == "Rejected"
 
 
 def test_compare_matches_by_url_despite_name_diff():

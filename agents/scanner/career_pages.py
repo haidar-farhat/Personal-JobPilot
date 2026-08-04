@@ -85,15 +85,17 @@ class GreenhouseScanner(BaseScanner):
                 else:
                     location = str(loc)
 
-            # Check if location is Bay Area related
-            bay_area_keywords = ["san francisco", "oakland", "berkeley", "san jose", "bay area",
-                                 "mountain view", "palo alto", "sunnyvale", "menlo park",
-                                 "remote", "los gatos", "cupertino", "redwood city"]
             location_lower = location.lower()
-            is_bay_area = any(kw in location_lower for kw in bay_area_keywords) or not location
 
-            if not is_bay_area:
-                continue
+            # ponytail: no location allow-list here. Until 2026-08-03 this dropped
+            # anything outside a hardcoded Bay Area keyword list, which silently
+            # threw away every out-of-metro role — the relocation-track companies
+            # in target_companies.yaml would never have produced a single onsite
+            # job. Geography is now decided in two better places: BaseScanner's
+            # non-US gate (run(), config-driven) and the ranker's location_remote
+            # dimension, which grades US-remote 95 / target metro 85 / other
+            # affordable US 65 / high-cost metro 40. A hard filter here would just
+            # hide roles the ranker is already equipped to rank down.
 
             # Get job URL
             url = job_data.get("absolute_url", job_data.get("url", ""))
@@ -159,49 +161,57 @@ class LeverScanner(BaseScanner):
         return jobs
 
     def _scan_company(self, company: dict) -> list[RawJob]:
-        """Scan a single Lever company's job listings."""
-        api_url = company["api_url"]
-        # Lever's public API endpoint
-        if not api_url.endswith("/"):
-            api_url += "/"
+        """Scan a single Lever company via the public JSON postings API.
+
+        Until 2026-08-03 this fetched the configured api_url and parsed it as
+        HTML looking for div.posting — but every Lever entry in
+        target_companies.yaml points at api.lever.co/v0/postings/<slug>, which
+        returns JSON. There are no div.posting elements in JSON, so this scanner
+        returned zero jobs on every run since those entries were added. Now it
+        normalises to the JSON endpoint and parses the documented fields.
+        """
+        api_url = company["api_url"].rstrip("/")
+
+        # Accept either form in config: the JSON API or the human careers page.
+        # jobs.lever.co/<slug> -> api.lever.co/v0/postings/<slug>
+        if "jobs.lever.co" in api_url:
+            slug = api_url.rsplit("/", 1)[-1]
+            api_url = f"https://api.lever.co/v0/postings/{slug}"
+        if "?" not in api_url:
+            api_url += "?mode=json"
 
         response = self._safe_request(api_url)
         if not response:
             return []
 
-        # Lever pages are HTML, parse the job listings
-        soup = BeautifulSoup(response.text, "lxml")
-        postings = soup.find_all("div", class_="posting")
+        try:
+            postings = response.json()
+        except ValueError:
+            logger.error(f"[lever] {company['name']}: non-JSON response from {api_url}")
+            return []
+        if not isinstance(postings, list):
+            logger.error(f"[lever] {company['name']}: unexpected payload type {type(postings).__name__}")
+            return []
 
         relevant_jobs = []
         for posting in postings:
-            title_elem = posting.find("h5") or posting.find("a", class_="posting-title")
-            if not title_elem:
+            title = (posting.get("text") or "").strip()
+            if not title or not self._title_is_relevant(title):
                 continue
 
-            title = title_elem.get_text(strip=True)
-            title_lower = title.lower()
-
-            # Check relevance
-            if not self._title_is_relevant(title):
-                continue
-
-            # Get URL
-            link = posting.find("a", href=True)
-            url = link["href"] if link else ""
+            url = posting.get("hostedUrl") or posting.get("applyUrl") or ""
             if not url:
                 continue
 
-            # Get location
-            location_elem = posting.find("span", class_="sort-by-location") or posting.find("span", class_="location")
-            location = location_elem.get_text(strip=True) if location_elem else company.get("location", "")
+            categories = posting.get("categories") or {}
+            location = (categories.get("location") or company.get("location") or "").strip()
 
-            # Check Bay Area
-            bay_area_keywords = ["san francisco", "oakland", "berkeley", "san jose", "bay area",
-                                 "mountain view", "remote"]
-            location_lower = location.lower()
-            if not any(kw in location_lower for kw in bay_area_keywords):
-                continue
+            # ponytail: no Bay Area allow-list — see the note in GreenhouseScanner.
+            # The non-US gate in BaseScanner.run() plus the ranker's
+            # location_remote dimension handle geography.
+
+            workplace = (posting.get("workplaceType") or "").lower()
+            title_lower = title.lower()
 
             relevant_jobs.append(RawJob(
                 title=title,
@@ -209,8 +219,13 @@ class LeverScanner(BaseScanner):
                 location=location,
                 url=url,
                 source=f"lever:{company['name'].lower().replace(' ', '_')}",
-                description="",  # Would need to follow link for full description
-                is_remote="remote" in location_lower or "remote" in title_lower,
+                description=(posting.get("descriptionPlain") or "")[:6000],
+                source_id=str(posting.get("id") or ""),
+                is_remote=(
+                    workplace == "remote"
+                    or "remote" in location.lower()
+                    or "remote" in title_lower
+                ),
             ))
 
         return relevant_jobs

@@ -61,23 +61,12 @@
       .filter((o) => o.getClientRects().length > 0);
   }
 
-  // Token-overlap option matcher (subset of fill.js chooseChoice — education
-  // values here are long proper nouns, so overlap is the signal that matters).
+  // Shared matcher from fill.js — resolved at call time (the e2e harness injects
+  // greenhouse.js before fill.js). The local copy this replaced accepted an
+  // option sharing a THIRD of the words, which picked the wrong university.
   function bestOption(value) {
-    const nv = norm(value);
-    const opts = visibleOptions().map((el) => ({ el, t: norm(el.innerText) }));
-    let o = opts.find((x) => x.t === nv);
-    if (o) return o.el;
-    o = opts.find((x) => x.t && (x.t.includes(nv) || nv.includes(x.t)));
-    if (o) return o.el;
-    const dw = nv.split(" ").filter((w) => w.length > 2);
-    let best = null, bn = 0;
-    for (const x of opts) {
-      const ow = new Set(x.t.split(" "));
-      const k = dw.filter((w) => ow.has(w)).length;
-      if (k > bn) { best = x.el; bn = k; }
-    }
-    return bn >= Math.max(1, Math.floor(dw.length / 3)) ? best : null;
+    return window.__jpafHelpers.chooseChoice(
+      value, visibleOptions().map((el) => ({ el, t: norm(el.innerText) })));
   }
 
   function send(msg) {
@@ -153,17 +142,10 @@
     if (!value) return false;
     const nv = norm(value);
     let opt = [...sel.options].find((o) => norm(o.text) === nv || norm(o.value) === nv);
-    if (!opt) opt = [...sel.options].find((o) => { const t = norm(o.text); return t && (t.includes(nv) || nv.includes(t)); });
-    if (!opt) {  // token overlap for verbose lists
-      const dw = nv.split(" ").filter((w) => w.length > 2);
-      let bn = 0;
-      for (const o of sel.options) {
-        const ow = new Set(norm(o.text).split(" "));
-        const k = dw.filter((w) => ow.has(w)).length;
-        if (k > bn) { opt = o; bn = k; }
-      }
-      if (!bn) opt = null;
-    }
+    // shared gated matcher — the local token-overlap copy this replaced would
+    // pick "Associate Degree" for "Bachelor's Degree" off the shared word
+    if (!opt) opt = window.__jpafHelpers.chooseChoice(
+      value, [...sel.options].map((o) => ({ el: o, t: norm(o.text) })));
     if (!opt) return false;
     sel.value = opt.value;
     sel.dispatchEvent(new Event("input", { bubbles: true }));

@@ -125,12 +125,6 @@ companies:
     search_params:
       keywords: "data analyst"
 
-  - name: "Salesforce"
-    career_url: "https://careers.salesforce.com/en/jobs"
-    ats_platform: "custom"
-    location: "San Francisco, CA"
-    priority: medium
-
   - name: "Uber"
     career_url: "https://www.uber.com/us/en/careers/list"
     ats_platform: "custom"
@@ -177,13 +171,6 @@ companies:
     api_url: "https://boards-api.greenhouse.io/v1/boards/cohere/jobs"
     ats_platform: "greenhouse"
     location: "San Francisco, CA"
-    priority: medium
-
-  - name: "Hugging Face"
-    career_url: "https://huggingface.co/careers"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/huggingface/jobs"
-    ats_platform: "greenhouse"
-    location: "Remote"
     priority: medium
 
   - name: "Mode Analytics"
@@ -371,9 +358,261 @@ companies:
     sr_company_id: "ServiceNow"
 
   # Workable public widget API
+  # HF moved off Greenhouse — boards/huggingface/jobs is 404. Don't re-add it.
   - name: "Hugging Face"
     career_url: "https://apply.workable.com/huggingface/"
     ats_platform: "workable"
     location: "Remote (US)"
     priority: high
     workable_account: "huggingface"
+
+  # =====================================================================
+  # RELOCATION TRACK (added 2026-08-03)
+  # =====================================================================
+  # Everything above this line is Bay-Area-HQ. SF rent (~$4.2k/mo solo) is
+  # unaffordable on an entry salary, so these are employers that actually
+  # hire into affordable growth metros, plus remote-first companies where
+  # the job doesn't constrain where you live at all.
+  #
+  # Every slug below was verified live against its ATS API on 2026-08-03
+  # (job counts in the comments are from that probe). If one goes quiet for
+  # weeks, re-probe before assuming the metro has no openings.
+
+  # --- Arizona (Phoenix / Tempe / Scottsdale) ---
+  - name: "Axon"
+    career_url: "https://www.axon.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/axon/jobs"
+    ats_platform: "greenhouse"
+    location: "Scottsdale, AZ"
+    priority: high          # 487 open, ~97 in target metros — biggest AZ source
+
+  - name: "Carvana"
+    career_url: "https://www.carvana.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/carvana/jobs"
+    ats_platform: "greenhouse"
+    location: "Tempe, AZ"
+    priority: high          # 1813 open — high volume, mostly ops; analyst roles exist
+
+  # --- Colorado (Denver / Boulder) ---
+  - name: "Gusto"
+    career_url: "https://gusto.com/about/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/gusto/jobs"
+    ats_platform: "greenhouse"
+    location: "Denver, CO"
+    priority: high          # 91 open, ~64 in target metros — best target-metro density
+
+  - name: "Checkr"
+    career_url: "https://checkr.com/company/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/checkr/jobs"
+    ats_platform: "greenhouse"
+    location: "Denver, CO"
+    priority: high          # 51 open, ~25 target
+
+  - name: "Alarm.com"
+    career_url: "https://www.alarm.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/alarmcom/jobs"
+    ats_platform: "greenhouse"
+    location: "Denver, CO"
+    priority: medium
+
+  # --- Utah (Salt Lake City / Lehi / Draper) ---
+  - name: "Lucid Software"
+    career_url: "https://lucid.co/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/lucidsoftware/jobs"
+    ats_platform: "greenhouse"
+    location: "South Jordan, UT"
+    priority: high          # 38 open, ~26 target — strong analytics org
+
+  - name: "BILL"
+    career_url: "https://www.bill.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/billcom/jobs"
+    ats_platform: "greenhouse"
+    location: "Draper, UT"
+    priority: medium        # 51 open, 8 Draper/UT
+
+  - name: "Recursion"
+    career_url: "https://www.recursion.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/recursionpharmaceuticals/jobs"
+    ats_platform: "greenhouse"
+    location: "Salt Lake City, UT"
+    priority: medium        # 18 open, 9 target — ML/data heavy
+
+  # --- Texas (Austin / Dallas / Houston) ---
+  - name: "MongoDB"
+    career_url: "https://www.mongodb.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/mongodb/jobs"
+    ats_platform: "greenhouse"
+    location: "Austin, TX"
+    priority: high          # 398 open, ~39 target
+
+  - name: "Cloudflare"
+    career_url: "https://www.cloudflare.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs"
+    ats_platform: "greenhouse"
+    location: "Austin, TX"
+    priority: medium        # 282 open, Austin is a real hub for them
+
+  - name: "Everlywell"
+    career_url: "https://www.everlywell.com/careers"
+    api_url: "https://api.lever.co/v0/postings/everlywell"
+    ats_platform: "lever"
+    location: "Austin, TX"
+    priority: medium        # 24 open, 11 target
+
+  - name: "Self Financial"
+    career_url: "https://www.self.inc/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/selffinancial/jobs"
+    ats_platform: "greenhouse"
+    location: "Austin, TX"
+    priority: medium        # small board, high Austin density
+
+  - name: "ZenBusiness"
+    career_url: "https://www.zenbusiness.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/zenbusiness/jobs"
+    ats_platform: "greenhouse"
+    location: "Austin, TX"
+    priority: medium
+
+  # --- Oregon (Portland) ---
+  - name: "New Relic"
+    career_url: "https://newrelic.com/about/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/newrelic/jobs"
+    ats_platform: "greenhouse"
+    location: "Portland, OR"
+    priority: high          # 51 open, 11 target — observability/data tooling
+
+  - name: "Vacasa"
+    career_url: "https://www.vacasa.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/vacasa/jobs"
+    ats_platform: "greenhouse"
+    location: "Portland, OR"
+    priority: medium
+
+  - name: "Jama Software"
+    career_url: "https://www.jamasoftware.com/company/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/jamasoftware/jobs"
+    ats_platform: "greenhouse"
+    location: "Portland, OR"
+    priority: medium        # tiny board — cheap to scan, Portland-native
+
+  # --- North Carolina (Raleigh / Durham / Cary) ---
+  - name: "Pendo"
+    career_url: "https://www.pendo.io/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/pendo/jobs"
+    ats_platform: "greenhouse"
+    location: "Raleigh, NC"
+    priority: high          # 36 open, 23 target — product-analytics shop, good archetype fit
+
+  - name: "Epic Games"
+    career_url: "https://www.epicgames.com/site/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/epicgames/jobs"
+    ats_platform: "greenhouse"
+    location: "Cary, NC"
+    priority: medium        # 152 open, ~51 target
+
+  # --- Georgia / Florida ---
+  - name: "Salesloft"
+    career_url: "https://salesloft.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/salesloft/jobs"
+    ats_platform: "greenhouse"
+    location: "Atlanta, GA"
+    priority: medium
+
+  - name: "KnowBe4"
+    career_url: "https://www.knowbe4.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/knowbe4/jobs"
+    ats_platform: "greenhouse"
+    location: "Clearwater, FL"
+    priority: medium        # 79 open, 21 target (Tampa metro)
+
+  # --- Remote-first (the highest-ranked bucket: no relocation required) ---
+  - name: "Remote"
+    career_url: "https://remote.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/remotecom/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 208 open, 198 remote — fully distributed by design
+
+  - name: "GitLab"
+    career_url: "https://about.gitlab.com/jobs"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 189 open, 170 remote — all-remote company
+
+  - name: "Twilio"
+    career_url: "https://www.twilio.com/en-us/company/jobs"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/twilio/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 178 open, all remote-tagged
+
+  - name: "Affirm"
+    career_url: "https://www.affirm.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/affirm/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 181 open, remote-first
+
+  - name: "Grafana Labs"
+    career_url: "https://grafana.com/about/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/grafanalabs/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 142 open, all remote
+
+  - name: "Datadog"
+    career_url: "https://careers.datadoghq.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/datadog/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: high          # 433 open, 49 remote + 26 target metros
+
+  - name: "Reddit"
+    career_url: "https://www.redditinc.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/reddit/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium        # 188 open, 120 remote
+
+  - name: "Mozilla"
+    career_url: "https://www.mozilla.org/en-US/careers/listings/"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/mozilla/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium        # 85 open, all remote
+
+  - name: "Wikimedia Foundation"
+    career_url: "https://wikimediafoundation.org/about/jobs/"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/wikimedia/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium
+
+  - name: "Calendly"
+    career_url: "https://careers.calendly.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/calendly/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium
+
+  - name: "Doximity"
+    career_url: "https://workat.doximity.com"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/doximity/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium
+
+  - name: "Tebra"
+    career_url: "https://www.tebra.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/tebra/jobs"
+    ats_platform: "greenhouse"
+    location: "Remote (US)"
+    priority: medium
+
+  - name: "Vanta"
+    career_url: "https://www.vanta.com/careers"
+    ashby_slug: "vanta"
+    ats_platform: "ashby"
+    location: "Remote (US)"
+    priority: medium        # 98 open, 59 remote

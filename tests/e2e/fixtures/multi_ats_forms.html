@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Multi-ATS Application Forms</title></head>
+<body>
+<h1>Senior AI Engineer — Application</h1>
+<p>Apply for this role. Upload your resume and tell us why you want to work here.</p>
+
+<!-- ══════════════ Lever ══════════════
+     Real Lever markup: bare inputs with placeholders, urls[Network] names,
+     no <label for> at all — the scanner has to fall back to placeholders. -->
+<form id="lever" class="application-form" onsubmit="window.__submitted=true;return false;">
+  <h2>Submit your application</h2>
+  <input id="lv_name" name="name" type="text" placeholder="Full name✱">
+  <input id="lv_email" name="email" type="email" placeholder="Email✱">
+  <input id="lv_phone" name="phone" type="tel" placeholder="Phone">
+  <input id="lv_org" name="org" type="text" placeholder="Current company">
+  <input id="lv_li" name="urls[LinkedIn]" type="text" placeholder="LinkedIn URL">
+  <input id="lv_gh" name="urls[GitHub]" type="text" placeholder="GitHub URL">
+  <div class="application-question">
+    <label for="lv_auth">Are you legally authorized to work in the United States?✱</label>
+    <select id="lv_auth" name="cards[auth][field0]">
+      <option value="">Select...</option><option>Yes</option><option>No</option>
+    </select>
+  </div>
+  <button type="submit">Submit application</button>
+</form>
+
+<!-- ══════════════ Ashby ══════════════
+     _systemfield_* names, aria-label only, no visible <label>. -->
+<form id="ashby" onsubmit="window.__submitted=true;return false;">
+  <h2>Ashby — Application</h2>
+  <input id="ab_name" name="_systemfield_name" type="text" aria-label="Name">
+  <input id="ab_email" name="_systemfield_email" type="email" aria-label="Email">
+  <input id="ab_loc" name="_systemfield_location" type="text" aria-label="Location (City)">
+  <fieldset>
+    <legend>Do you now or will you in the future require visa sponsorship?</legend>
+    <label><input type="radio" name="ab_sponsor" value="Yes"> Yes</label>
+    <label><input type="radio" name="ab_sponsor" value="No"> No</label>
+  </fieldset>
+  <button type="submit">Submit</button>
+</form>
+
+<!-- ══════════════ SmartRecruiters ══════════════
+     data-test hooks, split name fields, verbose consent checkbox. -->
+<form id="smartrecruiters" onsubmit="window.__submitted=true;return false;">
+  <h2>SmartRecruiters</h2>
+  <label for="sr_first">First name</label>
+  <input id="sr_first" data-test="firstName" name="firstName" type="text">
+  <label for="sr_last">Last name</label>
+  <input id="sr_last" data-test="lastName" name="lastName" type="text">
+  <label for="sr_email">Email address</label>
+  <input id="sr_email" data-test="email" name="email" type="email">
+  <label for="sr_country">Country</label>
+  <select id="sr_country" name="country">
+    <option value="">--</option>
+    <option>Canada</option><option>United States of America</option>
+    <option>United States Minor Outlying Islands</option>
+  </select>
+  <label for="sr_zip">Postal code</label>
+  <input id="sr_zip" name="postalCode" type="text">
+  <button type="submit">Apply</button>
+</form>
+
+<!-- ══════════════ iCIMS ══════════════
+     Legacy table layout, labels in adjacent <td> not <label for>. -->
+<form id="icims" onsubmit="window.__submitted=true;return false;">
+  <h2>iCIMS</h2>
+  <table>
+    <tr><td>Legal Name</td><td><input id="ic_name" name="fields[name]" type="text"></td></tr>
+    <tr><td>Email Address</td><td><input id="ic_email" name="fields[email]" type="text"></td></tr>
+    <tr><td>Street Address</td><td><input id="ic_street" name="fields[addr1]" type="text"></td></tr>
+    <tr><td>City</td><td><input id="ic_city" name="fields[city]" type="text"></td></tr>
+    <tr><td>State</td><td>
+      <select id="ic_state" name="fields[state]">
+        <option value="">--</option><option>California</option><option>Colorado</option>
+      </select></td></tr>
+  </table>
+  <button type="submit">Continue</button>
+</form>
+
+<!-- ══════════════ Workable ══════════════ -->
+<form id="workable" onsubmit="window.__submitted=true;return false;">
+  <h2>Workable</h2>
+  <label for="wk_first">First name</label><input id="wk_first" data-ui="firstname" type="text">
+  <label for="wk_last">Last name</label><input id="wk_last" data-ui="lastname" type="text">
+  <label for="wk_email">Email</label><input id="wk_email" data-ui="email" type="email">
+  <label for="wk_resume">Resume</label><input id="wk_resume" data-ui="resume" type="file">
+  <button type="submit">Submit application</button>
+</form>
+
+<!-- ══════════════ Bespoke / custom careers page ══════════════
+     No ATS at all — hand-rolled markup with conversational labels. This is the
+     "custom job thing" case: nothing here matches a known ATS selector. -->
+<form id="custom" onsubmit="window.__submitted=true;return false;">
+  <h2>Tell us about yourself</h2>
+  <div><span>What should we call you?</span><input id="cu_name" name="applicant_name" type="text"></div>
+  <div><span>Best email to reach you</span><input id="cu_email" name="contact_email" type="text"></div>
+  <div><span>Where do you currently live?</span><input id="cu_where" name="loc" type="text"></div>
+  <div><span>Your LinkedIn</span><input id="cu_li" name="li_url" type="text"></div>
+  <div><span>Are you authorized to work in the US?</span>
+    <select id="cu_auth" name="auth"><option value="">--</option><option>Yes</option><option>No</option></select>
+  </div>
+  <button type="submit">Send it</button>
+</form>
+
+<!-- ══════════════ TRAP SECTION ══════════════
+     Every field below has NO correct answer in the profile. Filling any of
+     them is a wrong answer on a real application, so all must stay EMPTY.
+     These are named for the specific way each one can go wrong. -->
+<form id="traps" onsubmit="window.__submitted=true;return false;">
+  <h2>Emergency contact and other details</h2>
+
+  <!-- contains "phone" — must NOT inherit the applicant's own number -->
+  <label for="tp_ec_phone">Emergency contact phone number</label>
+  <input id="tp_ec_phone" name="emergency_contact_phone" type="tel">
+
+  <!-- contains "name" — must NOT inherit the applicant's own name -->
+  <label for="tp_ec_name">Emergency contact full name</label>
+  <input id="tp_ec_name" name="emergency_contact_name" type="text">
+
+  <!-- contains "email" — must NOT inherit the applicant's own address -->
+  <label for="tp_ref_email">Reference's email address</label>
+  <input id="tp_ref_email" name="reference_email" type="text">
+
+  <!-- contains "referral" but wants a CODE, not a source like "LinkedIn" -->
+  <label for="tp_refcode">Referral code</label>
+  <input id="tp_refcode" name="referral_code" type="text">
+
+  <!-- he holds a Master's; NEITHER option is true, so neither may be chosen -->
+  <label for="tp_degree">Highest degree completed</label>
+  <select id="tp_degree" name="highest_degree">
+    <option value="">--</option><option>High School Diploma</option><option>Associate Degree</option>
+  </select>
+
+  <!-- his school is absent; must not settle for a similar-sounding one -->
+  <label for="tp_school">University attended</label>
+  <select id="tp_school" name="university">
+    <option value="">--</option><option>Adams State University</option><option>Stanford University</option>
+  </select>
+
+  <!-- "Economics" appears in both, but he studied neither of these -->
+  <label for="tp_major">Field of study</label>
+  <select id="tp_major" name="major">
+    <option value="">--</option><option>Home Economics</option><option>Agricultural Economics</option>
+  </select>
+
+  <button type="submit">Save</button>
+</form>
+
+<script>window.__submitted = false;</script>
+</body>
+</html>

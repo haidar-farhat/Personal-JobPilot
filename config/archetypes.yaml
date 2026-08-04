@@ -12,8 +12,8 @@
 dimensions:
   - technical_fit       # tooling/languages overlap with JD requirements
   - level_match         # is this entry-level/IC1-IC2? (Matthew is junior)
-  - comp_range          # is the comp in range / disclosed / good for SF Bay
-  - location_remote     # SF Bay or remote-friendly?
+  - comp_range          # enough to live alone in the JOB'S metro (not SF-anchored)
+  - location_remote     # US-remote or an affordable target metro? (2026-08-03 relocation pivot)
   - archetype_fit       # does the role align with this archetype's core work
   - skills_overlap      # specific skill keywords from JD found in CV
   - growth_signal       # does the role offer learning trajectory

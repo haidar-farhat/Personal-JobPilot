@@ -14,12 +14,6 @@ from agents.scanner.base import BaseScanner, RawJob
 logger = logging.getLogger(__name__)
 
 
-BAY_AREA_KEYWORDS = (
-    "san francisco", "oakland", "berkeley", "san jose", "bay area",
-    "mountain view", "palo alto", "sunnyvale", "menlo park",
-    "remote", "los gatos", "cupertino", "redwood city", "emeryville",
-)
-
 class AshbyScanner(BaseScanner):
     """Scan Ashby-based career pages via their public posting API."""
 
@@ -81,13 +75,9 @@ class AshbyScanner(BaseScanner):
                 location = location.get("name", "")
             location_lower = (location or "").lower()
             is_remote_field = bool(job_data.get("isRemote", False))
-            is_bay_area = (
-                any(kw in location_lower for kw in BAY_AREA_KEYWORDS)
-                or is_remote_field
-                or not location  # default to including when Ashby omits location
-            )
-            if not is_bay_area:
-                continue
+            # ponytail: no Bay Area allow-list — see the note in GreenhouseScanner.
+            # Geography is decided by BaseScanner's non-US gate plus the ranker's
+            # location_remote dimension, both config-driven.
 
             url = job_data.get("jobUrl") or job_data.get("applyUrl") or ""
             if not url:

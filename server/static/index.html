@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>JobPilot · Job Search</title>
 <script>(function(){try{var t=localStorage.getItem('jp-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%236d28d9'/><text x='50' y='72' font-family='Arial,sans-serif' font-size='64' font-weight='bold' fill='white' text-anchor='middle'>J</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='14' fill='%230b5cd6'/><text x='50' y='72' font-family='Arial,sans-serif' font-size='64' font-weight='bold' fill='white' text-anchor='middle'>J</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <style>
   /* ===== Design tokens — light default, dark via [data-theme="dark"] =====
      Keeps glassmorphism + bento; every legacy var name preserved. */
@@ -166,12 +166,12 @@
     color:#bcd0ff;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:7px 14px;background:rgba(255,255,255,.05);margin-bottom:20px}
   .eyebrow .spark{width:7px;height:7px;border-radius:50%;background:var(--grad);box-shadow:0 0 10px 1px #7c8bff}
   .hero-title{font-family:var(--display);font-weight:700;font-size:clamp(30px,4.4vw,54px);line-height:1.04;letter-spacing:-1.6px;margin:0 0 14px}
-  .hero-title .accent{background:linear-gradient(110deg,#7dd3fc 0%,#c4b5fd 55%,#f0abfc 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-title .accent{color:#e5372b}
   .hero-sub{color:#aab8d6;font-size:clamp(15px,1.4vw,17.5px);line-height:1.6;max-width:640px;margin:0 auto 30px}
 
   /* Search card (glass, floats on hero) */
   .search-wrap{display:flex;max-width:920px;margin:0 auto;background:rgba(255,255,255,.98);
-    border:1px solid rgba(255,255,255,.6);border-radius:18px;box-shadow:0 28px 70px -22px rgba(5,10,35,.75);overflow:hidden}
+    border:1px solid rgba(255,255,255,.6);border-radius:18px;box-shadow:0 30px 70px -30px rgba(0,0,0,.8);overflow:hidden}
   .field{display:flex;align-items:center;gap:10px;padding:16px 18px;flex:1;text-align:left}
   .field+.field{border-left:1px solid var(--divider)}
   .field svg{flex:none;color:var(--subtle)}
@@ -201,8 +201,7 @@
   .insights.open{display:block}
   .stat-grid{display:flex;flex-wrap:wrap;gap:26px}
   .stat{min-width:108px}
-  .stat b{display:block;font-family:var(--display);font-size:26px;line-height:1.1;
-    background:linear-gradient(135deg,#1d2b4a,#3b82f6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat b{display:block;font-family:var(--display);font-size:26px;line-height:1.1;color:var(--text)}
   .stat span{color:var(--subtle);font-size:12px;font-weight:600}
   .funnel{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 
@@ -290,8 +289,8 @@
   .d-head .co{font-size:14px;color:var(--muted);font-weight:600}
   .apply-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--divider)}
   .btn{background:var(--grad);color:#fff;border:0;border-radius:11px;padding:11px 18px;font-weight:700;font-size:14px;
-    box-shadow:0 10px 22px -10px rgba(99,40,217,.6);transition:transform .12s,box-shadow .12s,filter .12s}
-  .btn:hover{transform:translateY(-1px);filter:brightness(1.06);box-shadow:0 14px 28px -10px rgba(99,40,217,.7);text-decoration:none}
+    transition:transform .12s,box-shadow .12s,filter .12s}
+  .btn:hover{filter:brightness(1.06);text-decoration:none}
   .btn.sec{background:var(--surface);color:var(--brand);border:1px solid var(--border);box-shadow:none}
   .btn.sec:hover{background:var(--surface-2);filter:none}
   .jd-chip{display:inline-flex;align-items:center;gap:6px;background:var(--success-bg);color:var(--success-fg);border:1px solid var(--success-border);border-radius:8px;padding:6px 11px;font-weight:600;font-size:13px}
@@ -567,6 +566,282 @@
     a{color:#000;text-decoration:none}
   }
 </style>
+<style id="mc-skin">
+  /* ===== Editorial v5 — "The Hiring Desk" =====
+     GRB-inspired: warm paper, ink type, one cobalt accent, pill geometry.
+     Skin layer only: overrides the structural sheet above. Same selectors,
+     same var names. No JS contract touched. */
+  :root{
+    --bg:#ffffff; --page-bg:#f6f5f2; --surface:#ffffff; --surface-2:#f1f0ec; --panel:#f1f0ec;
+    --glass-bg:rgba(255,255,255,.82); --glass-border:#e7e5e0;
+    --glass-bar-bg:rgba(246,245,242,.88); --glass-blur:12px;
+    --header-bg:rgba(250,250,248,.86); --header-blur:14px;
+    --text:#16181d; --muted:#555b66; --subtle:#79808c; --grey:#79808c;
+    --on-dark:#ffffff; --on-dark-soft:#c9d2e2;
+    --brand:#0b5cd6; --blue:#0b5cd6; --blue-dark:#0a4cb0; --brand2:#0b5cd6; --brand-hover:#0a4cb0;
+    --violet:#0f766e; --ai:#0f766e;
+    --grad:linear-gradient(135deg,#0f66e6 0%,#0947a8 100%);
+    --accent-tint:#e9f0fc; --blue-tint:#e9f0fc; --ai-tint:rgba(15,118,110,.09); --ink:#101319;
+    --match-strong:#157f3d; --match-strong-fg:#f2fbf5;
+    --match-maybe:#b45309; --match-maybe-fg:#fff8ec;
+    --match-stretch:#52627a; --match-stretch-fg:#eef2f7;
+    --ring-track:#e8e6e1;
+    --success:#157f3d; --success-bg:rgba(21,127,61,.08); --success-border:rgba(21,127,61,.26); --success-fg:#116634;
+    --warn:#b45309; --warn-bg:rgba(180,83,9,.08); --warn-border:rgba(180,83,9,.28); --warn-fg:#8f4207;
+    --danger:#c02348; --danger-bg:rgba(192,35,72,.07); --danger-border:rgba(192,35,72,.26); --danger-fg:#a51d3d;
+    --green:#157f3d; --amber:#b45309; --up:#189a4a; --down:#d64545;
+    --border:#e7e5e0; --divider:#eeede9; --border-strong:#d3d1ca;
+    --shadow:0 1px 2px rgba(22,24,29,.05);
+    --shadow-lg:0 22px 48px -24px rgba(22,24,29,.28);
+    --shadow-glass:0 8px 28px -18px rgba(22,24,29,.22);
+    --shadow-brand:0 12px 26px -12px rgba(11,92,214,.45);
+    --radius-xs:8px; --radius-sm:10px; --radius-md:12px; --radius:16px; --radius-lg:20px; --radius-xl:24px;
+    --focus-ring:0 0 0 3px rgba(11,92,214,.28); --focus-ring-color:#0b5cd6;
+    --font:"Instrument Sans",system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --display:"Instrument Serif",Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    /* skin-local: header + hero per theme */
+    --hd-text:#16181d; --hd-muted:#59606b; --hd-border:#e7e5e0;
+    --hero-bg:#fbfaf7; --hero-ink:#16181d; --hero-sub-c:#565c66;
+    --hero-dot:rgba(22,24,29,.055);
+    --hero-chip-bg:rgba(255,255,255,.78); --hero-chip-bd:#e3e1da; --hero-chip-tx:#3c424c;
+    --hero-glow-a:rgba(11,92,214,.10); --hero-glow-b:rgba(233,212,170,.35);
+    --hero-film-op:.5; --hero-film-filter:saturate(1.06) contrast(1.02);
+    --hero-scrim:rgba(251,250,247,.55);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c0e12; --page-bg:#0c0e12; --surface:#14171d; --surface-2:#1a1e26; --panel:#1a1e26;
+    --glass-bg:rgba(20,23,29,.82); --glass-border:#262b34;
+    --glass-bar-bg:rgba(12,14,18,.84); --glass-blur:14px;
+    --header-bg:rgba(12,14,18,.86); --header-blur:16px;
+    --text:#e9ebef; --muted:#a3aab6; --subtle:#7d8590; --grey:#7d8590;
+    --brand:#7aa7f7; --blue:#7aa7f7; --blue-dark:#9dbdf9; --brand2:#7aa7f7; --brand-hover:#9dbdf9;
+    --violet:#2dd4bf; --ai:#2dd4bf;
+    --grad:linear-gradient(135deg,#4c86ea 0%,#3060bd 100%);
+    --accent-tint:rgba(122,167,247,.13); --blue-tint:rgba(122,167,247,.13); --ai-tint:rgba(45,212,191,.11); --ink:#0c0e12;
+    --match-strong:#1c9c4e; --match-strong-fg:#eafff2;
+    --match-maybe:#c97b1e; --match-maybe-fg:#1c1204;
+    --match-stretch:#5b6c85; --match-stretch-fg:#eef2f8;
+    --ring-track:#262b34;
+    --success:#3ecf74; --success-bg:rgba(62,207,116,.12); --success-border:rgba(62,207,116,.30); --success-fg:#7fe3a6;
+    --warn:#e6a23c; --warn-bg:rgba(230,162,60,.12); --warn-border:rgba(230,162,60,.30); --warn-fg:#f0bd6e;
+    --danger:#f16a8b; --danger-bg:rgba(241,106,139,.12); --danger-border:rgba(241,106,139,.30); --danger-fg:#f792ab;
+    --green:#3ecf74; --amber:#e6a23c; --up:#3ecf74; --down:#f16a8b;
+    --border:#262b34; --divider:#20242c; --border-strong:#39404c;
+    --shadow:0 1px 2px rgba(0,0,0,.42);
+    --shadow-lg:0 24px 52px -26px rgba(0,0,0,.72);
+    --shadow-glass:0 8px 28px -18px rgba(0,0,0,.6);
+    --shadow-brand:0 12px 26px -14px rgba(0,0,0,.55);
+    --focus-ring:0 0 0 3px rgba(122,167,247,.35); --focus-ring-color:#7aa7f7;
+    --hd-text:#e9ebef; --hd-muted:#8b93a0; --hd-border:#20242c;
+    --hero-bg:#0e1117; --hero-ink:#eef1f5; --hero-sub-c:#a3aab6;
+    --hero-dot:rgba(233,235,239,.05);
+    --hero-chip-bg:rgba(20,23,29,.72); --hero-chip-bd:#262b34; --hero-chip-tx:#cfd5de;
+    --hero-glow-a:rgba(76,134,234,.16); --hero-glow-b:rgba(45,212,191,.07);
+    --hero-film-op:.42; --hero-film-filter:invert(1) hue-rotate(178deg) saturate(1.2) brightness(.88);
+    --hero-scrim:rgba(14,17,23,.55);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]):not([data-theme="dark"]){
+      --bg:#0c0e12; --page-bg:#0c0e12; --surface:#14171d; --surface-2:#1a1e26; --panel:#1a1e26;
+      --glass-bg:rgba(20,23,29,.82); --glass-border:#262b34;
+      --glass-bar-bg:rgba(12,14,18,.84); --glass-blur:14px;
+      --header-bg:rgba(12,14,18,.86); --header-blur:16px;
+      --text:#e9ebef; --muted:#a3aab6; --subtle:#7d8590; --grey:#7d8590;
+      --brand:#7aa7f7; --blue:#7aa7f7; --blue-dark:#9dbdf9; --brand2:#7aa7f7; --brand-hover:#9dbdf9;
+      --violet:#2dd4bf; --ai:#2dd4bf;
+      --grad:linear-gradient(135deg,#4c86ea 0%,#3060bd 100%);
+      --accent-tint:rgba(122,167,247,.13); --blue-tint:rgba(122,167,247,.13); --ai-tint:rgba(45,212,191,.11);
+      --match-strong:#1c9c4e; --match-strong-fg:#eafff2;
+      --match-maybe:#c97b1e; --match-maybe-fg:#1c1204;
+      --match-stretch:#5b6c85; --match-stretch-fg:#eef2f8; --ring-track:#262b34;
+      --success:#3ecf74; --success-bg:rgba(62,207,116,.12); --success-border:rgba(62,207,116,.30); --success-fg:#7fe3a6;
+      --warn:#e6a23c; --warn-bg:rgba(230,162,60,.12); --warn-border:rgba(230,162,60,.30); --warn-fg:#f0bd6e;
+      --danger:#f16a8b; --danger-bg:rgba(241,106,139,.12); --danger-border:rgba(241,106,139,.30); --danger-fg:#f792ab;
+      --green:#3ecf74; --amber:#e6a23c;
+      --border:#262b34; --divider:#20242c; --border-strong:#39404c;
+      --shadow:0 1px 2px rgba(0,0,0,.42); --shadow-lg:0 24px 52px -26px rgba(0,0,0,.72);
+      --shadow-glass:0 8px 28px -18px rgba(0,0,0,.6); --shadow-brand:0 12px 26px -14px rgba(0,0,0,.55);
+      --focus-ring:0 0 0 3px rgba(122,167,247,.35); --focus-ring-color:#7aa7f7;
+      --hd-text:#e9ebef; --hd-muted:#8b93a0; --hd-border:#20242c;
+      --hero-bg:#0e1117; --hero-ink:#eef1f5; --hero-sub-c:#a3aab6;
+      --hero-dot:rgba(233,235,239,.05);
+      --hero-chip-bg:rgba(20,23,29,.72); --hero-chip-bd:#262b34; --hero-chip-tx:#cfd5de;
+      --hero-glow-a:rgba(76,134,234,.16); --hero-glow-b:rgba(45,212,191,.07);
+      --hero-film-op:.42; --hero-film-filter:invert(1) hue-rotate(178deg) saturate(1.2) brightness(.88);
+      --hero-scrim:rgba(14,17,23,.55);
+    }
+  }
+
+  body{font-size:14px;letter-spacing:.01em}
+  ::selection{background:#0b5cd6;color:#fff}
+
+  /* Header — paper masthead */
+  header{background:var(--header-bg);backdrop-filter:saturate(170%) blur(var(--header-blur));border-bottom:1px solid var(--hd-border)}
+  .brand{font-family:var(--display);font-weight:400;font-size:21px;letter-spacing:-.2px;color:var(--hd-text)}
+  .brand span{background:none;-webkit-background-clip:initial;background-clip:initial;-webkit-text-fill-color:var(--brand);color:var(--brand);font-style:italic}
+  .topnav a{color:var(--hd-muted);font-weight:600;font-size:13.5px}
+  .topnav a:hover{color:var(--hd-text)}
+  .topnav a.active{color:var(--hd-text);border-bottom-color:var(--brand)}
+  .health{color:var(--hd-muted);font-size:11.5px;letter-spacing:.02em}
+  .health #lastUpdate{color:var(--hd-muted)!important;font-variant-numeric:tabular-nums}
+  .dot{box-shadow:none;background:#b9bec7}
+  .dot.up{background:#189a4a;box-shadow:0 0 0 3px rgba(24,154,74,.14)}
+  .dot.down{background:#d64545;box-shadow:0 0 0 3px rgba(214,69,69,.14)}
+  .topicons{color:var(--hd-muted)}
+  .topicons svg:hover{color:var(--brand)}
+  .topicons .sep{background:var(--hd-border)}
+  .topicons .emp{color:var(--hd-text);font-size:13.5px}
+  .topicons .emp:hover{color:var(--brand)}
+  .theme-toggle{color:var(--hd-muted)}
+  .theme-toggle:hover{color:var(--brand)}
+
+  /* Hero — the editorial opener */
+  .hero{background:var(--hero-bg);color:var(--hero-ink)}
+  .hero .aurora{inset:-30% -15%;filter:blur(60px);opacity:1;animation:none;
+    background:
+      radial-gradient(42% 52% at 12% 18%, var(--hero-glow-a), transparent 70%),
+      radial-gradient(38% 48% at 88% 8%, var(--hero-glow-b), transparent 70%),
+      radial-gradient(50% 60% at 70% 95%, var(--hero-glow-a), transparent 72%)}
+  .hero .grid{opacity:1;animation:none;
+    background-image:radial-gradient(var(--hero-dot) 1.2px,transparent 1.2px),
+      radial-gradient(78% 92% at 50% 42%,var(--hero-scrim) 0%,transparent 76%);
+    background-size:22px 22px,100% 100%}
+  /* Cinematic film layer — deepest plane; aurora glows and dot-grid scrim sit above it */
+  .hero .hero-film{position:absolute;inset:0;z-index:-3;width:100%;height:100%;object-fit:cover;
+    opacity:var(--hero-film-op);filter:var(--hero-film-filter);pointer-events:none}
+  @media (prefers-reduced-motion:reduce){.hero .hero-film{display:none}}
+  .hero::after{background:linear-gradient(transparent,var(--page-bg))}
+  .hero-inner{padding:64px clamp(16px,4vw,48px) 84px;animation:heroRise .7s cubic-bezier(.22,.9,.28,1) both}
+  @keyframes heroRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .eyebrow{color:var(--hero-chip-tx);background:var(--hero-chip-bg);border:1px solid var(--hero-chip-bd);
+    font-size:10.5px;font-weight:700;letter-spacing:2px;backdrop-filter:blur(6px)}
+  .eyebrow .spark{background:var(--brand);box-shadow:0 0 0 3px rgba(11,92,214,.16)}
+  .hero-title{font-family:var(--display);font-weight:400;font-size:clamp(32px,4.6vw,58px);
+    line-height:1.06;letter-spacing:-.5px;color:var(--hero-ink);margin:0 0 16px}
+  .hero-title .accent{color:var(--brand);font-style:italic;font-weight:400}
+  .hero-sub{color:var(--hero-sub-c);font-size:clamp(15px,1.35vw,17px);line-height:1.65}
+  /* Search — one white pill, button floats inside */
+  .search-wrap{background:var(--surface);border:1px solid var(--border);border-radius:999px;
+    box-shadow:0 24px 60px -28px rgba(22,24,29,.30),0 2px 6px rgba(22,24,29,.05);
+    transition:box-shadow .18s ease,border-color .18s ease;padding:0 0 0 10px}
+  .search-wrap:focus-within{border-color:var(--brand);box-shadow:0 24px 60px -26px rgba(11,92,214,.35),var(--focus-ring)}
+  .field{padding:16px 16px}
+  .field+.field{border-left:1px solid var(--divider)}
+  .field svg{color:var(--subtle)}
+  .field input{color:var(--text);font-size:15.5px}
+  .field input::placeholder{color:var(--subtle)}
+  .find{background:var(--grad);border-radius:999px;margin:7px;padding:0 30px;font-size:15px;font-weight:700;
+    letter-spacing:.1px;box-shadow:var(--shadow-brand)}
+  .find:hover{filter:brightness(1.08)}
+  .pref{background:var(--hero-chip-bg);border:1px solid var(--hero-chip-bd);color:var(--hero-chip-tx);
+    font-weight:600;font-size:12.5px;backdrop-filter:blur(6px)}
+
+  /* Results toolbar — quiet utility strip */
+  .resultsbar #resultCount{font-weight:700;font-variant-numeric:tabular-nums}
+  .track-btn{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:999px;
+    box-shadow:var(--shadow);font-weight:600;font-size:13px}
+  .track-btn:hover{filter:none;transform:none;border-color:var(--brand);color:var(--brand)}
+  .track-badge{background:var(--brand);color:#fff}
+  .sortlbl select{border-radius:999px;padding:8px 14px}
+  .sortlbl select:focus{border-color:var(--brand);box-shadow:var(--focus-ring)}
+
+  /* Insights — serif numerals */
+  .insights{border-radius:var(--radius-lg)}
+  .stat b{background:none;-webkit-background-clip:initial;background-clip:initial;-webkit-text-fill-color:var(--text);color:var(--text);
+    font-family:var(--display);font-weight:400;font-size:30px;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;letter-spacing:.8px;font-weight:700}
+
+  /* Panels */
+  .rail,.detail{border-radius:var(--radius-lg)}
+  .facet h4{font-size:10.5px;letter-spacing:1.3px}
+  .rail .clear{border-radius:999px}
+  .ai-toggle{border-radius:var(--radius-md)}
+  .feed-head{font-family:var(--display);font-weight:400;font-size:19px;letter-spacing:-.2px}
+
+  /* Cards — ink titles, cobalt on intent */
+  .card{border-radius:18px;animation:cardRise .34s cubic-bezier(.22,.9,.28,1) both}
+  .card:nth-child(2){animation-delay:.03s}.card:nth-child(3){animation-delay:.06s}
+  .card:nth-child(4){animation-delay:.09s}.card:nth-child(5){animation-delay:.12s}
+  .card:nth-child(6){animation-delay:.15s}.card:nth-child(n+7){animation-delay:.18s}
+  @keyframes cardRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .card .title{color:var(--text);font-size:16.5px;letter-spacing:-.2px}
+  .card:hover .title{color:var(--brand)}
+  .card.sel{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset,var(--shadow-lg)}
+  .card.sel .title{color:var(--brand)}
+  .card.ai-card::before{background:var(--ai);width:3px}
+  .posted{font-variant-numeric:tabular-nums}
+  .icon-btn:hover{color:var(--brand);background:var(--accent-tint)}
+
+  /* Top picks */
+  .pick{border-radius:16px}
+  .pick .title{color:var(--text)}
+  .pick:hover .title{color:var(--brand)}
+  .picks-head{font-family:var(--display);font-weight:400;font-size:19px;letter-spacing:-.2px}
+
+  /* Detail — ink cover band */
+  .banner{background:#10131a;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+  .banner .checker{background:radial-gradient(60% 90% at 82% 8%, rgba(11,92,214,.5), transparent 70%);opacity:.65}
+  .banner .tag{font-family:var(--display);font-weight:400;letter-spacing:-.2px}
+  .banner .logo{border-radius:12px}
+  .d-head h2{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:-.3px}
+  .btn{border-radius:999px;font-weight:700}
+  .btn.sec{color:var(--brand)}
+  .bar{border-radius:999px}
+  .chip{border-radius:999px}
+  .mdbox{border-radius:var(--radius-md)}
+  .jd-chip{border-radius:999px}
+  .statusctl select{border-radius:999px}
+  .qcard,.omsg{border-radius:var(--radius-md)}
+  .copybtn{border-radius:999px}
+
+  /* View sections — soft settle */
+  #appliedView:not([hidden]),#boardView:not([hidden]),#companiesView:not([hidden]),#advisorView:not([hidden]){animation:viewIn .3s ease-out both}
+  @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .board-title{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:-.3px}
+
+  /* Board */
+  .col{border-radius:var(--radius-lg)}
+  .col.drag-over{background:var(--accent-tint);box-shadow:0 0 0 2px var(--brand) inset}
+  .col-name{font-size:13px;letter-spacing:.02em}
+  .bcard{border-radius:14px}
+  .bcard .bt{color:var(--text)}
+  .bcard:hover .bt{color:var(--brand)}
+
+  /* Applied */
+  .ap-tab{border-radius:999px}
+  .ap-row{border-radius:16px}
+  .ap-title{color:var(--text)}
+  .ap-row:hover .ap-title{color:var(--brand)}
+  .ap-date{font-variant-numeric:tabular-nums}
+  .ap-row select{border-radius:999px}
+
+  /* Companies / Advisor */
+  .ccard{border-radius:16px;background:var(--surface);box-shadow:var(--shadow)}
+  .ccard:hover{border-color:var(--brand);box-shadow:var(--shadow-lg)}
+  .ccard h3{font-family:var(--display);font-weight:400;font-size:18px;letter-spacing:-.2px}
+  .cjob{border-radius:12px}
+  .cdetail .backlink{color:var(--brand)}
+  .adv-stat{border-radius:14px}
+  .adv-stat b{font-family:var(--display);font-weight:400;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+  .adv-app{border-radius:12px}
+
+  /* Modals */
+  .modal{border-radius:var(--radius-xl)}
+  .modal-backdrop{background:rgba(16,19,26,.5);backdrop-filter:blur(6px)}
+  .modal-backdrop:not([hidden]) .modal{animation:modalIn .22s cubic-bezier(.22,.9,.28,1) both}
+  @keyframes modalIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+  .modal-head{background:#10131a}
+  .modal-title{font-family:var(--display);font-weight:400;letter-spacing:-.2px}
+  .modal-x{border-radius:999px}
+  .la-field input,.la-field select,.la-field textarea{border-radius:12px}
+  .track-row{border-radius:12px}
+  .count-chip b{color:var(--brand)}
+
+  /* Toast */
+  .toast{background:#10131a;border-radius:14px}
+  .toast.err{background:#5c1428}
+</style>
 </head>
 <body>
 <header>
@@ -596,12 +871,13 @@
 </header>
 
 <section class="hero">
+  <video class="hero-film" src="/static/hero-film.mp4" autoplay muted loop playsinline aria-hidden="true"></video>
   <div class="aurora"></div>
   <div class="grid"></div>
   <div class="hero-inner">
     <div class="eyebrow"><span class="spark"></span> JobPilot · AI-era job command center</div>
     <h1 class="hero-title">Welcome back, Matthew.<br>Land roles built for the <span class="accent">AI era</span>.</h1>
-    <p class="hero-sub">Curated AI-engineering and Bay-Area roles — auto-scored, auto-tailored, and ready to apply. Plus part-time BT roles above your $30/hr floor.</p>
+    <p class="hero-sub">Curated AI-engineering and Bay-Area roles: auto-scored, auto-tailored, ready to apply. Plus part-time BT roles above your $30/hr floor.</p>
     <div class="search-wrap">
       <div class="field">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
@@ -655,7 +931,7 @@
   <div class="board-head">
     <div>
       <div class="board-title">Application board</div>
-      <div class="board-sub" id="boardSub">Drag a card between stages — changes save instantly.</div>
+      <div class="board-sub" id="boardSub">Drag a card between stages. Changes save instantly.</div>
     </div>
   </div>
   <div class="board" id="board"></div>
@@ -676,7 +952,7 @@
   <div class="board-head">
     <div>
       <div class="board-title">Companies</div>
-      <div class="board-sub">Tailored targets — profiles, hiring bars, and your full pipeline at each.</div>
+      <div class="board-sub">Tailored targets: profiles, hiring bars, and your full pipeline at each.</div>
     </div>
   </div>
   <div id="companiesGrid" class="cgrid"></div>
@@ -688,7 +964,7 @@
   <div class="board-head no-print">
     <div>
       <div class="board-title">Advisor report</div>
-      <div class="board-sub">For Vantage Point check-ins — pick your last meeting date, review, print.</div>
+      <div class="board-sub">For Vantage Point check-ins: pick your last meeting date, review, print.</div>
     </div>
   </div>
   <div class="adv-controls no-print">
@@ -723,7 +999,7 @@
       <button class="modal-x" id="prefsClose" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
-      <label class="la-field">What kind of work do you enjoy most? <span class="hint">comma-separated — these roles get boosted</span>
+      <label class="la-field">What kind of work do you enjoy most? <span class="hint">comma-separated; these roles get boosted</span>
         <input type="text" id="prefLove" placeholder="e.g. LLM agents, evaluation, forecasting, Python">
       </label>
       <label class="la-field">What won't you do again? <span class="hint">these get demoted</span>
@@ -732,7 +1008,7 @@
       <label class="la-field">Locations that work for you
         <input type="text" id="prefLoc" placeholder="e.g. San Francisco, East Bay, Remote">
       </label>
-      <label class="la-field">Hourly pay floor <span class="hint">$/hr — roles paying under this sink; blank for none</span>
+      <label class="la-field">Hourly pay floor <span class="hint">$/hr; roles paying under this sink (blank for none)</span>
         <input type="number" id="prefFloor" min="0" step="1" placeholder="30">
       </label>
       <label class="la-field">Anything else your agent should know
@@ -787,14 +1063,19 @@ const AI_THRESHOLD = 60;
 const state = {
   apps: [], stats: {}, archetypes: {}, prefs: {},
   selectedId: null, lastTotal: -1,
-  filters: { what:"", where:"", categories:new Set(), tiers:new Set(), aiForward:false,
+  filters: { what:"", where:"", categories:new Set(), locations:new Set(), tiers:new Set(), aiForward:false,
              jobTypes:new Set(), sources:new Set(), statuses:new Set(), datePosted:"any", minScore:0 },
   sort: "relevance",
 };
 
 // JobRight-style split: once you apply, a job leaves Home and lives in the Applied tab.
 const APPLIED_TRACK=new Set(["applied","response_received","interview","rejected","no_response"]);
-const homeApps=()=>state.apps.filter(a=>!APPLIED_TRACK.has(a.status));
+// Roles that exist but Matthew cannot actually take (e.g. non-US reqs retired by
+// scripts/skip_non_us_jobs.py). They stay in the DB and still show in the Board's
+// closed column, but they don't belong in the Home browse list — they only push
+// obtainable jobs further down a fit-ranked page.
+const UNAVAILABLE=new Set(["no_longer_available"]);
+const homeApps=()=>state.apps.filter(a=>!APPLIED_TRACK.has(a.status)&&!UNAVAILABLE.has(a.status));
 const appliedApps=()=>state.apps.filter(a=>APPLIED_TRACK.has(a.status));
 
 const $ = s => document.querySelector(s);
@@ -904,6 +1185,12 @@ function filterApps(skip){
     if(where){ const isRemoteQ=where.includes("remote"); const loc=(a.location||"").toLowerCase();
       if(isRemoteQ){ if(!(a.is_remote||loc.includes("remote"))) return false; } else if(!loc.includes(where)) return false; }
     if(skip!=="categories" && f.categories.size && !f.categories.has(a.archetype||"unknown")) return false;
+    // Multi-region: a posting listing several cities matches if ANY is selected.
+    if(skip!=="locations" && f.locations.size){
+      const rs=regionsOf(a); let hit=false;
+      for(const sel of f.locations){ if(rs.has(sel)){ hit=true; break; } }
+      if(!hit) return false;
+    }
     if(skip!=="tiers" && f.tiers.size && !f.tiers.has(fitTier(a.fit_score))) return false;
     if(skip!=="aiForward" && f.aiForward && !isAIForward(a)) return false;
     if(skip!=="jobTypes" && f.jobTypes.size && !f.jobTypes.has(a.employment_type||"unknown")) return false;
@@ -962,9 +1249,63 @@ function sortApps(list){
   return c;
 }
 
+// ---- Location facet ------------------------------------------------------
+// Raw location strings are far too messy to list directly (800+ jobs produce
+// 550+ distinct values like "Austin, TX; Chicago, IL; San Francisco, CA"), so
+// postings are bucketed into regions instead. A posting that names several
+// cities belongs to ALL of their regions — filtering on Texas must still find
+// "Austin, TX; Chicago, IL", otherwise the facet hides real matches.
+// `terms:null` marks a bucket that regionsOf() assigns specially.
+const REGION_DEFS = [
+  {val:"remote",    label:"Remote (US)",       terms:null},
+  {val:"portland",  label:"Portland, OR",      terms:["portland, or","portland, oregon","portland,or","beaverton","hillsboro","vancouver, wa","oregon"]},
+  {val:"nevada",    label:"Nevada",            terms:["las vegas","reno","henderson","nevada"]},
+  {val:"arizona",   label:"Arizona",           terms:["phoenix","tempe","scottsdale","tucson","chandler","mesa, az","arizona"]},
+  {val:"texas",     label:"Texas",             terms:["austin","dallas","houston","san antonio","fort worth","plano","irving","texas"]},
+  {val:"colorado",  label:"Colorado",          terms:["denver","boulder","colorado springs","centennial","broomfield","colorado"]},
+  {val:"utah",      label:"Utah",              terms:["salt lake","lehi","draper","provo","south jordan","utah"]},
+  {val:"idaho",     label:"Idaho",             terms:["boise","idaho"]},
+  {val:"tennessee", label:"Tennessee",         terms:["nashville","memphis","knoxville","tennessee"]},
+  {val:"carolina",  label:"North Carolina",    terms:["raleigh","durham","charlotte","cary, nc","north carolina"]},
+  {val:"georgia",   label:"Atlanta / Georgia", terms:["atlanta","georgia"]},
+  {val:"florida",   label:"Florida",           terms:["tampa","clearwater","miami","orlando","jacksonville","st. petersburg","florida"]},
+  {val:"bay",       label:"Bay Area",          terms:["san francisco","oakland","berkeley","san jose","bay area","mountain view","palo alto","sunnyvale","menlo park","cupertino","santa clara","redwood city","los gatos","emeryville","san mateo","foster city"]},
+  {val:"seattle",   label:"Seattle",           terms:["seattle","bellevue","redmond","kirkland"]},
+  {val:"nyc",       label:"New York",          terms:["new york","nyc","brooklyn","manhattan"]},
+  {val:"socal",     label:"Los Angeles / SD",  terms:["los angeles","santa monica","san diego","irvine","pasadena","culver city"]},
+  {val:"chicago",   label:"Chicago",           terms:["chicago","evanston"]},
+  {val:"boston",    label:"Boston",            terms:["boston","cambridge, ma","somerville"]},
+  {val:"dc",        label:"Washington DC",     terms:["washington, d","washington d.c","washington dc","arlington, va","mclean","reston","tysons","sterling, va"]},
+  {val:"other",     label:"Other US",          terms:null},
+  {val:"unknown",   label:"Not specified",     terms:null},
+];
+const REGION_WITH_TERMS = REGION_DEFS.filter(r=>r.terms);
+
+function regionsOf(a){
+  const s=(a.location||"").toLowerCase();
+  const out=new Set();
+  if(a.is_remote || /\bremote\b|\banywhere\b|distributed/.test(s)) out.add("remote");
+  for(const r of REGION_WITH_TERMS){ if(r.terms.some(t=>s.includes(t))) out.add(r.val); }
+  // Only fall back once nothing specific matched — "Remote - Austin, TX" is
+  // both remote and Texas, but neither "other" nor "unknown".
+  if(!out.size) out.add(s.trim() ? "other" : "unknown");
+  return out;
+}
+
+function locationOptions(){
+  const present=new Set();
+  for(const a of homeApps()) for(const r of regionsOf(a)) present.add(r);
+  return REGION_DEFS.filter(r=>present.has(r.val)).map(r=>({val:r.val,label:r.label}));
+}
+
 function countBy(skip, keyFn){
   const base=filterApps(skip); const m=new Map();
-  for(const a of base){ const k=keyFn(a); if(k==null) continue; m.set(k,(m.get(k)||0)+1); }
+  for(const a of base){
+    const k=keyFn(a); if(k==null) continue;
+    // keyFn may return a Set when one job belongs to several buckets.
+    if(k instanceof Set){ for(const x of k) m.set(x,(m.get(x)||0)+1); }
+    else m.set(k,(m.get(k)||0)+1);
+  }
   return m;
 }
 
@@ -972,6 +1313,7 @@ function checkboxFacet(title, key, options){
   let html=`<div class="facet"><h4>${esc(title)}</h4>`;
   const cmap = countBy(key, a=>{
     if(key==="categories") return a.archetype||"unknown";
+    if(key==="locations") return regionsOf(a);
     if(key==="jobTypes") return a.employment_type||"unknown";
     if(key==="sources") return (a.source||"").split(":")[0];
     if(key==="statuses") return a.status;
@@ -1005,6 +1347,7 @@ function renderRail(){
   let html="";
   html+=`<div class="facet"><div class="ai-toggle"><div class="opt toggle"><input type="checkbox" id="f-ai" ${state.filters.aiForward?"checked":""}/>
     <label for="f-ai">⚡ AI-forward only</label><span class="ct">${aiCt}</span></div></div></div>`;
+  html+=checkboxFacet("Location","locations",locationOptions());
   html+=checkboxFacet("Role category","categories",catOpts);
   html+=checkboxFacet("Match tier","tiers",tierOpts);
   html+=checkboxFacet("Job type","jobTypes",typeOpts);
@@ -1027,7 +1370,7 @@ function renderRail(){
   $("#f-ai").onchange=e=>{ state.filters.aiForward=e.target.checked; render(); };
   $("#rail").querySelectorAll('input[data-dp]').forEach(el=>el.onchange=()=>{ state.filters.datePosted=el.dataset.dp; render(); });
   $("#ms").oninput=e=>{ state.filters.minScore=+e.target.value; $("#msLabel").textContent=e.target.value; renderList(); };
-  $("#clearBtn").onclick=()=>{ state.filters={ what:"",where:"",categories:new Set(),tiers:new Set(),aiForward:false,
+  $("#clearBtn").onclick=()=>{ state.filters={ what:"",where:"",categories:new Set(),locations:new Set(),tiers:new Set(),aiForward:false,
     jobTypes:new Set(),sources:new Set(),statuses:new Set(),datePosted:"any",minScore:0 };
     $("#what").value="";$("#where").value=""; render(); };
 }
@@ -1362,7 +1705,7 @@ async function loadAll(){
   try{
     const [stats, apps, arch, prefs] = await Promise.all([
       fetch("/api/stats").then(r=>r.json()),
-      fetch("/api/applications?limit=500").then(r=>r.json()),
+      fetch("/api/applications?limit=2000").then(r=>r.json()),
       fetch("/api/archetypes").then(r=>r.json()).catch(()=>({})),
       fetch("/api/agent/preferences").then(r=>r.json()).catch(()=>({})),
     ]);
@@ -1380,7 +1723,7 @@ function connectSSE(){
       let d; try{ d=JSON.parse(ev.data); }catch(_){ return; }
       if(d.type==="stats"){ state.stats=d.payload; setLastUpdate(); renderInsights();
         if(d.payload.total_jobs!==state.lastTotal){ state.lastTotal=d.payload.total_jobs;
-          fetch("/api/applications?limit=500").then(r=>r.json()).then(a=>{ state.apps=a; render(); if(state.selectedId) selectApp(state.selectedId); }); } }
+          fetch("/api/applications?limit=2000").then(r=>r.json()).then(a=>{ state.apps=a; render(); if(state.selectedId) selectApp(state.selectedId); }); } }
     };
     es.onerror=()=>{};
   }catch(e){}

@@ -48,6 +48,30 @@ def _archetype_config() -> dict:
     return _ARCHETYPE_CONFIG_CACHE
 
 
+_SETTINGS_CACHE: dict | None = None
+
+
+def _settings() -> dict:
+    """Load and cache settings.yaml (target metros + comp floor for scoring)."""
+    global _SETTINGS_CACHE
+    if _SETTINGS_CACHE is None:
+        config_path = Path(__file__).parent.parent / "config" / "settings.yaml"
+        with open(config_path, encoding="utf-8") as f:
+            _SETTINGS_CACHE = yaml.safe_load(f) or {}
+    return _SETTINGS_CACHE
+
+
+def _target_locations_text() -> str:
+    """Comma-joined target metros for the location_remote prompt."""
+    locs = (_settings().get("search", {}) or {}).get("locations", []) or []
+    return ", ".join(str(loc) for loc in locs) or "Remote (US)"
+
+
+def _salary_floor() -> int:
+    """Full-time base-salary floor used to anchor comp_range scoring."""
+    return int((_settings().get("comp", {}) or {}).get("min_annual_full_time", 85000))
+
+
 def _load_resume_summary(archetype: str | None = None) -> str:
     """Load and format the resume for the ranking prompts.
 
@@ -242,8 +266,27 @@ Description:
 ## DIMENSION DEFINITIONS:
 - technical_fit       (0-100): how well candidate's tools/languages overlap with what the JD asks for
 - level_match         (0-100): is this entry-level / IC1-IC2 (high=junior fit, low=too senior for candidate)
-- comp_range          (0-100): is compensation in range / disclosed / good for SF Bay (50 if not stated)
-- location_remote     (0-100): SF Bay or remote-friendly? (Bay Area=90+, remote-OK=80, anywhere-but-Bay=20)
+- comp_range          (0-100): does this pay enough to live ALONE in the job's OWN metro? (50 if not stated)
+                                 Judge against local cost of living, NOT against SF norms. The candidate's
+                                 floor is ${salary_floor:,}/yr base. $95k in Tucson or Nashville is a strong
+                                 score (~85); the same $95k in San Francisco barely clears rent (~45).
+                                 A disclosed range at/above the floor for its metro should score 75+.
+- location_remote     (0-100): can the candidate afford to live alone there, and does it fit the target list?
+                                 STEP 1 — ELIGIBILITY FIRST, before anything else. The candidate can only
+                                 work in the UNITED STATES. If the role is based outside the US, score 5 —
+                                 no matter what else the posting says. "Remote" does NOT override this:
+                                 "Remote - India", "Canada - Remote", "Remote-Vietnam" and
+                                 "Remote, UAE" are all 5, because the remote work is not US-based.
+                                 Only score a remote role highly when it is explicitly US-eligible.
+                                 Careful: a US state or city that merely resembles a country name is
+                                 still the US — "Indiana" is not India, "Dublin, OH" is not Ireland.
+                                 STEP 2 — only for US-based roles, grade affordability:
+                                 US-remote / remote-first = 95 (best case — decouples the job from the move).
+                                 Hybrid or onsite in a TARGET METRO (listed below) = 85.
+                                 Onsite in another affordable US metro not on the list = 65.
+                                 Onsite in a high-cost US metro (SF Bay, NYC, Seattle, Boston, San Diego,
+                                 LA, DC) = 40 — the role may be good but rent eats an entry salary alive.
+                                 TARGET METROS: {target_locations}
 - archetype_fit       (0-100): does the role's day-to-day match the {archetype} archetype
 - skills_overlap      (0-100): how many of the JD's required skills appear in the CV verbatim or near-verbatim
 - growth_signal       (0-100): does the role offer learning, mentorship, career trajectory
@@ -255,7 +298,10 @@ Description:
 ## SCORING GUIDANCE:
 - Be honest. A senior/staff role with 8+ yrs required should give level_match < 30.
 - An ML Eng role for a junior MS Quant Econ candidate should give technical_fit ~50, gap_severity ~40.
-- A data-analyst role at a Bay Area tech company should generally score well across the board for this candidate.
+- A data-analyst or analytics role that is US-remote, or onsite in one of the target metros above,
+  should generally score well across the board for this candidate — that is the sweet spot.
+- The candidate currently lives in San Francisco but is actively relocating to a cheaper metro.
+  Do NOT treat a non-Bay location as a negative; treat an unaffordable one as the negative.
 
 ## AI-FORWARD SIGNAL (separate from the 10 dimensions above):
 - ai_intensity (0-100): how central is BUILDING WITH or USING AI/LLM tooling to THIS role's day-to-day?
@@ -319,6 +365,8 @@ def score_dimensions(job: Job, archetype: str, resume_summary: str) -> dict:
         archetype=archetype,
         archetype_label=arch.get("label", archetype),
         job_description=description,
+        target_locations=_target_locations_text(),
+        salary_floor=_salary_floor(),
     )
 
     result = generate_json(prompt, system_prompt=DIMENSION_SYSTEM_PROMPT)
@@ -607,6 +655,12 @@ def rank_new_jobs(config: dict) -> dict:
     session = get_session()
     scoring_config = config.get("scoring", {})
     auto_queue_threshold = scoring_config.get("auto_queue_threshold", 60)
+    # Batch size per 15-min cycle. Was hardcoded at 20, which was fine while the
+    # scanners' Bay-Area allow-list kept intake tiny. Removing that filter
+    # (2026-08-03) raised intake ~5x, so 20/cycle no longer keeps up. Keep this
+    # under ~45: each job costs 2-3 Ollama calls (~18s), and the cycle must
+    # finish inside its 15-minute interval.
+    batch_size = int(scoring_config.get("rank_batch_size", 40))
 
     scored_count = 0
     queued_count = 0
@@ -619,7 +673,7 @@ def rank_new_jobs(config: dict) -> dict:
             .outerjoin(JobScore)
             .filter(JobScore.id.is_(None))
             .order_by(Job.date_found.desc())
-            .limit(20)  # batch
+            .limit(batch_size)
             .all()
         )
 

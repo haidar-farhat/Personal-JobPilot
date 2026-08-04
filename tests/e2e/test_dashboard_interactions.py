@@ -24,7 +24,10 @@ def test_what_search_filters_list(page, base_url):
     # The search haystack is title + company + ats_keywords (LLM-extracted) —
     # verify every visible card matches in one of those fields.
     ids = page.eval_on_selector_all(".card", "els => els.map(e => +e.dataset.id)")
-    apps = page.evaluate("fetch('/api/applications?limit=500').then(r => r.json())")
+    # Must match the limit index.html fetches with, or cards rendered from the
+    # UI's larger result set won't be found here (the cap was raised to 2000 on
+    # 2026-08-03 so out-of-metro jobs stop falling off the fit_score-sorted cut).
+    apps = page.evaluate("fetch('/api/applications?limit=2000').then(r => r.json())")
     by_id = {a["id"]: a for a in apps}
     for card_id in ids:
         a = by_id.get(card_id)

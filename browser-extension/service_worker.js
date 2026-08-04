@@ -3,16 +3,16 @@
  * All network calls go only to the local JobPilot backend (host_permissions).
  */
 
-// Chrome caches unpacked-extension service workers and does NOT re-read this
-// file on browser restart or manifest version bump (content scripts DO
-// refresh — the 2026-07-05 stale-SW incident). Self-heal: every SW edit must
-// bump SW_BUILD together with manifest.json's version; a stale worker then
-// sees the mismatch on wake and runtime.reload() re-reads the whole extension
-// from disk (same as the chrome://extensions ↻ button).
-const SW_BUILD = "1.8.0";
-try {
-  if (chrome.runtime.getManifest().version !== SW_BUILD) chrome.runtime.reload();
-} catch (e) { /* never block startup on the self-check */ }
+// ponytail: NO self-reload here. A `getManifest().version !== SW_BUILD ->
+// chrome.runtime.reload()` self-heal used to live here and it bricked the
+// extension (2026-08-03): reload() re-reads the SAME file, so the hardcoded
+// constant stays stale, so it reloads again — forever. Chrome kills an
+// extension that reloads 5x in 10s with "This extension reloaded itself too
+// frequently." The check also cannot detect what it was written for: a truly
+// stale worker reports the OLD manifest version too, so both agree and it
+// never fires. It was a no-op when correct and a brick when not.
+// After editing this file, hit ↻ on chrome://extensions like every other MV3
+// extension. tests/e2e/test_extension_no_self_reload.py keeps it from coming back.
 
 const BACKEND = "http://127.0.0.1:7777";
 
@@ -50,9 +50,12 @@ async function cacheProfile() {
 }
 
 // Structured work/education/skills for wizard ATSes (Workday). Cached for offline.
-async function fetchHistory() {
+// company/title route to the tailored resume's entries when one exists, so
+// filled panels match the attached tailored .docx.
+async function fetchHistory(company, title) {
   try {
-    const r = await fetch(`${BACKEND}/api/autofill/history`, { cache: "no-store" });
+    const qs = new URLSearchParams({ company: company || "", job_title: title || "" });
+    const r = await fetch(`${BACKEND}/api/autofill/history?${qs}`, { cache: "no-store" });
     if (r.ok) {
       const h = await r.json();
       await chrome.storage.local.set({ history: h });
@@ -89,12 +92,64 @@ function jnorm(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").t
 function jTok(n, ...w) { const t = new Set(n.split(" ")); return w.some((x) => t.has(x)); }
 function jSub(n, ...s) { return s.some((x) => n.includes(x)); }
 
+// Fields asking about someone who is NOT the applicant. "Emergency contact
+// phone number" contains "phone" and "Reference's email" contains "email", so
+// without this the identity rules below hand over his own details for a
+// different person. Mirrors _THIRD_PARTY in agents/autofill_mapper.py.
+// Both halves required: a question may NAME a relative without asking for their
+// details ("Are you a close relative of a government official (…spouse/partner,
+// parent/guardian…)?" is a yes/no about him and must still be answered).
+const J_THIRD_PARTY = ["emergency contact", "emergency", "next of kin", "spouse",
+  "guardian", "beneficiary", "dependent", "reference", "references", "referee",
+  "supervisor", "previous manager", "parent guardian"];
+const J_THIRD_PARTY_DETAIL = ["name", "email", "e mail", "phone", "mobile",
+  "telephone", "address", "relationship", "contact number"];
+
+// Safe option matching — the same two gates as content/fill.js and
+// agents/autofill_mapper.py. Kept in sync by tests/js/choice_matching.mjs,
+// which runs one shared REJECT/ACCEPT table against all three.
+const jAnchored = (short, long) => long === short || long.startsWith(short + " ");
+
+// The one option that is `c` plus a trailing qualifier. Ties refuse: matching
+// "Bachelor of Science" against both "…in Physics" and "…in Economics" would
+// otherwise pick him a major.
+function jAnchoredMatch(c, opts) {
+  if (!c) return null;
+  const hits = opts.filter((o) => { const t = jnorm(o); return t && (jAnchored(c, t) || jAnchored(t, c)); });
+  if (!hits.length) return null;
+  if (hits.length === 1) return hits[0];
+  hits.sort((a, b) => jnorm(a).split(" ").length - jnorm(b).split(" ").length);
+  const n0 = jnorm(hits[0]).split(" ").length, n1 = jnorm(hits[1]).split(" ").length;
+  return n0 !== n1 ? hits[0] : null;
+}
+
+// Gated token overlap: an option must contain EVERY distinctive word of the
+// target. Ungated, "Master of Science" matched "Bachelor of Science" on the
+// shared word "science" and filled a degree he does not hold.
+function jTokenOverlap(nv, opts) {
+  const dw = nv.split(" ").filter((w) => w.length > 2);
+  if (!dw.length) return null;
+  const covering = opts.filter((o) => { const ow = new Set(jnorm(o).split(" ")); return dw.every((w) => ow.has(w)); });
+  if (!covering.length) return null;
+  if (covering.length === 1) return covering[0];
+  covering.sort((a, b) => jnorm(a).split(" ").length - jnorm(b).split(" ").length);
+  const n0 = jnorm(covering[0]).split(" ").length, n1 = jnorm(covering[1]).split(" ").length;
+  return n0 !== n1 ? covering[0] : null;
+}
+
 function jmap(field, p) {
   const type = (field.type || "text").toLowerCase();
   if (type === "file") return { value: null, source: "file", needs_review: true, confidence: 1 };
   const nl = jnorm(field.label || ""), nn = jnorm(field.name || "");
   const n = (nl + " " + nn).trim();
   if (!n) return null;
+  const LEAVE_EMPTY = { value: null, source: "deterministic", needs_review: true, confidence: 1 };
+  // someone else's details — we hold none, so flag it rather than fill his own
+  if (jSub(n + " " + jnorm(field.section || ""), ...J_THIRD_PARTY) &&
+      jSub(n, ...J_THIRD_PARTY_DETAIL)) return LEAVE_EMPTY;
+  // a referral CODE is an identifier, not the "how did you hear" channel
+  if (jSub(n, "referral", "referrer", "referred") && jTok(n, "code", "id", "number", "token"))
+    return LEAVE_EMPTY;
   const id = p.identity || {}, ad = p.address || {}, li = p.links || {}, wa = p.work_authorization || {},
         ex = p.experience || {}, sa = p.salary || {}, rf = p.referral || {}, ee = p.eeoc || {},
         ed = (p.education || [])[0] || {}, pr = p.preferences || {},
@@ -110,23 +165,17 @@ function jmap(field, p) {
     if (!v) return null;
     if (!opts.length) return { value: v, source: "deterministic", needs_review: false, confidence: 0.9 };
     const nv = jnorm(v);
-    let m = opts.find((o) => jnorm(o) === nv);
-    if (!m) {
-      // substring tier: TIGHTEST match, not first in list order — "United
-      // States" → "United States of America", not "…Minor Outlying Islands"
-      let bd = Infinity;
-      for (const o of opts) {
-        const no = jnorm(o);
-        if (no && (no.includes(nv) || nv.includes(no)) && Math.abs(no.length - nv.length) < bd) {
-          bd = Math.abs(no.length - nv.length); m = o;
-        }
-      }
-    }
+    // anchored + tightest: "United States" → "United States of America", never
+    // "…Minor Outlying Islands", and never "Home Economics" for "Economics"
+    const m = opts.find((o) => jnorm(o) === nv) || jAnchoredMatch(nv, opts);
     return m ? { value: m, source: "deterministic", needs_review: false, confidence: 0.9 }
              : { value: v, source: "deterministic", needs_review: true, confidence: 0.5 };
   };
   // EEO-tolerant choice matcher (mirrors autofill_mapper._match_choice)
-  const DECLINE = ["decline", "do not wish", "dont wish", "prefer not", "not to answer", "not wish", "choose not", "rather not"];
+  // "dont wish" can never fire — jnorm turns "don't" into "don t"
+  const DECLINE = ["decline", "do not wish", "prefer not", "not to answer", "not wish",
+                   "choose not", "rather not", "wish to answer", "want to answer",
+                   "wish to disclose", "not to disclose", "not to identify", "not specified"];
   const SYN = { male: ["man"], female: ["woman"], heterosexual: ["straight"], "two or more races": ["two or more", "multiracial"] };
   const C = (v) => {
     if (!v) return null;
@@ -146,13 +195,8 @@ function jmap(field, p) {
         m = opts.find((o) => { const no = jnorm(o); return hints.some((h) => no === h || no.startsWith(h + " ")); });
       }
     }
-    if (!m) for (const c of cands) { m = opts.find((o) => { const no = jnorm(o); return c && (no.includes(c) || c.includes(no)); }); if (m) break; }
-    if (!m) {  // best token overlap
-      const dw = nv.split(" ").filter((w) => w.length > 2);
-      let best = null, bn = 0;
-      for (const o of opts) { const ow = new Set(jnorm(o).split(" ")); const k = dw.filter((w) => ow.has(w)).length; if (k > bn) { best = o; bn = k; } }
-      m = best;
-    }
+    if (!m) for (const c of cands) { m = jAnchoredMatch(c, opts); if (m) break; }
+    if (!m) m = jTokenOverlap(nv, opts);
     return m ? { value: m, source: "deterministic", needs_review: false, confidence: 0.9 }
              : { value: v, source: "deterministic", needs_review: true, confidence: 0.5 };
   };
@@ -380,6 +424,26 @@ async function fillPageOnce(tab, ctx, resumePref) {
   return { totals, planMeta, lastError, sawFields };
 }
 
+// Page context (top frame): title/h1/body text + company guess from the URL.
+// textLimit 4000 for fill-plans; the tailor chain wants the whole JD (12000).
+async function collectJobCtx(tab, textLimit) {
+  let ctx = { url: tab.url || "", title: tab.title || "", h1: "", text: "",
+              company: companyFromUrl(tab.url) };
+  try {
+    const c = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (lim) => ({
+        title: document.title,
+        h1: (document.querySelector("h1") || {}).innerText || "",
+        text: document.body ? document.body.innerText.slice(0, lim) : "",
+      }),
+      args: [textLimit || 4000],
+    });
+    if (c && c[0] && c[0].result) ctx = { ...ctx, ...c[0].result };
+  } catch (e) { /* non-fatal */ }
+  return ctx;
+}
+
 async function runAutofill(resumePref) {
   const tab = await getActiveTab();
   if (!tab || !tab.id) return { error: "No active tab." };
@@ -389,19 +453,7 @@ async function runAutofill(resumePref) {
   await cacheProfile();
 
   // page context for archetype routing + essays (top frame)
-  let ctx = { url: tab.url || "", title: tab.title || "", h1: "", text: "",
-              company: companyFromUrl(tab.url) };
-  try {
-    const c = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => ({
-        title: document.title,
-        h1: (document.querySelector("h1") || {}).innerText || "",
-        text: document.body ? document.body.innerText.slice(0, 4000) : "",
-      }),
-    });
-    if (c && c[0] && c[0].result) ctx = { ...ctx, ...c[0].result };
-  } catch (e) { /* non-fatal */ }
+  const ctx = await collectJobCtx(tab, 4000);
 
   // Fill the current page; on Workday, keep advancing (Next / Save and
   // Continue — NEVER Submit or the review step) and filling each new step,
@@ -432,10 +484,79 @@ async function runAutofill(resumePref) {
 
   if (!sawAny) return { error: lastError || "No application fields detected on this page." };
   if (!planMeta && !grand.filled) return { error: lastError || "Could not build a fill plan." };
+
+  // Autofill success == the user is applying here — put it on the JobPilot
+  // board right away (server side is idempotent, never regresses a status).
+  let board = null;
+  try {
+    const r = await fetch(`${BACKEND}/api/applied/record`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: tab.url, title: ctx.h1 || ctx.title || "",
+                             company: ctx.company || "",
+                             lead_source: "autofill", source: "extension" }),
+    });
+    if (r.ok) board = await r.json();
+  } catch (e) { /* board tracking is best-effort — never fail the fill */ }
+
   return { ok: true, stats: grand, pages, stopped_at: stoppedAt,
            resume: planMeta && planMeta.resume_used,
            archetype: planMeta && planMeta.archetype_label,
-           offline: !!(planMeta && planMeta._offline) };
+           offline: !!(planMeta && planMeta._offline),
+           board };
+}
+
+// ---- Company scan / save-to-board / tailor chain ----
+
+async function companyScan() {
+  const tab = await getActiveTab();
+  if (!tab || !tab.url) return { error: "No active tab." };
+  try {
+    const r = await fetch(`${BACKEND}/api/extension/company-scan`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: tab.url }),
+    });
+    return await r.json();
+  } catch (e) { return { error: "JobPilot backend offline — start it and retry." }; }
+}
+
+async function saveJob(job, ensureScore) {
+  try {
+    const r = await fetch(`${BACKEND}/api/extension/job`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: job.url, title: job.title || "",
+                             company: job.company || "",
+                             description: job.description || "",
+                             location: job.location || "",
+                             ensure_score: !!ensureScore }),
+    });
+    return await r.json();
+  } catch (e) { return { error: "JobPilot backend offline — start it and retry." }; }
+}
+
+// Save the job on the current page, make sure it's scored, then tailor a
+// one-page résumé + cover letter for it. Slow (local LLM) — the popup shows
+// progress. Autofill picks the tailored .docx up automatically afterwards
+// (/api/autofill/resume_file prefers a tailored file for this company/role).
+async function tailorCurrentJob() {
+  const tab = await getActiveTab();
+  if (!tab || !tab.id) return { error: "No active tab." };
+  const ctx = await collectJobCtx(tab, 12000);
+  const saved = await saveJob({
+    url: ctx.url, title: ctx.h1 || ctx.title, company: ctx.company,
+    description: ctx.text,
+  }, true);
+  if (saved.error || !saved.ok) return { error: saved.error || "Could not save this job." };
+  if (!saved.scored)
+    return { error: "Saved to board, but scoring failed" +
+             (saved.score_error ? ` (${saved.score_error})` : " — is Ollama running?") };
+  try {
+    const r = await fetch(`${BACKEND}/api/application/${saved.app_id}/tailor`, { method: "POST" });
+    const t = await r.json();
+    if (!t.ok) return { error: t.error || "Tailoring failed.", app_id: saved.app_id };
+    return { ok: true, resume_filename: t.resume_filename,
+             cover_filename: t.cover_filename,
+             fit_score: saved.fit_score, app_id: saved.app_id };
+  } catch (e) { return { error: "Tailoring request failed: " + e.message }; }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -444,7 +565,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     else if (msg.cmd === "profile") sendResponse(await cacheProfile());
     else if (msg.cmd === "autofill") sendResponse(await runAutofill(msg.resumePref));
     else if (msg.cmd === "plan") { await cacheProfile(); sendResponse(await fetchPlan(msg.fields, msg.ctx, msg.resumePref)); }
-    else if (msg.cmd === "history") sendResponse(await fetchHistory());
+    else if (msg.cmd === "history") sendResponse(await fetchHistory(msg.company, msg.title));
     else if (msg.cmd === "resume_file") sendResponse(await fetchFileB64("resume_file", msg.company, msg.title));
     else if (msg.cmd === "cover_letter_file") sendResponse(await fetchFileB64("cover_letter_file", msg.company, msg.title));
     else if (msg.cmd === "resume_meta") {
@@ -463,6 +584,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse(await r.json());
       } catch (e) { sendResponse({ error: String(e && e.message || e) }); }
     }
+    else if (msg.cmd === "company_scan") sendResponse(await companyScan());
+    else if (msg.cmd === "save_job") sendResponse(await saveJob(msg.job || {}, msg.ensureScore));
+    else if (msg.cmd === "tailor") sendResponse(await tailorCurrentJob());
     else if (msg.cmd === "mark_applied") {
       try {
         const r = await fetch(`${BACKEND}/api/applied/record`, {

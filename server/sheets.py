@@ -284,6 +284,17 @@ async def sheet_sync(request: Request):
         except Exception as e:
             return {"connected": True, "reason": f"Could not write the header row: {e}",
                     "added": 0, "skipped": 0, "spreadsheet_url": url, "errors": [str(e)]}
+        try:  # mirror the Job Log workbook's look: 14pt centered header, wide columns
+            ws.format("1:1", {"horizontalAlignment": "CENTER", "textFormat": {"fontSize": 14}})
+            ws.spreadsheet.batch_update({"requests": [{
+                "updateDimensionProperties": {
+                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
+                              "startIndex": 0, "endIndex": len(header)},
+                    "properties": {"pixelSize": 190},
+                    "fields": "pixelSize",
+                }}]})
+        except Exception:
+            pass  # cosmetic only — never fail the sync over styling
         hmap = canonical_header_map()
         data_rows = []
     else:

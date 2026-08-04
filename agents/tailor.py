@@ -5,6 +5,7 @@ section headers with hairline rule beneath, tab-aligned two-column rows for
 institution/location and degree/date, tight bullet spacing.
 """
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -751,6 +752,15 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
     resume_doc = _create_resume_docx(resume_data, config)
     resume_path = resumes_dir / f"{filename_base}_resume.docx"
     resume_doc.save(str(resume_path))
+
+    # Sidecar JSON of the structured content — /api/autofill/history serves
+    # THESE entries for Workday-style wizards so the filled experience panels
+    # match the attached tailored résumé word-for-word.
+    try:
+        resume_path.with_suffix(".json").write_text(
+            json.dumps(resume_data, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"[tailor] sidecar JSON save failed: {e}")
 
     # Save cover letter .docx
     cover_doc = _create_cover_letter_docx(cover_text, job, config)

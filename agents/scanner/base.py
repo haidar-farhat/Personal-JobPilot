@@ -48,6 +48,7 @@ class BaseScanner(ABC):
         self.keywords = self.search_config.get("keywords", [])
         self.locations = self.search_config.get("locations", [])
         self.excluded_keywords = self.search_config.get("excluded_title_keywords", [])
+        self.excluded_locations = self.search_config.get("excluded_locations", [])
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -65,6 +66,95 @@ class BaseScanner(ABC):
             if keyword.lower() in title_lower:
                 return True
         return False
+
+    # US-eligibility signals. A posting that names any of these is keepable even
+    # if it ALSO names a foreign office — big ATS boards routinely list one req
+    # as "San Francisco, CA | London, UK", and a naive deny-list would throw the
+    # US-eligible half away.
+    _US_SIGNALS = (
+        "united states", "usa", "u.s.", " us;", " us)", ", us", "remote - us",
+        "us remote", "nationwide", "anywhere in the us",
+    )
+    _US_STATE_CODES = (
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+        "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+        "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+        "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+        "WI", "WY", "DC",
+    )
+    # ", CA" only when the code ends a segment: end-of-string or a separator.
+    _US_STATE_RE = re.compile(
+        r",\s*(?:" + "|".join(_US_STATE_CODES) + r")\s*(?:$|[;|/)\],\n])"
+    )
+    # "Toronto, ON, CA" — here CA is the ISO code for Canada, not California, so
+    # the US-state escape above must not fire. US postings write ", CA" after a
+    # city ("San Francisco, CA"), never after another region code.
+    _CA_IS_CANADA_RE = re.compile(
+        r",\s*(?:ON|BC|AB|QC|NS|MB|SK|NB|PE|NL|YT|NT|NU)\s*,\s*CA\b",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _deny_pattern(terms) -> "re.Pattern | None":
+        """Compile the deny-list with word boundaries.
+
+        Plain substring matching silently eats US locations that merely contain
+        a country name: "india" is inside "Indiana"/"Indianapolis", "oman" is
+        inside "Romansville". Boundaries are only added on ends that are word
+        characters, so entries like ", uk" and "uk&i" still match correctly.
+        """
+        parts = []
+        for t in terms:
+            t = (t or "").strip().lower()
+            if not t:
+                continue
+            p = re.escape(t)
+            if t[0].isalnum():
+                p = r"\b" + p
+            if t[-1].isalnum():
+                p = p + r"\b"
+            parts.append(p)
+        return re.compile("|".join(parts)) if parts else None
+
+    def _should_skip_location(self, location: str) -> bool:
+        """True if the posting is for a location Matthew can't take.
+
+        Deny-list from settings.yaml `search.excluded_locations`, overridden by
+        any US-eligibility signal in the same string. Blank locations pass —
+        plenty of real US reqs omit it, and the ranker scores those properly.
+
+        This is deliberately a coarse non-US gate, NOT a target-metro allow-list:
+        location strings are too messy ("US, CA, Santa Clara", "Remote-Friendly,
+        United States") for exact matching, and metro preference is nuanced work
+        the LLM ranker already does. Point of this gate is only to stop paying
+        for LLM calls on reqs in Bangalore or Tokyo.
+        """
+        if not self.excluded_locations:
+            return False
+        loc = (location or "").strip().lower()
+        if not loc:
+            return False
+
+        pat = getattr(self, "_deny_pat_cache", None)
+        if pat is None:
+            pat = self._deny_pattern(self.excluded_locations)
+            self._deny_pat_cache = pat
+        if pat is None or not pat.search(loc):
+            return False
+
+        # Named a foreign location — keep it anyway if it's also US-eligible.
+        if self._CA_IS_CANADA_RE.search(location or ""):
+            return True
+        if any(sig in loc for sig in self._US_SIGNALS):
+            return False
+        # ", CA" / ", TX" style state suffixes. Matched UPPERCASE against the
+        # original string and anchored to a segment end, because the loose
+        # version has two false positives that both occur in real postings:
+        #   "Canada - Remote (ON, AB, BC, or NS Only)" -> ", or" reads as Oregon
+        #   "London, ON" (Ontario) -> not a US state, must stay rejected
+        if re.search(self._US_STATE_RE, location or ""):
+            return False
+        return True
 
     # Core role terms always treated as relevant (preserves legacy data/analyst
     # recall) — unioned with the configured search keywords. Matched on word
@@ -137,6 +227,14 @@ class BaseScanner(ABC):
                     # Skip excluded titles
                     if self._should_skip_title(raw_job.title):
                         logger.debug(f"[{self.source_name}] Skipping excluded title: {raw_job.title}")
+                        continue
+
+                    # Skip non-US postings before they cost an LLM scoring call
+                    if self._should_skip_location(raw_job.location):
+                        logger.debug(
+                            f"[{self.source_name}] Skipping non-US location "
+                            f"'{raw_job.location}': {raw_job.title}"
+                        )
                         continue
 
                     # Check for duplicates
