@@ -39,6 +39,17 @@ class ApplicationStatus(enum.Enum):
     SKIPPED = "skipped"
 
 
+# Auto-apply outcomes that will not change on a retry: the bot never signs in,
+# never creates accounts, never solves CAPTCHAs. Shared by the runner (skip on
+# re-selection) and the dashboard ("Needs manual apply" surfacing).
+AUTO_APPLY_PERMANENT_FAILURES = frozenset({
+    "failed_login_required", "failed_workday_login_required", "failed_captcha",
+    "failed_honeypot", "failed_too_complex", "failed_too_many_essays",
+    "failed_not_workday", "failed_no_resume_upload", "failed_resume_field_not_found",
+    "failed_required_fields_unfilled",
+})
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

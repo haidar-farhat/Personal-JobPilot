@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Common semantic application fixture</title></head>
+<body>
+  <main>
+    <h1>Application</h1>
+    <p id="identity-help">Use the legal name shown on your documents.</p>
+    <label id="first-label" for="first">Given name</label>
+    <input id="first" name="candidate[given]" autocomplete="given-name"
+           aria-labelledby="first-label identity-help" required>
+
+    <label for="last">Family name</label>
+    <input id="last" name="candidate[family]" autocomplete="family-name" required>
+
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+
+    <label for="phone">Phone</label>
+    <input id="phone" type="tel" autocomplete="tel-national" inputmode="tel">
+
+    <fieldset>
+      <legend>Home address</legend>
+      <label for="street">Street address</label>
+      <input id="street" autocomplete="address-line1">
+      <label for="city">City</label>
+      <input id="city" autocomplete="address-level2">
+      <label for="region">State</label>
+      <select id="region" autocomplete="address-level1">
+        <option value="">Select</option><option>California</option><option>Nevada</option>
+      </select>
+      <label for="postal">Postal code</label>
+      <input id="postal" autocomplete="postal-code" inputmode="numeric">
+    </fieldset>
+
+    <label for="linkedin">LinkedIn profile</label>
+    <input id="linkedin" name="linkedin" type="url" autocomplete="url">
+
+    <label for="consent">Anything else we should know?</label>
+    <textarea id="consent"></textarea>
+
+    <button type="submit">Submit application</button>
+  </main>
+</body>
+</html>

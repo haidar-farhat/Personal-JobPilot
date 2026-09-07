@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -20,7 +21,8 @@ from sqlalchemy import func, desc
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.database import get_session, init_db, record_status_change
-from db.models import Job, JobScore, Application, ApplicationStatus, ScanLog
+from db.models import (Job, JobScore, Application, ApplicationStatus, ScanLog,
+                       AUTO_APPLY_PERMANENT_FAILURES)
 
 
 BASE_DIR = Path(__file__).parent
@@ -49,7 +51,45 @@ def _archetype_label(key: str | None) -> str | None:
     arch = _archetypes().get("archetypes", {}).get(key)
     return arch.get("label") if arch else key
 
+
+def _ats_summary(resume_path: str | None) -> dict | None:
+    """Optimizer verdict the tailor saved for this résumé
+    (output/optimizer/<base>_optimizer.json, same base name as the .docx)."""
+    if not resume_path:
+        return None
+    try:
+        base = Path(resume_path).stem.removesuffix("_resume")
+        report = PROJECT_ROOT / "output" / "optimizer" / f"{base}_optimizer.json"
+        if not report.exists():
+            return None
+        r = json.loads(report.read_text(encoding="utf-8"))
+        return {"score": r.get("overall"), "keywords_missing": list(r.get("keywords_missing") or [])[:8]}
+    except Exception:
+        return None
+
 app = FastAPI(title="JobPilot Dashboard", docs_url=None, redoc_url=None)
+
+
+class _QuietLogs(logging.Filter):
+    """Drop the two noise sources that buried real errors in dashboard.log
+    (964 tracebacks by 2026-09-01): the Windows Proactor ConnectionResetError
+    raised whenever an SSE client disconnects, and access lines for the two
+    5-second pollers (SSE stats, watchdog health)."""
+
+    def filter(self, record):
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, ConnectionResetError):
+            return False
+        msg = record.getMessage()
+        if record.name == "asyncio" and "_call_connection_lost" in msg:
+            return False
+        if record.name == "uvicorn.access" and ('"GET /api/stats ' in msg or '"GET /api/stream ' in msg):
+            return False
+        return True
+
+
+for _name in ("asyncio", "uvicorn.access"):
+    logging.getLogger(_name).addFilter(_QuietLogs())
 
 # CORS — the server binds to 127.0.0.1 only; permissive origins let the
 # browser-extension service worker call the autofill API.
@@ -85,6 +125,10 @@ app.include_router(advisor_router)
 # Extension features (company board scan / find-or-import for the tailor chain)
 from server.extension_api import router as extension_router
 app.include_router(extension_router)
+
+# Gmail connector (read-only IMAP): ATS verification codes + "Sync from email" review queue
+from server.gmail import router as gmail_router
+app.include_router(gmail_router)
 
 # Initialize DB
 init_db()
@@ -143,6 +187,7 @@ def _serialize_application(app_obj, job, score):
         "job_id": job.id,
         "title": job.title,
         "company": job.company,
+        "company_id": getattr(job, "company_id", None),
         "location": job.location or "",
         "salary_text": job.salary_text or "",
         "salary_min": job.salary_min,
@@ -180,6 +225,8 @@ def _serialize_application(app_obj, job, score):
         "resume_filename": resume_filename,
         "cover_filename": cover_filename,
         "has_tailored_cv": bool(app_obj.resume_path),
+        "has_resume_pdf": bool(app_obj.resume_path) and Path(app_obj.resume_path).with_suffix(".pdf").exists(),
+        "ats": _ats_summary(app_obj.resume_path),
         "has_cover_letter": bool(app_obj.cover_letter_path),
         "date_applied": app_obj.date_applied.isoformat() if app_obj.date_applied else None,
         "days_since_applied": days_since_applied,
@@ -190,6 +237,11 @@ def _serialize_application(app_obj, job, score):
         "auto_apply_status": getattr(app_obj, "auto_apply_status", None),
         "auto_apply_attempted_at": app_obj.auto_apply_attempted_at.isoformat()
             if getattr(app_obj, "auto_apply_attempted_at", None) else None,
+        "next_action": getattr(app_obj, "next_action", None),
+        # The bot hit a wall it can never clear (login, CAPTCHA…) and the role is
+        # still waiting — a human has to submit it.
+        "needs_manual_apply": getattr(app_obj, "auto_apply_status", None) in AUTO_APPLY_PERMANENT_FAILURES
+            and status_key == "materials_ready",
     }
 
 
@@ -242,6 +294,21 @@ def _get_stats():
             auto_applied_total = 0
             auto_applied_today = 0
 
+        # Pipeline liveness for the header strip (2026-09-01): when did the
+        # scheduler last scan, and how many roles is the bot waiting on a human for?
+        last_scan = session.query(func.max(ScanLog.timestamp)).scalar()
+        last_scan_age_min = None
+        if last_scan:
+            if last_scan.tzinfo is None:
+                last_scan = last_scan.replace(tzinfo=timezone.utc)
+            last_scan_age_min = max(0, int((now - last_scan).total_seconds() // 60))
+        needs_manual_apply = (
+            session.query(Application)
+            .filter(Application.auto_apply_status.in_(AUTO_APPLY_PERMANENT_FAILURES))
+            .filter(Application.status == ApplicationStatus.MATERIALS_READY)
+            .count()
+        )
+
         return {
             "total_jobs": total_jobs,
             "jobs_today": jobs_today,
@@ -254,6 +321,9 @@ def _get_stats():
             "pending_review": pipeline.get("materials_ready", 0) + pipeline.get("queued", 0) + pipeline.get("scored", 0),
             "auto_applied_total": auto_applied_total,
             "auto_applied_today": auto_applied_today,
+            "last_scan_at": last_scan.isoformat() if last_scan else None,
+            "last_scan_age_min": last_scan_age_min,
+            "needs_manual_apply": needs_manual_apply,
             "last_update": now.isoformat(),
         }
     finally:
@@ -362,15 +432,19 @@ def _get_scan_logs(limit=15):
 # ============================================================
 # API Endpoints
 # ============================================================
+# Handlers that only do sync SQLite work are plain `def` on purpose: FastAPI
+# runs those in its threadpool, so a slow query can't stall the event loop and
+# freeze the SSE stream for every open tab (they were all `async def` until
+# 2026-09-01). Handlers that await a threadpool call themselves stay async.
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
+def index():
     html_path = STATIC_DIR / "index.html"
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
 
 @app.get("/healthz")
-async def healthz():
+def healthz():
     """Liveness probe — checks Ollama reachability + DB query + return ok."""
     from utils.ollama_client import check_ollama_health  # local import to avoid startup cost
     ollama_ok = False
@@ -398,7 +472,7 @@ async def healthz():
 
 
 @app.get("/api/stats")
-async def api_stats():
+def api_stats():
     return _get_stats()
 
 
@@ -416,7 +490,7 @@ def _clean_keyword_list(v):
 
 
 @app.get("/api/agent/preferences")
-async def get_agent_preferences():
+def get_agent_preferences():
     if PREFS_PATH.exists():
         try:
             return yaml.safe_load(PREFS_PATH.read_text(encoding="utf-8")) or {}
@@ -445,12 +519,12 @@ async def set_agent_preferences(request: Request):
 
 
 @app.get("/api/applications")
-async def api_applications(status: str = None, search: str = None, limit: int = 2000):
+def api_applications(status: str = None, search: str = None, limit: int = 2000):
     return _get_applications(status_filter=status, search=search, limit=limit)
 
 
 @app.get("/api/application/{app_id}")
-async def api_application_detail(app_id: int):
+def api_application_detail(app_id: int):
     session = get_session()
     try:
         result = (
@@ -514,17 +588,17 @@ async def api_update_notes(app_id: int, request: Request):
 
 
 @app.get("/api/scan-logs")
-async def api_scan_logs(limit: int = 15):
+def api_scan_logs(limit: int = 15):
     return _get_scan_logs(limit)
 
 
 @app.get("/api/activity")
-async def api_activity(limit: int = 15):
+def api_activity(limit: int = 15):
     return _get_recent_activity(limit)
 
 
 @app.get("/api/file/{file_type}/{app_id}")
-async def api_file_download(file_type: str, app_id: int):
+def api_file_download(file_type: str, app_id: int):
     """Download resume or cover letter .docx."""
     session = get_session()
     try:
@@ -534,6 +608,8 @@ async def api_file_download(file_type: str, app_id: int):
 
         if file_type == "resume" and app_obj.resume_path:
             path = Path(app_obj.resume_path)
+        elif file_type == "resume_pdf" and app_obj.resume_path:
+            path = Path(app_obj.resume_path).with_suffix(".pdf")   # Word-verified one-page export
         elif file_type == "cover" and app_obj.cover_letter_path:
             path = Path(app_obj.cover_letter_path)
         else:
@@ -545,14 +621,15 @@ async def api_file_download(file_type: str, app_id: int):
         return FileResponse(
             path=str(path),
             filename=path.name,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            media_type=("application/pdf" if path.suffix.lower() == ".pdf" else
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         )
     finally:
         session.close()
 
 
 @app.post("/api/application/{app_id}/open-link")
-async def api_open_link(app_id: int):
+def api_open_link(app_id: int):
     """Open the application URL in the default browser."""
     session = get_session()
     try:
@@ -569,7 +646,7 @@ async def api_open_link(app_id: int):
 
 
 @app.get("/api/application/{app_id}/evaluation")
-async def api_evaluation(app_id: int):
+def api_evaluation(app_id: int):
     """Return the 6-block markdown evaluation report for this application."""
     session = get_session()
     try:
@@ -689,6 +766,69 @@ async def api_outreach(app_id: int, refresh: bool = False):
         return JSONResponse(content={"ok": False, "error": str(e)}, status_code=200)
 
 
+@app.get("/api/application/{app_id}/followup")
+async def api_followup(app_id: int, refresh: bool = False):
+    """Generate (or return cached) a follow-up nudge DRAFT for a quiet application.
+
+    Drafts a short status-check email + LinkedIn DM the user copies and sends
+    themselves — it NEVER sends anything. LLM runs in a threadpool; degrades
+    gracefully (ok:false) when Ollama is offline instead of 500-ing.
+    """
+    session = get_session()
+    try:
+        result = (
+            session.query(Application, Job, JobScore)
+            .join(Job, Application.job_id == Job.id)
+            .outerjoin(JobScore, JobScore.job_id == Job.id)
+            .filter(Application.id == app_id)
+            .first()
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job, score = result
+        job_id = job.id
+        days_since_applied = None
+        if app_obj.date_applied:
+            delta = datetime.now(timezone.utc) - app_obj.date_applied.replace(tzinfo=timezone.utc)
+            days_since_applied = delta.days
+        ctx = {
+            "title": job.title,
+            "company": job.company,
+            "description": job.description or "",
+            "archetype": getattr(score, "archetype", None) if score else None,
+            "fit_score": getattr(score, "fit_score", None) if score else None,
+            "key_matches": (getattr(score, "key_matches", None) or []) if score else [],
+            "status": app_obj.status.value if hasattr(app_obj.status, "value") else str(app_obj.status),
+            "days_since_applied": days_since_applied,
+        }
+    finally:
+        session.close()
+
+    try:
+        from agents.followup import get_or_create_followup
+        pack = await asyncio.to_thread(get_or_create_followup, job_id, ctx, refresh)
+        pack["ok"] = True
+        return JSONResponse(content=pack)
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=200)
+
+
+@app.get("/api/upskill")
+async def api_upskill(refresh: bool = False):
+    """Global skill-gap heatmap + learning plan aggregated from every scored job.
+
+    The heatmap is deterministic (DB only); the learning-plan themes need Ollama
+    and degrade to an `llm_error` note inside an ok:true response when it's down.
+    """
+    try:
+        from agents.upskill import get_or_create_upskill
+        report = await asyncio.to_thread(get_or_create_upskill, refresh)
+        report["ok"] = True
+        return JSONResponse(content=report)
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=200)
+
+
 _TAILOR_LOCKS_GUARD = threading.Lock()
 _TAILOR_LOCKS: dict = {}
 
@@ -705,9 +845,10 @@ def _tailor_lock(job_id):
 
 
 @app.post("/api/application/{app_id}/tailor")
-async def api_tailor_resume(app_id: int):
-    """On-demand: generate a tailored one-page résumé + cover letter for this job.
+async def api_tailor_resume(app_id: int, cover_letter: int | None = None):
+    """On-demand: generate a tailored one-page résumé (+ optional cover letter).
 
+    ?cover_letter=0|1 overrides settings.yaml tailor.cover_letter_default.
     Runs the LLM in a threadpool; degrades gracefully (ok:false) on failure.
     Persists the file paths + bumps status to MATERIALS_READY from pre-materials states.
     """
@@ -734,9 +875,10 @@ async def api_tailor_resume(app_id: int):
 
     try:
         from agents.tailor import tailor_for_job
+        want_cover = None if cover_letter is None else bool(cover_letter)
         def _run_tailor():
             with _tailor_lock(job.id):   # serialize same-job tailoring (no dup LLM, no racing save)
-                return tailor_for_job(job, score)
+                return tailor_for_job(job, score, cover_letter=want_cover)
         paths = await asyncio.to_thread(_run_tailor)
     except Exception as e:
         return JSONResponse(content={"ok": False, "error": f"Tailoring failed: {e}"}, status_code=200)
@@ -747,24 +889,31 @@ async def api_tailor_resume(app_id: int):
         if not app_obj:
             raise HTTPException(status_code=404, detail="Application not found")
         app_obj.resume_path = paths["resume_docx"]
-        app_obj.cover_letter_path = paths["cover_letter_docx"]
+        if paths.get("cover_letter_docx"):        # a skipped letter keeps any earlier one
+            app_obj.cover_letter_path = paths["cover_letter_docx"]
         if app_obj.status in (ApplicationStatus.FOUND, ApplicationStatus.SCORED, ApplicationStatus.QUEUED):
             record_status_change(session, app_obj, ApplicationStatus.MATERIALS_READY, source="dashboard")
         session.commit()
         new_status = app_obj.status.value
+        cover_name = Path(app_obj.cover_letter_path).name if app_obj.cover_letter_path else None
     finally:
         session.close()
 
     return JSONResponse(content={
         "ok": True,
         "resume_filename": Path(paths["resume_docx"]).name,
-        "cover_filename": Path(paths["cover_letter_docx"]).name,
+        "pdf_filename": Path(paths["resume_pdf"]).name if paths.get("resume_pdf") else None,
+        "pages": paths.get("pages"),
+        "cover_filename": cover_name,
+        "cover_generated": bool(paths.get("cover_letter_docx")),
+        "ats_score": paths.get("optimizer_score"),
+        "keywords_missing": paths.get("keywords_missing") or [],
         "status": new_status,
     })
 
 
 @app.get("/api/archetypes")
-async def api_archetypes():
+def api_archetypes():
     """Return the archetype config so the drawer can render labels + auto-apply floors."""
     cfg = _archetypes()
     out = {}
@@ -778,7 +927,7 @@ async def api_archetypes():
 
 
 @app.post("/api/application/{app_id}/open-cv")
-async def api_open_cv(app_id: int):
+def api_open_cv(app_id: int):
     """Open the tailored CV in the default application (Word)."""
     session = get_session()
     try:
@@ -800,6 +949,186 @@ async def api_open_cv(app_id: int):
 
 
 # ============================================================
+# JobRight-parity endpoints (2026-09-07): copilot Q&A, résumé list,
+# profile page, agent run/status.
+# ============================================================
+
+_ASK_SYSTEM = ("You are JobPilot, a job-search copilot for one candidate. Answer the question about "
+               "this specific job using the posting, the evaluation and the candidate's résumé summary. "
+               "Be concrete and brief: markdown bullets, no preamble, no invented facts about the company.")
+
+
+@app.post("/api/application/{app_id}/ask")
+async def api_ask(app_id: int, request: Request):
+    """Free-text copilot question about one job → local LLM (90 s cap)."""
+    body = await request.json()
+    question = str(body.get("question") or "").strip()[:2000]
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    session = get_session()
+    try:
+        result = (
+            session.query(Application, Job, JobScore)
+            .join(Job, Application.job_id == Job.id)
+            .outerjoin(JobScore, JobScore.job_id == Job.id)
+            .filter(Application.id == app_id)
+            .first()
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Application not found")
+        _, job, score = result
+        title, company, desc = job.title, job.company, (job.description or "")[:6000]
+        archetype = getattr(score, "archetype", None) if score else None
+        eval_md = ""
+        eval_path = getattr(score, "evaluation_path", None) if score else None
+        if eval_path and Path(eval_path).exists():
+            eval_md = Path(eval_path).read_text(encoding="utf-8")[:4000]
+    finally:
+        session.close()
+
+    def _answer():
+        from agents.ranker import _load_resume_summary
+        from utils.ollama_client import generate_text
+        try:
+            resume = _load_resume_summary(archetype)[:3500]
+        except Exception:
+            resume = ""
+        prompt = (f"JOB: {title} at {company}\n\nPOSTING:\n{desc}\n\n"
+                  + (f"EVALUATION REPORT:\n{eval_md}\n\n" if eval_md else "")
+                  + f"CANDIDATE RESUME SUMMARY:\n{resume}\n\nQUESTION: {question}\n\nANSWER (markdown):")
+        return generate_text(prompt, _ASK_SYSTEM)
+
+    try:
+        answer = await asyncio.wait_for(asyncio.to_thread(_answer), timeout=90)
+        return {"ok": True, "answer": (answer or "").strip()}
+    except asyncio.TimeoutError:
+        return JSONResponse(content={"ok": False, "error": "The local AI took longer than 90 s — try a shorter question."})
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)})
+
+
+_BASE_RESUMES = [
+    {"key": "ai", "file": "base_resume.yaml", "label": "AI / Data base résumé", "target": "AI, data & analytics roles"},
+    {"key": "bt", "file": "base_resume_bt.yaml", "label": "Behavioral Tech base résumé", "target": "Behavioral Technician roles"},
+]
+
+
+def _stamp(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M")
+
+
+@app.get("/api/resume/list")
+def api_resume_list(limit: int = 20):
+    """Resume page: uploaded PDF · base YAML résumés · newest tailored .docx (with their job)."""
+    from server.autofill import resume_meta
+    try:
+        uploaded = resume_meta("ai")
+    except Exception as e:
+        uploaded = {"file": None, "error": str(e)}
+    base = []
+    for b in _BASE_RESUMES:
+        p = PROJECT_ROOT / "config" / b["file"]
+        if p.exists():
+            st = p.stat()
+            base.append({**b, "modified": _stamp(st.st_mtime), "created": _stamp(getattr(st, "st_birthtime", st.st_ctime))})
+    out_dir = PROJECT_ROOT / "output" / "resumes"
+    docs = sorted(out_dir.glob("*_resume.docx"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
+    newest = docs[:limit]
+    by_path = {}
+    session = get_session()
+    try:
+        names = [d.name for d in newest]
+        rows = (session.query(Application, Job)
+                .join(Job, Application.job_id == Job.id)
+                .filter(Application.resume_path.isnot(None)).all())
+        for app_obj, job in rows:
+            if app_obj.resume_path and Path(app_obj.resume_path).name in names:
+                by_path[Path(app_obj.resume_path).name] = (app_obj, job)
+    finally:
+        session.close()
+    tailored = []
+    for d in newest:
+        st = d.stat()
+        hit = by_path.get(d.name)
+        ats = _ats_summary(str(d)) or {}
+        tailored.append({
+            "file": d.name, "modified": _stamp(st.st_mtime), "created": _stamp(getattr(st, "st_birthtime", st.st_ctime)),
+            "has_pdf": d.with_suffix(".pdf").exists(), "ats_score": ats.get("score"),
+            "app_id": hit[0].id if hit else None, "title": hit[1].title if hit else None, "company": hit[1].company if hit else None,
+        })
+    return {"uploaded": uploaded, "base": base, "tailored": tailored, "tailored_total": len(docs)}
+
+
+@app.get("/api/resume/base/{key}")
+def api_resume_base(key: str):
+    """Render a base résumé YAML to .docx (cached next to the autofill's copy)."""
+    b = next((x for x in _BASE_RESUMES if x["key"] == key), None)
+    if not b:
+        raise HTTPException(status_code=404, detail="Unknown base résumé")
+    yaml_path = PROJECT_ROOT / "config" / b["file"]
+    if not yaml_path.exists():
+        raise HTTPException(status_code=404, detail="Base résumé YAML missing")
+    from agents.tailor import _create_resume_docx, _load_config
+    cache = PROJECT_ROOT / "output" / "resumes" / "_base"
+    cache.mkdir(parents=True, exist_ok=True)
+    out = cache / f"base_resume_{key}.docx"
+    if not out.exists() or out.stat().st_mtime < yaml_path.stat().st_mtime:
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        _create_resume_docx(data, _load_config()).save(str(out))
+    return FileResponse(str(out), filename=f"Matthew_Cromaz_{b['label'].split(' ')[0]}_base_resume.docx")
+
+
+_PROFILE_KEYS = ("identity", "address", "links", "work_authorization", "experience", "education", "eeoc")
+_RESUME_KEYS = ("education", "work_experience", "project_experience", "technical_skills", "certifications", "summary")
+
+
+@app.get("/api/profile/full")
+def api_profile_full():
+    """Profile page. Never returns guardrails / essays / passwords / overrides."""
+    prof = {}
+    p = PROJECT_ROOT / "config" / "applicant_profile.yaml"
+    if p.exists():
+        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        prof = {k: raw.get(k) for k in _PROFILE_KEYS if raw.get(k) is not None}
+    r = PROJECT_ROOT / "config" / "base_resume.yaml"
+    resume = {}
+    if r.exists():
+        raw = yaml.safe_load(r.read_text(encoding="utf-8")) or {}
+        resume = {k: raw.get(k) for k in _RESUME_KEYS if raw.get(k) is not None}
+    return {**prof, "resume": resume, "note": "Edit config/applicant_profile.yaml or config/base_resume.yaml to change"}
+
+
+# ponytail: one module-level thread + dict; per-user tool, one run at a time is the point.
+_AGENT = {"thread": None, "last_summary": None, "started_at": None}
+
+
+def _agent_worker():
+    try:
+        from agents.auto_applier.runner import run_auto_apply
+        _AGENT["last_summary"] = run_auto_apply()
+    except Exception as e:  # runner is being rewritten by another agent — surface, never crash
+        _AGENT["last_summary"] = {"error": str(e)}
+
+
+@app.get("/api/agent/status")
+def api_agent_status():
+    t = _AGENT["thread"]
+    return {"running": bool(t and t.is_alive()), "last_summary": _AGENT["last_summary"], "started_at": _AGENT["started_at"]}
+
+
+@app.post("/api/agent/run")
+def api_agent_run():
+    t = _AGENT["thread"]
+    if t and t.is_alive():
+        return {"started": False, "reason": "already running"}
+    t = threading.Thread(target=_agent_worker, name="jobpilot-agent", daemon=True)
+    _AGENT["thread"] = t
+    _AGENT["started_at"] = datetime.now(timezone.utc).isoformat()
+    t.start()
+    return {"started": True}
+
+
+# ============================================================
 # Server-Sent Events for live updates
 # ============================================================
 
@@ -813,7 +1142,9 @@ async def api_stream():
 
         while True:
             try:
-                stats = _get_stats()
+                # DB work off the event loop — this generator runs once per open
+                # tab, forever; a sync query here stalled every other request.
+                stats = await asyncio.to_thread(_get_stats)
                 total = stats["total_jobs"]
                 applied_count = stats["pipeline"].get("applied", 0)
 
@@ -826,14 +1157,14 @@ async def api_stream():
 
                 # If job counts changed, also send updated applications
                 if total != last_total or applied_count != last_applied_count:
-                    applications = _get_applications(limit=100)
+                    applications = await asyncio.to_thread(_get_applications, limit=100)
                     data = {
                         "type": "applications",
                         "payload": applications[:100],
                     }
                     yield f"data: {json.dumps(data)}\n\n"
 
-                    activity = _get_recent_activity()
+                    activity = await asyncio.to_thread(_get_recent_activity)
                     data = {
                         "type": "activity",
                         "payload": activity,

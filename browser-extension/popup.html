@@ -31,6 +31,20 @@
     <button id="tailorBtn" class="secondary">Tailor résumé for this job</button>
     <div id="tailorResult" class="result"></div>
 
+    <div class="pw">
+      <label class="row" for="atsPw">ATS password
+        <span class="pwrow">
+          <input type="password" id="atsPw" placeholder="one for every ATS account" autocomplete="off" spellcheck="false">
+          <button id="pwShow" class="mini" type="button" title="Show / hide">👁</button>
+          <button id="pwGen" class="mini" type="button" title="Generate a strong one">⚄</button>
+        </span>
+      </label>
+      <button id="pwSave" class="secondary">Save ATS password</button>
+      <div id="pwResult" class="result"></div>
+      <div class="meta">Used by the in-page “Fill account” button on Workday-style sign-up walls. Stored only in this browser — never sent to JobPilot. Verification codes come from your Gmail (set up on the dashboard).</div>
+    </div>
+    <div class="status"><span class="dot" id="gdot"></span><span id="gmailText">Gmail: checking…</span></div>
+
     <div class="foot">Fills fields only — you review &amp; click <b>Apply</b> yourself.
       <a href="http://127.0.0.1:7777" target="_blank">Open dashboard</a></div>
   </div>

@@ -13,8 +13,10 @@ from agents.auto_applier.lever import LeverAutoApplier
 from agents.auto_applier.workday import WorkdayAutoApplier
 from agents.auto_applier.generic import GenericAutoApplier
 
+from agents.auto_applier.mapper_engine import MapperApplier
+
 APPLIERS = [GreenhouseAutoApplier, AshbyAutoApplier, LeverAutoApplier,
-            WorkdayAutoApplier, GenericAutoApplier]
+            WorkdayAutoApplier, GenericAutoApplier, MapperApplier]
 
 
 @pytest.mark.parametrize("cls", APPLIERS)

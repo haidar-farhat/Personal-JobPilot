@@ -101,9 +101,15 @@ def has_captcha(page) -> bool:
     """Check if the page contains any visible CAPTCHA challenge."""
     for selector in CAPTCHA_INDICATORS:
         try:
-            if page.locator(selector).count() > 0:
-                # At least one CAPTCHA-shaped element exists; check visibility
-                if page.locator(selector).first.is_visible():
+            loc = page.locator(selector)
+            for i in range(min(loc.count(), 5)):
+                el = loc.nth(i)
+                # 2026-09-07: the invisible reCAPTCHA badge (every Greenhouse board)
+                # and hCaptcha's passive enclave frame (Lever) are not challenges.
+                if el.evaluate("e => !!e.closest('.grecaptcha-badge') || "
+                               "/size=invisible|enclave/.test(e.getAttribute('src') || '')"):
+                    continue
+                if el.is_visible():
                     logger.warning(f"[auto_apply] CAPTCHA detected via {selector}")
                     return True
         except Exception:

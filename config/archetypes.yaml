@@ -207,6 +207,67 @@ archetypes:
       ats_keyword_density: 0.04
       gap_severity:        0.06
 
+  # --- Trainable / low-barrier tracks (2026-08-11) ---
+  # Shared rubric logic: Matthew has no prior experience in any of these, and
+  # that is the POINT — they hire on aptitude and train you. So technical_fit,
+  # skills_overlap and ats_keyword_density are dialled way down (his data résumé
+  # will never keyword-match a data-center floor role), while comp_range,
+  # growth_signal (does it actually train + certify you) and archetype_fit carry
+  # the score. gap_severity is near-zero weight: an "unqualified" verdict is
+  # expected and must not sink an otherwise good posting.
+  # Comp is judged against comp.min_annual_by_archetype ($62,400 = $30/hr).
+
+  skilled_technician:
+    label: "Skilled Technician (trained on the job)"
+    description: "Hands-on technician work with employer-run training: data center / critical facilities, semiconductor fab equipment, utility and plant operations, telecom and field service. Hired on aptitude + reliability, not credentials. Typically $30-45/hr with shift differentials and a defined step/level ladder."
+    keywords: ["data center technician", "data centre technician", "critical facilities", "critical environment", "data center operations", "mission critical", "facilities technician", "manufacturing technician", "equipment technician", "process technician", "maintenance technician", "field service technician", "field technician", "operations technician", "plant operator", "power plant", "wind turbine technician", "fiber technician", "installation technician"]
+    auto_apply_min_score: 68
+    weights:
+      technical_fit:       0.06
+      level_match:         0.12
+      comp_range:          0.20
+      location_remote:     0.08   # onsite by nature — location matters less than pay
+      archetype_fit:       0.20
+      skills_overlap:      0.06
+      growth_signal:       0.18   # does it actually train/certify you?
+      company_reputation:  0.06
+      ats_keyword_density: 0.02
+      gap_severity:        0.02
+
+  sales_representative:
+    label: "Sales Representative (commission / trained)"
+    description: "Dealership floor sales, inside sales, SDR/BDR and other quota-carrying roles that train from scratch. Base + commission; judge realistic OTE, not base alone. Matthew's quant background is a differentiator, not a requirement."
+    keywords: ["sales consultant", "automotive sales", "sales advisor", "product specialist", "client advisor", "inside sales", "sales development representative", "business development representative", "sales representative", "sales associate", "account executive", "car sales", "retail sales consultant"]
+    auto_apply_min_score: 68
+    weights:
+      technical_fit:       0.04
+      level_match:         0.12
+      comp_range:          0.22   # OTE is the whole question here
+      location_remote:     0.10
+      archetype_fit:       0.20
+      skills_overlap:      0.06
+      growth_signal:       0.16
+      company_reputation:  0.08   # dealer group reputation = how real the OTE is
+      ats_keyword_density: 0.01
+      gap_severity:        0.01
+
+  operations_trainee:
+    label: "Operations / Controller Trainee"
+    description: "Structured paid-training pipelines into licensed or certified operations work: air traffic control, aircraft and rail dispatch, train conductor, insurance claims adjuster and underwriter trainee programs. Employer pays for the academy/licensing. Screening is aptitude-test driven (AT-SA, ATSAP) — a strong fit for an MS Quant Econ profile."
+    keywords: ["air traffic", "air traffic control", "air traffic controller", "flight operations", "dispatcher", "aircraft dispatcher", "conductor", "claims adjuster", "claims representative", "claims specialist", "adjuster", "underwriter trainee", "claims trainee", "operator trainee", "trainee", "apprentice"]
+    auto_apply_min_score: 68
+    weights:
+      technical_fit:       0.06
+      level_match:         0.14
+      comp_range:          0.18
+      location_remote:     0.10
+      archetype_fit:       0.20
+      skills_overlap:      0.06
+      growth_signal:       0.20   # the training program IS the value
+      company_reputation:  0.04
+      ats_keyword_density: 0.01
+      gap_severity:        0.01
+
   unknown:
     label: "Unknown / Other"
     description: "Could not confidently classify. Use default weights and score conservatively."

@@ -21,36 +21,60 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from agents.auto_applier.base import ApplyResult, load_profile
-from agents.auto_applier.greenhouse import GreenhouseAutoApplier
-from agents.auto_applier.ashby import AshbyAutoApplier
-from agents.auto_applier.lever import LeverAutoApplier
+from agents.auto_applier.mapper_engine import MapperApplier
 from agents.auto_applier.workday import WorkdayAutoApplier
-from agents.auto_applier.generic import GenericAutoApplier
 from db.database import get_session, record_status_change
-from db.models import Application, ApplicationStatus, Job, JobScore
+from db.models import (Application, ApplicationStatus, Job, JobScore,
+                       AUTO_APPLY_PERMANENT_FAILURES)
 
 logger = logging.getLogger(__name__)
 
+# Submit was clicked but never confirmed — retrying could double-apply.
+NEVER_RETRY = AUTO_APPLY_PERMANENT_FAILURES | {"submitted_unverified"}
 
-# Maps a job's `source` prefix to the right applier class.
-# Order matters only for documentation — dispatch is by exact prefix match.
+
+def _skip_after_failure(app: Application, now: datetime, cooldown_hours: float) -> bool:
+    """True when the last attempt failed and must not be retried yet (or ever).
+
+    2026-09-01: without this, the same login-walled job was re-attempted every
+    25-minute cycle, tripped the 3-consecutive-failure halt, and starved every
+    other candidate. A login wall or CAPTCHA is the same tomorrow — permanent.
+    Everything else (timeouts, missing submit button) gets one retry per cooldown.
+    """
+    status = app.auto_apply_status or ""
+    if status in NEVER_RETRY:
+        return True
+    if not status.startswith("failed_"):
+        return False
+    attempted = app.auto_apply_attempted_at
+    if attempted is None:
+        return False
+    if attempted.tzinfo is None:
+        attempted = attempted.replace(tzinfo=timezone.utc)
+    return now - attempted < timedelta(hours=cooldown_hours)
+
+
+# Maps a job's `source` prefix to the right applier class. Keys double as the
+# ATS keys for guardrail lookups (allowed_ats_platforms / min_score_per_ats), so
+# anything not listed here — SmartRecruiters, career pages — is "generic".
+# 2026-09-07: every form-based ATS goes through the extension's mapper engine;
+# only Workday keeps its multi-page wizard applier.
 APPLIER_MAP = {
-    "greenhouse": GreenhouseAutoApplier,
-    "ashby": AshbyAutoApplier,
-    "lever": LeverAutoApplier,
+    "greenhouse": MapperApplier,
+    "ashby": MapperApplier,
+    "lever": MapperApplier,
     "workday": WorkdayAutoApplier,
-    # `generic` and `custom` both route to the heuristic fallback applier
-    "generic": GenericAutoApplier,
-    "custom": GenericAutoApplier,
+    "generic": MapperApplier,
+    "custom": MapperApplier,
 }
 
 
 def _applier_for_source(source: str | None):
-    """Pick the right applier for a job. Falls back to generic if no exact match."""
+    """Pick the right applier for a job. Falls back to the mapper engine."""
     if not source:
-        return GenericAutoApplier
+        return MapperApplier
     prefix = source.split(":", 1)[0].lower().strip()
-    return APPLIER_MAP.get(prefix, GenericAutoApplier)
+    return APPLIER_MAP.get(prefix, MapperApplier)
 
 
 def _ats_key_for_source(source: str | None) -> str:
@@ -112,9 +136,13 @@ def _candidates(session, profile: dict, config: dict | None = None, max_candidat
       * score.fit_score >= per-ATS min_score (defaults to global guardrails.min_score)
       * archetype hourly floor met (BT: >= $30/hr; settings.comp.min_hourly_by_archetype)
       * not already auto-applied
+      * last attempt didn't fail permanently, or failed retryably more than
+        guardrails.retry_cooldown_hours ago (default 24)
     """
     guardrails = profile.get("guardrails", {})
     fallback_min = guardrails.get("min_score", 75)
+    cooldown_hours = float(guardrails.get("retry_cooldown_hours", 24))
+    now = datetime.now(timezone.utc)
     allowed_ats = set(guardrails.get("allowed_ats_platforms", ["greenhouse", "ashby", "lever"]))
     # BT track: per-archetype hourly floor (e.g. behavioral_technician: 30).
     min_hourly_map = (config or {}).get("comp", {}).get("min_hourly_by_archetype", {}) or {}
@@ -137,6 +165,8 @@ def _candidates(session, profile: dict, config: dict | None = None, max_candidat
 
     eligible: list[tuple[Application, Job, JobScore]] = []
     for app, job, score in rows:
+        if _skip_after_failure(app, now, cooldown_hours):
+            continue
         ats_key = _ats_key_for_source(job.source)
         if ats_key not in allowed_ats:
             continue
@@ -170,6 +200,12 @@ def _record_result(session, app: Application, result: ApplyResult) -> None:
     app.auto_apply_status = result.status
     app.auto_apply_log = result.to_log_json()
     app.auto_apply_attempted_at = datetime.now(timezone.utc)
+    if result.status in AUTO_APPLY_PERMANENT_FAILURES:
+        # Hand it to the human — the dashboard shows this as "Needs manual apply".
+        reason = result.status.removeprefix("failed_").replace("_", " ")
+        app.next_action = f"Apply manually — bot hit {reason}"
+    elif result.status == "submitted_unverified":
+        app.next_action = "Check email — bot clicked Submit but saw no confirmation; verify before re-applying"
 
     if result.success and result.status == "submitted":
         record_status_change(session, app, ApplicationStatus.APPLIED,
@@ -241,6 +277,7 @@ def run_auto_apply(config: dict | None = None) -> dict:
             args=["--disable-blink-features=AutomationControlled"],
         )
         context = browser.new_context(
+            bypass_csp=True,  # MapperApplier injects the extension's scan.js/fill.js
             viewport={"width": 1366, "height": 900},
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -310,6 +347,11 @@ def run_auto_apply(config: dict | None = None) -> dict:
                     consecutive_failures = 0
                 elif result.status == "dry_run":
                     summary["dry_run_count"] += 1
+                    consecutive_failures = 0
+                elif result.status == "submitted_unverified":
+                    # Probably went through — count it against today's quota.
+                    summary["submitted_unverified"] = summary.get("submitted_unverified", 0) + 1
+                    submitted_count += 1
                     consecutive_failures = 0
                 elif result.status == "failed_captcha":
                     summary["failed_captcha"] += 1

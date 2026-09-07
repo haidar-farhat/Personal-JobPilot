@@ -28,6 +28,10 @@ if not exist "%PYW%" (
 >> "%VBS%" echo sh.CurrentDirectory = "%~dp0"
 >> "%VBS%" echo sh.Run """%PYW%"" ""%WD%""", 0, False
 
+:: Windows "Startup apps" can silently disable a Startup-folder item (that is
+:: what kept JobPilot down after the 2026-09-06 reboot). Force it back to enabled.
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder" /v JobPilot.vbs /t REG_BINARY /d 020000000000000000000000 /f >nul
+
 if exist "%VBS%" (
   echo  Done. JobPilot will start automatically when you log in.
   echo    Launcher: %VBS%

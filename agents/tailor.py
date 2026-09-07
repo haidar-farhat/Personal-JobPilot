@@ -661,13 +661,65 @@ def _create_cover_letter_docx(cover_text: str, job: Job, config: dict) -> Docume
     return doc
 
 
-def tailor_for_job(job: Job, job_score: JobScore) -> dict:
-    """Generate tailored resume and cover letter for a specific job.
+def _trim_one_bullet(data: dict) -> dict | None:
+    """One cut, least valuable first: the last bullet of the last rendered
+    project / experience entry that still has more than MIN_BULLETS_PER_ENTRY,
+    then a whole trailing project. None when nothing safe is left. Pure."""
+    import copy
+    d = copy.deepcopy(data)
+    # keys are the ones _create_resume_docx renders, not the prompt's prose names
+    for key, cap in (("project_experience", MAX_PROJECTS), ("work_experience", MAX_EXPERIENCE)):
+        for entry in reversed((d.get(key) or [])[:cap]):
+            bullets = entry.get("bullets") or []
+            if len(bullets) > MIN_BULLETS_PER_ENTRY:
+                entry["bullets"] = bullets[:-1]
+                return d
+    if len(d.get("project_experience") or []) > 2:
+        d["project_experience"] = d["project_experience"][:-1]
+        return d
+    return None
+
+
+def _fit_one_page(resume_data: dict, config: dict, resume_path: Path):
+    """Export the .docx to PDF and, while Word says it spills past page 1, cut
+    one line and re-render (≤6 cuts). Returns (data, pdf_path|None, pages|None).
+    Without Word the .docx ships as-is — exactly the pre-PDF behavior."""
+    from agents.pdf_export import WordExporter
+    pdf_path = resume_path.with_suffix(".pdf")
+    data, pages = resume_data, None
+    with WordExporter() as word:
+        if not word.available:
+            return data, None, None
+        for cut in range(7):
+            pages = word.export(resume_path, pdf_path)
+            if pages is None:
+                return data, None, None
+            if pages <= 1:
+                if cut:
+                    logger.info(f"[tailor] fit to one page after trimming {cut} line(s)")
+                return data, pdf_path, pages
+            trimmed = _trim_one_bullet(data)
+            if trimmed is None:
+                logger.warning(f"[tailor] still {pages} pages with nothing safe left to trim")
+                return data, pdf_path, pages
+            data = trimmed
+            _create_resume_docx(data, config).save(str(resume_path))
+    return data, pdf_path, pages
+
+
+def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None = None) -> dict:
+    """Generate a tailored, page-count-verified one-page résumé (+ optional
+    cover letter) for a specific job.
+
+    cover_letter: None → settings.yaml tailor.cover_letter_default (True).
 
     Returns:
-        Dict with paths: {resume_docx, cover_letter_docx}
+        {resume_docx, resume_pdf|None, pages|None, cover_letter_docx|None,
+         optimizer_score, optimizer_report, keywords_missing}
     """
     config = _load_config()
+    if cover_letter is None:
+        cover_letter = bool((config.get("tailor") or {}).get("cover_letter_default", True))
     archetype = getattr(job_score, "archetype", None)
     resume_yaml = _load_resume_yaml(archetype)
     user = config.get("user", {})
@@ -689,22 +741,23 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
 
     resume_data = generate_json(resume_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
 
-    # Generate cover letter
-    logger.info(f"[tailor] Generating cover letter for: {job.title} at {job.company}")
-    cover_prompt = COVER_LETTER_PROMPT_TEMPLATE.format(
-        name=user.get("name", ""),
-        email=user.get("email", ""),
-        phone=user.get("phone", ""),
-        candidate_location=user.get("location", ""),
-        job_title=job.title,
-        company=job.company,
-        location=job.location or "Not specified",
-        job_description=(job.description or "No description")[:3000],
-        key_matches="\n".join(f"- {m}" for m in (job_score.key_matches or [])),
-        archetype_guidance=guidance,
-    )
-
-    cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT)
+    # Generate cover letter (optional)
+    cover_text = ""
+    if cover_letter:
+        logger.info(f"[tailor] Generating cover letter for: {job.title} at {job.company}")
+        cover_prompt = COVER_LETTER_PROMPT_TEMPLATE.format(
+            name=user.get("name", ""),
+            email=user.get("email", ""),
+            phone=user.get("phone", ""),
+            candidate_location=user.get("location", ""),
+            job_title=job.title,
+            company=job.company,
+            location=job.location or "Not specified",
+            job_description=(job.description or "No description")[:3000],
+            key_matches="\n".join(f"- {m}" for m in (job_score.key_matches or [])),
+            archetype_guidance=guidance,
+        )
+        cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT)
 
     # Clean filename
     safe_company = "".join(c if c.isalnum() or c in "- " else "" for c in job.company).strip().replace(" ", "_")
@@ -748,32 +801,48 @@ def tailor_for_job(job: Job, job_score: JobScore) -> dict:
     resumes_dir.mkdir(parents=True, exist_ok=True)
     covers_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save resume .docx
+    # Save resume .docx, then VERIFY one page through Word (PDF export) and trim
+    # a line at a time until it fits — the bullet caps are a guess, the page
+    # count is the truth. A stale PDF from an earlier run must never survive a
+    # failed export, so it goes first.
     resume_doc = _create_resume_docx(resume_data, config)
     resume_path = resumes_dir / f"{filename_base}_resume.docx"
+    resume_path.with_suffix(".pdf").unlink(missing_ok=True)
     resume_doc.save(str(resume_path))
+    try:
+        resume_data, pdf_path, pages = _fit_one_page(resume_data, config, resume_path)
+    except Exception as e:
+        logger.warning(f"[tailor] PDF / one-page pass failed (docx still shipped): {e}")
+        pdf_path, pages = None, None
 
-    # Sidecar JSON of the structured content — /api/autofill/history serves
-    # THESE entries for Workday-style wizards so the filled experience panels
-    # match the attached tailored résumé word-for-word.
+    # Sidecar JSON of the structured content (post-trim) — /api/autofill/history
+    # serves THESE entries for Workday-style wizards so the filled experience
+    # panels match the attached tailored résumé word-for-word.
     try:
         resume_path.with_suffix(".json").write_text(
             json.dumps(resume_data, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception as e:
         logger.warning(f"[tailor] sidecar JSON save failed: {e}")
 
-    # Save cover letter .docx
-    cover_doc = _create_cover_letter_docx(cover_text, job, config)
-    cover_path = covers_dir / f"{filename_base}_cover_letter.docx"
-    cover_doc.save(str(cover_path))
+    # Save cover letter .docx (optional)
+    cover_path = None
+    if cover_letter:
+        cover_doc = _create_cover_letter_docx(cover_text, job, config)
+        cover_path = covers_dir / f"{filename_base}_cover_letter.docx"
+        cover_doc.save(str(cover_path))
 
-    logger.info(f"[tailor] Materials saved: {resume_path.name}, {cover_path.name}")
+    logger.info("[tailor] Materials saved: " + resume_path.name
+                + (f", {pdf_path.name} ({pages} page)" if pdf_path else " (no PDF — Word unavailable)")
+                + (f", {cover_path.name}" if cover_path else ""))
 
     return {
         "resume_docx": str(resume_path),
-        "cover_letter_docx": str(cover_path),
+        "resume_pdf": str(pdf_path) if pdf_path else None,
+        "pages": pages,
+        "cover_letter_docx": str(cover_path) if cover_path else None,
         "optimizer_score": optimizer_report["overall"] if optimizer_report else None,
         "optimizer_report": optimizer_report.get("_saved_to") if optimizer_report else None,
+        "keywords_missing": list(optimizer_report.get("keywords_missing") or [])[:8] if optimizer_report else [],
     }
 
 

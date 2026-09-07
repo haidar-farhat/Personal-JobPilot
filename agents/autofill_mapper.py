@@ -34,6 +34,13 @@ _THIRD_PARTY_DETAIL = (
     "relationship", "contact number",
 )
 
+# Credential-shaped fields (matched against the NORMALIZED label+name, so
+# "one-time-code" reads "one time code"). Kept in sync with service_worker.js.
+_CREDENTIAL_RE = re.compile(
+    r"password|passcode|one time|\botp\b|verification code|security code|confirmation code|"
+    r"authentication code|social security|\bssn\b")
+_CREDENTIAL_AUTOCOMPLETE = ("one time code", "new password", "current password")
+
 # Deterministic "leave this empty" — a repeat block beyond our history must
 # stay blank, never inherit entry 0's values or reach the LLM path.
 _SKIP = {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
@@ -226,9 +233,24 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
 
     nlabel = normalize(field.get("label") or "")
     nname = normalize(field.get("name") or "")
-    norm = (nlabel + " " + nname).strip()
+    # Standards-first mapping. Autocomplete is the portable semantic contract
+    # shared by common careers forms and Simplify/Jobright-style workflows;
+    # data-automation-id is the stable equivalent on Workday.
+    nautocomplete = normalize(field.get("autocomplete") or "")
+    nautomation = normalize(field.get("automation_id") or "")
+    norm = " ".join(x for x in (nlabel, nname, nautocomplete, nautomation) if x).strip()
     if not norm:
         return None
+
+    # --- Credentials: never from the generic planner ---
+    # Passwords and one-time codes belong to the extension's account assist
+    # (the user's own ATS password + a code read from Gmail); an SSN has no
+    # source at all. Without this, a 5+-word OTP label ("Enter the 6-digit
+    # verification code we emailed you") reads as an essay and the LLM types
+    # prose into the box. Mirrored in service_worker.js jmap().
+    if ftype == "password" or nautocomplete in _CREDENTIAL_AUTOCOMPLETE or _CREDENTIAL_RE.search(norm):
+        return {"value": None, "source": "deterministic", "confidence": 1.0,
+                "needs_review": bool(_has_sub(norm, "social security", "ssn"))}
 
     nsection = normalize(field.get("section") or "")
 
@@ -309,6 +331,23 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
                 "preferred name", "applicant name", "candidate name"}
 
     # --- Identity ---
+    ac_tokens = set(nautocomplete.split())
+    if {"given", "name"} <= ac_tokens:
+        return text(ident.get("first_name"))
+    if {"family", "name"} <= ac_tokens:
+        return text(ident.get("last_name"))
+    if "name" in ac_tokens and not ({"given", "family", "additional"} & ac_tokens):
+        return text(ident.get("full_name"))
+    if "email" in ac_tokens:
+        return text(ident.get("email"))
+    if "tel" in ac_tokens and not ({"extension", "ext"} & ac_tokens):
+        return text(ident.get("phone"))
+    if "url" in ac_tokens:
+        if "linkedin" in nlabel or "linkedin" in nname:
+            return text(links.get("linkedin"))
+        if "github" in nlabel or "github" in nname:
+            return text(links.get("github"))
+        return text(links.get("portfolio") or links.get("website"))
     if _has_tok(norm, "first", "given", "fname") and _has_tok(norm, "name"):
         return text(ident.get("first_name"))
     if (_has_tok(norm, "last", "surname", "family", "lname")) and _has_tok(norm, "name"):
@@ -473,6 +512,23 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
     # --- Address ---
     # Line 2 (apt/suite) is optional and not ours to invent — deterministic no-fill.
     # Checked first: "street address line 2" also contains "street address".
+    if {"address", "line2"} <= ac_tokens:
+        return {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
+    if {"address", "line1"} <= ac_tokens:
+        return text(addr.get("street"))
+    if {"postal", "code"} <= ac_tokens:
+        return text(addr.get("postal_code"))
+    if {"address", "level2"} <= ac_tokens:
+        return option(addr.get("city")) if options else text(addr.get("city"))
+    if {"address", "level1"} <= ac_tokens:
+        if options:
+            for cand in (addr.get("state_full"), addr.get("state")):
+                if cand and _match_option(cand, options):
+                    return option(cand)
+            return option(addr.get("state"))
+        return text(addr.get("state"))
+    if "country" in ac_tokens:
+        return option(addr.get("country")) if options else text(addr.get("country"))
     if _has_sub(norm, "address line 2", "address 2") or _has_tok(norm, "apt", "apartment", "suite"):
         return {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
     if _has_sub(norm, "address line 1", "address 1", "street address") or _has_tok(norm, "street"):

@@ -395,11 +395,64 @@
 
   function mark(el, ok) {
     const t = markTarget(el);
+    t.setAttribute("data-jpaf-state", ok ? "verified" : "review");
     t.style.outline = ok ? "2px solid #0a7e07" : "2px solid #c08a00";
     t.style.outlineOffset = "1px";
   }
 
+  // The JobRight moment: bring the field on screen and pulse a mint glow on
+  // it for ~600 ms right before the value lands. Pure feedback — mark() still
+  // paints the verified/review outline afterwards.
+  function flash(el) {
+    const t = markTarget(el);
+    try {
+      const r = t.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > (window.innerHeight || document.documentElement.clientHeight))
+        t.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch (e) { /* detached */ }
+    t.style.transition = "box-shadow .3s";
+    t.style.outline = "2px solid #12c98f";
+    t.style.boxShadow = "0 0 0 4px rgba(18,201,143,.25)";
+    setTimeout(() => { t.style.boxShadow = ""; }, 600);
+  }
+
+  function emit(detail) {
+    try { window.dispatchEvent(new CustomEvent("jpaf-progress", { detail })); } catch (e) { /* noop */ }
+  }
+
+  // Confirm that the value which reached the control is the value we intended.
+  // React controls can accept events while silently rejecting state changes;
+  // a successful call is therefore not enough. Mismatches remain highlighted
+  // for manual review and are never treated as completed.
+  function verifyValue(el, desired) {
+    const tag = el.tagName.toLowerCase();
+    const type = (el.type || "").toLowerCase();
+    const nd = norm(desired);
+    if (type === "radio" || type === "checkbox") {
+      const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const wanted = type === "checkbox"
+        ? String(desired).split(";").map((x) => x.trim()).filter(Boolean)
+        : [desired];
+      return wanted.every((value) => group.some((r) => r.checked &&
+        chooseChoice(value, [{ el: r, t: norm(labelText(r) || r.value) }], true)));
+    }
+    if (tag === "select") {
+      const o = el.selectedOptions && el.selectedOptions[0];
+      return !!o && !!chooseChoice(desired, [{ el: o, t: norm(o.text || o.value) }], true);
+    }
+    if (!['input', 'textarea'].includes(tag)) {
+      const got = norm(el.innerText || el.textContent || "");
+      return !!got && (got === nd || got.includes(nd) || nd.includes(got));
+    }
+    if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list")
+      return comboCommitted(el);
+    return norm(el.value) === nd;
+  }
+
   function toast(msg) {
+    // the in-page panel already shows the result — the toast is for the
+    // toolbar-popup flow, and it would sit right on top of the pill
+    if (document.getElementById("__jpaf_host")) return;
     let t = document.getElementById("__jpaf_toast");
     if (!t) {
       t = document.createElement("div");
@@ -427,11 +480,8 @@
         (el && (el.getAttribute("aria-label") || el.name || el.id)) || f.id).toString().slice(0, 70);
       reviewFields.push({ id: f.id, label });
     };
-    // Sequential (not forEach) — ARIA dropdowns open popups that must close
-    // before the next field is touched.
-    for (const f of plan.fields || []) {
-      const el = document.querySelector(`[data-jpaf-id="${f.id}"]`);
-      if (!el) continue;
+    // One field; true when a value verifiably landed.
+    async function fillOne(f, el) {
       if (f.source === "file") {
         const meta = metaById.get(f.id) || {};
         // combine scan meta with the element's own attributes ("Attach" labels
@@ -442,6 +492,7 @@
         const isResume = !isCover && (/resume|curriculum|\bcv\b/.test(lab) ||
                          (fileFieldCount === 1 && !/transcript|portfolio|photo/.test(lab)));
         let attached = false;
+        if (isResume || isCover) flash(el);
         if (isResume) attached = await attachFile(el, plan._ctx, "resume_file");
         else if (isCover) attached = await attachFile(el, plan._ctx, "cover_letter_file");
         if (attached) {
@@ -453,14 +504,15 @@
         } else {
           mark(el, false); fileFlags++; review++; noteReview(f, el);
         }
-        continue;
+        return attached;
       }
       if (f.value == null || f.value === "") {
         if (f.needs_review) { mark(el, false); review++; noteReview(f, el); }
-        continue;
+        return false;
       }
       // their answer wins — never overwrite one that is already there
-      if (alreadyAnswered(el)) { kept++; continue; }
+      if (alreadyAnswered(el)) { kept++; return false; }
+      flash(el);
       try {
         const tag = el.tagName.toLowerCase();
         const type = (el.type || "").toLowerCase();
@@ -485,12 +537,29 @@
         else if (isCombo) ok = await fillCombo(el, f.value);
         else { setNative(el, f.value); ok = true; }
         if (!ok && isCombo) comboRetries.push(f);
-        mark(target, ok && !f.needs_review);
-        if (ok) filled++;
-        if (f.needs_review || !ok) { review++; noteReview(f, target); }
+        const verified = !!ok && verifyValue(target, f.value);
+        mark(target, verified && !f.needs_review);
+        if (verified) filled++;
+        if (f.needs_review || !verified) { review++; noteReview(f, target); }
+        return verified;
       } catch (e) {
         mark(el, false); review++; noteReview(f, el);
+        return false;
       }
+    }
+
+    // Sequential (not forEach) — ARIA dropdowns open popups that must close
+    // before the next field is touched. The 90 ms stagger is deliberate: it is
+    // what makes the fill watchable (and what the widget's progress bar paces).
+    const fields = plan.fields || [];
+    for (let i = 0; i < fields.length; i++) {
+      const f = fields[i];
+      const el = document.querySelector(`[data-jpaf-id="${f.id}"]`);
+      const ok = el ? await fillOne(f, el) : false;
+      const meta = metaById.get(f.id) || {};
+      emit({ type: "field", index: i, total: fields.length, ok,
+             label: String(meta.label || (el && (el.getAttribute("aria-label") || el.name || el.id)) || f.id).slice(0, 70) });
+      await sleep(90);
     }
     // Final retry pass for combos that failed mid-run: résumé uploads and
     // conditional notes re-render the whole React form while we fill — once
@@ -504,7 +573,7 @@
                                     document.getElementsByName(meta2.name)[0]));
         if (!el2) continue;
         try {
-          if (await fillCombo(el2, f.value)) {
+          if (await fillCombo(el2, f.value) && verifyValue(el2, f.value)) {
             mark(el2, !f.needs_review);
             filled++;
             if (review > 0) review--;
@@ -526,7 +595,8 @@
     );
     return { filled, needs_review: review, file_flags: fileFlags, kept,
              resume_attached: resumeAttached, cover_attached: coverAttached,
-             review_fields: reviewFields.slice(0, 15) };
+             review_fields: reviewFields.slice(0, 15),
+             review_required: review > 0 || fileFlags > 0 };
   };
 
   // Shared with the per-ATS engines (greenhouse.js) — same isolated world,

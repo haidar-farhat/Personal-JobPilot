@@ -11,8 +11,10 @@ import base64
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter
@@ -49,6 +51,9 @@ class FieldSpec(BaseModel):
     required: bool | None = False
     section: str | None = ""   # nearest heading/legend — disambiguates e.g. education dates
     combo: bool | None = False  # scan marks React-Select/autocomplete inputs
+    autocomplete: str | None = ""  # browser-standard semantic hint
+    inputmode: str | None = ""
+    automation_id: str | None = ""  # stable Workday/vendor semantic hook
 
 
 class AutofillRequest(BaseModel):
@@ -266,12 +271,25 @@ def _tailored_resume_path(company: str, job_title: str = "") -> Path | None:
     return None
 
 
+def _attach_format() -> str:
+    try:
+        from agents.tailor import _load_config
+        return str((_load_config().get("tailor") or {}).get("attach_format", "pdf")).lower()
+    except Exception:
+        return "pdf"
+
+
 @router.get("/resume_file")
 def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = ""):
     """Best résumé file for the extension to attach: the tailored .docx for a
     matching application if one exists, otherwise a rendered base résumé."""
     tailored = _tailored_resume_path(company, job_title)
     if tailored is not None:
+        # The Word-verified one-page PDF when the tailor produced one — ATS
+        # parsers and recruiters both prefer it (settings tailor.attach_format).
+        pdf = tailored.with_suffix(".pdf")
+        if pdf.exists() and _attach_format() != "docx":
+            return FileResponse(pdf, filename=pdf.name)
         return FileResponse(tailored, filename=tailored.name)
 
     # 2. user-provided résumé file (the polished PDF), if configured in the profile.
@@ -440,6 +458,73 @@ def cover_letter_file(company: str = "", job_title: str = ""):
     except Exception as e:
         logger.warning(f"[autofill] cover-letter lookup failed: {e}")
     return JSONResponse({"error": "no tailored cover letter for this company"}, status_code=404)
+
+
+# ---------------------------------------------------------------------------
+# "APPLY WITH AUTOFILL" arming. The dashboard arms the job's host right before
+# it opens the link; the extension asks whether the page it landed on is armed
+# and, if so, runs the fill by itself (once). Filling is still not submitting.
+# ponytail: module dict + 15-min TTL — one process, a hint, not a record.
+# ---------------------------------------------------------------------------
+_ARMED: dict[str, dict] = {}
+_ARM_TTL = 15 * 60
+
+
+def _arm_host(host_or_url: str) -> str:
+    """'https://www.Boards.Greenhouse.io/x' or 'www.boards.greenhouse.io' -> 'boards.greenhouse.io'."""
+    s = (host_or_url or "").strip()
+    h = (urlparse(s).hostname if "://" in s else s.split(":")[0]).lower() if s else ""
+    return h[4:] if h.startswith("www.") else h
+
+
+class ArmRequest(BaseModel):
+    app_id: int | None = None
+    url: str | None = ""
+    company: str | None = ""
+    title: str | None = ""
+
+
+@router.post("/arm")
+def arm(req: ArmRequest):
+    url, company, title = req.url or "", req.company or "", req.title or ""
+    if req.app_id is not None:
+        from db.database import get_session
+        from db.models import Application, Job
+
+        s = get_session()
+        try:
+            row = (s.query(Job).join(Application, Application.job_id == Job.id)
+                   .filter(Application.id == req.app_id).first())
+            if row is None:
+                return JSONResponse({"error": f"application {req.app_id} not found"}, status_code=404)
+            url, company, title = row.url or url, row.company or company, row.title or title
+        finally:
+            s.close()
+    host = _arm_host(url)
+    if not host:
+        return JSONResponse({"error": "no url to arm"}, status_code=400)
+    rec = {"app_id": req.app_id, "url": url, "host": host, "company": company,
+           "title": title, "ts": time.time()}
+    _ARMED[host] = rec
+    return rec
+
+
+@router.get("/armed")
+def armed(host: str = "", url: str = ""):
+    """The un-expired arm for this host (or whose url is a prefix of the page url), else {}."""
+    now = time.time()
+    for h in [h for h, r in _ARMED.items() if now - r["ts"] > _ARM_TTL]:
+        _ARMED.pop(h, None)
+    rec = _ARMED.get(_arm_host(host or url))
+    if rec is None and url:
+        rec = next((r for r in _ARMED.values()
+                    if r["url"] and url.startswith(r["url"].split("?")[0].rstrip("/"))), None)
+    return rec or {}
+
+
+@router.delete("/armed")
+def disarm(host: str = ""):
+    return {"ok": True, "removed": _ARMED.pop(_arm_host(host), None) is not None}
 
 
 @router.get("/health")

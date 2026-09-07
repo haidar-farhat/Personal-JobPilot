@@ -40,6 +40,7 @@ LOGS.mkdir(exist_ok=True)
 
 CHECK_INTERVAL = 30   # seconds between health sweeps
 START_GRACE = 30      # seconds a just-started service is left alone to boot
+LOG_ROTATE_BYTES = 20 * 1024 * 1024   # rotate a service log past this on (re)spawn
 
 # Windows process-creation flags so children detach from this console.
 if sys.platform == "win32":
@@ -107,9 +108,21 @@ def http_ok(url: str, timeout: float = 4.0) -> bool:
         return False
 
 
+def _rotate(path: Path) -> None:
+    """Keep one previous generation (<name>.log.1) so a service log can't grow
+    unbounded — scheduler.log had reached 1M lines by 2026-09-01."""
+    try:
+        if path.exists() and path.stat().st_size > LOG_ROTATE_BYTES:
+            path.replace(path.with_name(path.name + ".1"))
+    except OSError:
+        pass  # still held open by a dying child on Windows — next spawn gets it
+
+
 def spawn(name: str) -> None:
     cmd = SERVICES[name]["cmd"]
-    logfile = open(LOGS / f"{name}.log", "a", buffering=1, encoding="utf-8")
+    logpath = LOGS / f"{name}.log"
+    _rotate(logpath)
+    logfile = open(logpath, "a", buffering=1, encoding="utf-8")
     try:
         proc = subprocess.Popen(
             cmd,
@@ -126,6 +139,10 @@ def spawn(name: str) -> None:
         log(f"ERROR  could not start {name}: {e}  (cmd={cmd[0]!r} not found on PATH)")
     except Exception as e:
         log(f"ERROR  could not start {name}: {e}")
+    finally:
+        # The child holds its own handle; ours would otherwise leak per respawn
+        # and pin the file so rotation can never rename it.
+        logfile.close()
 
 
 def kill(name: str) -> None:
@@ -173,6 +190,17 @@ def main() -> None:
             sys.stdout.reconfigure(encoding="utf-8")
         except Exception:
             pass
+
+    # Single-instance guard: a second watchdog (Startup folder + manual launch)
+    # would spawn a second scheduler and double every scan. Holding a loopback
+    # port is the simplest cross-process lock; the OS frees it if we die.
+    import socket
+    _lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _lock.bind(("127.0.0.1", 7776))
+    except OSError:
+        log("Another watchdog already holds 127.0.0.1:7776 — exiting.")
+        return
 
     log("=" * 52)
     log("JobPilot Watchdog starting — supervising: " + ", ".join(SERVICES))

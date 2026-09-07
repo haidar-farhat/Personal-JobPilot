@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JobPilot Autofill",
-  "version": "1.10.0",
-  "description": "Agentically autofill job-application fields from your resume via the local JobPilot backend. You review and click Apply.",
+  "version": "1.13.0",
+  "description": "Locally autofill job-application fields, verify the result, then review and submit it yourself.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "http://127.0.0.1:7777/*",
@@ -10,6 +10,7 @@
     "https://*.lever.co/*",
     "https://*.ashbyhq.com/*",
     "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
     "https://*.workday.com/*",
     "https://*.smartrecruiters.com/*",
     "https://*.icims.com/*",
@@ -34,7 +35,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content/scan.js", "content/fill.js", "content/workday.js", "content/greenhouse.js", "content/widget.js"],
+      "js": ["content/scan.js", "content/fill.js", "content/account.js", "content/workday.js", "content/greenhouse.js", "content/widget.js"],
       "run_at": "document_end",
       "all_frames": true
     }

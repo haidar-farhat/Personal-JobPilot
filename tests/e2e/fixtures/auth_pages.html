@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ATS auth pages fixture</title>
+<style>section{display:none} section.on{display:block} .boxes input{width:2em}</style>
+<script>
+  // ?mode=create | signin | otp-seg | otp-one — one wall at a time, like a real ATS.
+  window.__clicked = false;
+  document.addEventListener("DOMContentLoaded", () => {
+    const mode = new URLSearchParams(location.search).get("mode") || "create";
+    document.getElementById(mode).classList.add("on");
+  });
+</script>
+</head>
+<body>
+
+<section id="create">
+  <h1>Create Account</h1>
+  <form onsubmit="window.__clicked=true;return false;">
+    <label for="c_email">Email Address</label>
+    <input id="c_email" type="text" name="email" autocomplete="username">
+    <label for="c_pw">Password</label>
+    <input id="c_pw" type="password" name="password" autocomplete="new-password">
+    <label for="c_pw2">Verify New Password</label>
+    <input id="c_pw2" type="password" name="verifyPassword">
+    <label><input id="c_terms" type="checkbox" name="terms"> I have read and agree to the terms</label>
+    <button type="submit" onclick="window.__clicked=true;return false;">Create Account</button>
+  </form>
+</section>
+
+<section id="signin">
+  <h1>Sign In</h1>
+  <form onsubmit="window.__clicked=true;return false;">
+    <label for="s_email">Email Address</label>
+    <input id="s_email" type="email" name="username">
+    <label for="s_pw">Password</label>
+    <input id="s_pw" type="password" name="password" autocomplete="current-password">
+    <button type="submit" onclick="window.__clicked=true;return false;">Sign In</button>
+    <button type="button" data-automation-id="createAccountLink">Create Account</button>
+  </form>
+</section>
+
+<section id="otp-seg">
+  <h1>Verify your email</h1>
+  <p>Enter the 6-digit code we emailed you</p>
+  <form onsubmit="window.__clicked=true;return false;">
+    <div class="boxes">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 1">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 2">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 3">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 4">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 5">
+      <input maxlength="1" inputmode="numeric" aria-label="Digit 6">
+    </div>
+    <button type="submit" onclick="window.__clicked=true;return false;">Verify</button>
+  </form>
+</section>
+
+<section id="otp-one">
+  <h1>Check your email</h1>
+  <form onsubmit="window.__clicked=true;return false;">
+    <label for="o_code">Verification code</label>
+    <input id="o_code" type="text" name="code" autocomplete="one-time-code">
+    <button type="submit" onclick="window.__clicked=true;return false;">Continue</button>
+  </form>
+</section>
+
+</body>
+</html>

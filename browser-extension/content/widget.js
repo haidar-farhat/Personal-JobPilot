@@ -27,6 +27,7 @@
   let dismissed = false;    // user hid it on this page
   let disabled = false;     // global kill switch — persisted, all sites
   const DISABLE_KEY = "jpaf_disabled";
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
   function visibleInputs() {
     return [...document.querySelectorAll("input, textarea, select")].filter((e) => {
@@ -73,78 +74,104 @@
     root = hostEl.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        /* One light card, one green action. Everything secondary lives inside
-           the panel so the resting state is a single button, not a toolbar. */
+        /* JobRight-style: a small mint pill at rest, a 360px white card with a
+           mint header while it works. Everything secondary lives inside the card. */
         *{ box-sizing:border-box; margin:0;
-           font-family:-apple-system,'Segoe UI',Inter,Roboto,system-ui,sans-serif; }
-        :host{ --g:#05a67a; --g2:#04916a; --bg:#fff; --fg:#0f172a; --mut:#64748b;
-               --bd:#e4e8ee; --sub:#f6f8fa; --amb:#b45309; --ambg:#fff8ec; --ambd:#fde3b8; }
+           font-family:Inter,-apple-system,'Segoe UI',Roboto,system-ui,sans-serif; }
+        :host{ --g:#12c98f; --gd:#0b7a57; --tint:#e6fbf4; --tintb:#b9f0dc; --bg:#fff; --fg:#111827;
+               --mut:#6b7280; --bd:#e8eaee; --sub:#f5f6f8; --amb:#b45309; --ambg:#fff8ec; --ambd:#fde3b8; }
         @media (prefers-color-scheme:dark){
-          :host{ --bg:#151a22; --fg:#e9edf3; --mut:#98a3b3; --bd:#2a323d; --sub:#1d232c;
+          :host{ --gd:#2ee6a6; --tint:#0f2f2a; --tintb:#1d5c4c; --bg:#151a22; --fg:#e9edf3;
+                 --mut:#98a3b3; --bd:#2a323d; --sub:#1d232c;
                  --amb:#f0b45e; --ambg:#2a2113; --ambd:#4a3a1c; }
         }
         .dock{ display:flex; flex-direction:column-reverse; align-items:flex-end; gap:10px; }
-        .bar{ display:flex; align-items:center; gap:6px; background:var(--bg);
-          border:1px solid var(--bd); border-radius:999px; padding:5px 5px 5px 12px;
+        /* resting pill: mint, green dot, "Autofill" */
+        .bar{ display:flex; align-items:center; gap:6px; background:var(--tint);
+          border:1px solid var(--g); border-radius:999px; padding:4px 4px 4px 12px;
           box-shadow:0 6px 24px -6px rgba(15,23,42,.18), 0 1px 3px rgba(15,23,42,.08); }
-        .dot{ width:7px; height:7px; border-radius:50%; background:#cbd5e1; flex:none; }
+        .dot{ width:8px; height:8px; border-radius:50%; background:var(--g); flex:none; }
         .dot.up{ background:var(--g); }
         .dot.down{ background:#ef4444; }
-        .go{ border:0; cursor:pointer; color:#fff; font-weight:600; font-size:13px;
-          background:var(--g); border-radius:999px; padding:8px 16px; white-space:nowrap;
+        .go{ border:0; cursor:pointer; color:var(--gd); font-weight:700; font-size:13px;
+          background:transparent; border-radius:999px; padding:6px 8px; white-space:nowrap;
           letter-spacing:-.1px; }
-        .go:hover{ background:var(--g2); }
+        .go:hover{ background:rgba(18,201,143,.16); }
         .go:disabled{ opacity:.6; cursor:default; }
-        .more{ border:0; cursor:pointer; background:transparent; color:var(--mut); font-size:11px;
-          width:24px; height:24px; border-radius:50%; line-height:1; }
-        .more:hover{ background:var(--sub); color:var(--fg); }
-        .panel{ width:274px; background:var(--bg); color:var(--fg); border:1px solid var(--bd);
-          border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:12px;
-          box-shadow:0 12px 36px -8px rgba(15,23,42,.22), 0 1px 3px rgba(15,23,42,.08); }
+        .more{ border:0; cursor:pointer; background:transparent; color:var(--gd); font-size:12px;
+          width:26px; height:26px; border-radius:50%; line-height:1; }
+        .more:hover{ background:rgba(18,201,143,.16); }
+        /* the card */
+        .panel{ width:360px; max-width:calc(100vw - 28px); background:var(--bg); color:var(--fg);
+          border:1px solid var(--bd); border-radius:16px; overflow:hidden;
+          box-shadow:0 16px 48px -12px rgba(15,23,42,.28), 0 1px 3px rgba(15,23,42,.08); }
         .panel[hidden]{ display:none; }
-        .head{ display:flex; align-items:center; gap:8px; }
-        .logo{ width:22px; height:22px; border-radius:7px; background:var(--g); color:#fff;
-          font-size:11px; font-weight:700; display:flex; align-items:center;
-          justify-content:center; flex:none; letter-spacing:-.3px; }
-        .ttl{ font-weight:650; font-size:13.5px; letter-spacing:-.2px; }
-        .head .dot{ margin-left:auto; }
+        .head{ display:flex; align-items:center; gap:8px; background:var(--g); color:#fff;
+          padding:11px 12px 11px 14px; }
+        .logo{ width:22px; height:22px; border-radius:7px; background:rgba(255,255,255,.22);
+          font-size:12px; display:flex; align-items:center; justify-content:center; flex:none; }
+        .ttl{ font-weight:700; font-size:14px; letter-spacing:-.2px; }
+        .close{ margin-left:auto; border:0; cursor:pointer; background:transparent; color:#fff;
+          width:26px; height:26px; border-radius:50%; font-size:15px; line-height:1; }
+        .close:hover{ background:rgba(255,255,255,.2); }
+        .body{ padding:14px; display:flex; flex-direction:column; gap:12px; }
+        .banner{ font-size:12px; color:var(--gd); background:var(--tint); border:1px solid var(--tintb);
+          border-radius:10px; padding:8px 10px; font-weight:600; line-height:1.4; }
+        .banner[hidden]{ display:none; }
+        /* progress */
+        .prog{ display:flex; flex-direction:column; gap:6px; }
+        .prog[hidden]{ display:none; }
+        .track{ height:6px; border-radius:999px; background:var(--tint); overflow:hidden; }
+        .pfill{ height:100%; width:100%; background:var(--g); border-radius:999px;
+                transform:scaleX(0); transform-origin:left; transition:transform .35s ease; }
+        .count{ font-size:12px; color:var(--mut); font-weight:600; }
+        /* checklist: ○ pending · spinner running · ✓ done · – skipped · ! failed */
+        .steps{ display:flex; flex-direction:column; gap:8px; }
+        .steps[hidden]{ display:none; }
+        .step{ display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--mut); }
+        .step .ic{ width:18px; height:18px; border-radius:50%; flex:none; display:flex;
+          align-items:center; justify-content:center; font-size:10px; font-weight:700;
+          color:var(--mut); border:1.5px solid var(--bd); }
+        .step.run .ic{ border-color:var(--g); border-top-color:transparent; color:transparent;
+          animation:jp-spin .8s linear infinite; }
+        .step.run{ color:var(--fg); }
+        .step.done{ color:var(--fg); }
+        .step.done .ic{ background:var(--g); color:#fff; border-color:var(--g); }
+        .step.skip .ic{ color:var(--mut); }
+        .step.fail .ic{ background:var(--amb); color:#fff; border-color:var(--amb); }
+        .step .nt{ margin-left:auto; font-size:11px; color:var(--mut); max-width:130px;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        @keyframes jp-spin{ to{ transform:rotate(360deg); } }
+        /* result + review */
+        .res{ font-size:12.5px; color:var(--mut); min-height:16px; line-height:1.5; }
+        .res .amber{ color:var(--amb); font-weight:600; } .res .err{ color:#dc2626; }
+        .res b{ color:var(--fg); }
+        .res a{ color:var(--gd); }
+        .res .cta{ margin-top:4px; font-size:11.5px; }
+        .rev{ display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--bd);
+          padding-top:11px; max-height:170px; overflow-y:auto; }
+        .rev[hidden]{ display:none; }
+        .rttl{ font-size:11px; color:var(--amb); font-weight:700; }
+        .rrow{ display:flex; align-items:center; gap:8px; background:var(--ambg);
+          border:1px solid var(--ambd); border-radius:8px; padding:5px 6px 5px 9px; }
+        .rlab{ flex:1; font-size:11.5px; color:var(--amb); overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; }
+        .rl{ border:1px solid var(--ambd); cursor:pointer; background:var(--bg); color:var(--amb);
+          font-size:11px; font-weight:600; padding:3px 9px; border-radius:6px; flex:none; }
+        .rl:hover{ filter:brightness(.97); }
+        /* résumé chooser */
         label{ font-size:11px; color:var(--mut); font-weight:600; display:block; margin-bottom:5px; }
         select{ width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--bd);
           background:var(--sub); color:var(--fg); font-size:12.5px; outline:none; cursor:pointer; }
         select:focus{ border-color:var(--g); }
-        .res{ font-size:12px; color:var(--mut); min-height:16px; line-height:1.5; }
-        .res .amber{ color:var(--amb); font-weight:600; } .res .err{ color:#dc2626; }
-        .res b{ color:var(--fg); }
-        .steps{ display:flex; flex-direction:column; gap:7px; }
-        .steps[hidden]{ display:none; }
-        .step{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--mut); }
-        .step .ic{ width:16px; height:16px; border-radius:50%; flex:none; display:flex;
-          align-items:center; justify-content:center; font-size:9px; font-weight:700;
-          background:var(--sub); color:var(--mut); border:1px solid var(--bd); }
-        .step.run .ic{ background:var(--g); color:#fff; border-color:var(--g);
-          animation:jp-pulse 1s infinite; }
-        .step.done{ color:var(--fg); }
-        .step.done .ic{ background:var(--g); color:#fff; border-color:var(--g); }
-        .step.skip .ic{ opacity:.6; }
-        .step.fail .ic{ background:var(--amb); color:#fff; border-color:var(--amb); }
-        .step .nt{ margin-left:auto; font-size:11px; color:var(--mut); max-width:96px;
-          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        @keyframes jp-pulse{ 50%{ opacity:.5; } }
-        .rev{ display:flex; flex-direction:column; gap:5px; border-top:1px solid var(--bd);
-          padding-top:11px; max-height:150px; overflow-y:auto; }
-        .rev[hidden]{ display:none; }
-        .rttl{ font-size:11px; color:var(--amb); font-weight:700; }
-        .rl{ border:1px solid var(--ambd); cursor:pointer; background:var(--ambg); color:var(--amb);
-          font-size:11.5px; text-align:left; padding:6px 9px; border-radius:8px; overflow:hidden;
-          text-overflow:ellipsis; white-space:nowrap; }
-        .rl:hover{ filter:brightness(.97); }
         .rfile{ display:flex; align-items:center; gap:7px; font-size:11.5px; margin-top:7px; }
         .rfname{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--mut); }
         .rswap{ border:1px solid var(--bd); cursor:pointer; background:var(--bg); color:var(--fg);
           font-size:11px; padding:4px 10px; border-radius:8px; flex:none; font-weight:600; }
         .rswap:hover{ background:var(--sub); }
         .rswap[hidden]{ display:none; }
-        /* footer: the secondary actions that used to crowd the resting pill */
+        .auth{ display:flex; gap:6px; flex-wrap:wrap; }
+        /* footer: the secondary actions */
         .foot{ display:flex; align-items:center; gap:6px; flex-wrap:wrap;
           border-top:1px solid var(--bd); padding-top:11px; }
         .lnk{ border:0; background:transparent; color:var(--mut); cursor:pointer; font-size:11.5px;
@@ -164,36 +191,49 @@
         </div>
         <div class="panel" id="panel" hidden>
           <div class="head">
-            <span class="logo">JP</span>
+            <span class="logo">✦</span>
             <span class="ttl">JobPilot Autofill</span>
+            <button class="close" id="close" title="Collapse" aria-label="Collapse">⌄</button>
           </div>
-          <div class="steps" id="steps" hidden></div>
-          <div>
-            <label for="resume">Résumé</label>
-            <select id="resume">
-              <option value="auto">Auto (match the role)</option>
-              <option value="ai">AI / data résumé</option>
-              <option value="bt">Behavioral Technician résumé</option>
-            </select>
-            <div class="rfile">
-              <span class="rfname" id="rfname">…</span>
-              <button class="rswap" id="rswap" title="Upload a newer résumé PDF — it becomes the file autofill attaches">Replace</button>
-              <input type="file" id="rfinput" accept="application/pdf,.pdf" hidden>
+          <div class="body">
+            <div class="banner" id="banner" hidden></div>
+            <div class="prog" id="prog" hidden>
+              <div class="track"><div class="pfill" id="pfill"></div></div>
+              <div class="count" id="count">Analyzing form…</div>
             </div>
-          </div>
-          <div class="res" id="res">Fills the form — never submits. You review &amp; click Apply.</div>
-          <div class="rev" id="review" hidden></div>
-          <div class="foot">
-            <button class="applied" id="applied" title="Record that you submitted this application in JobPilot">Mark applied</button>
-            <button class="lnk" id="hide">Hide here</button>
-            <span class="lnk sep">·</span>
-            <button class="lnk" id="off" title="Stop the pill from appearing on any site — nothing fills until you re-enable it from the JobPilot toolbar popup.">Turn off</button>
+            <div class="steps" id="steps" hidden></div>
+            <div class="res" id="res">Fills the form — never submits. You review &amp; click Apply.</div>
+            <div class="rev" id="review" hidden></div>
+            <div class="auth" id="auth" hidden>
+              <button class="applied" id="acct" title="Fill your email + ATS password into this sign-up / sign-in form. You click the button.">Fill account</button>
+              <button class="applied" id="otp" title="Read the verification code the ATS just emailed you (Gmail, read-only) and fill it in">Get code from Gmail</button>
+            </div>
+            <div>
+              <label for="resume">Résumé</label>
+              <select id="resume">
+                <option value="auto">Auto (match the role)</option>
+                <option value="ai">AI / data résumé</option>
+                <option value="bt">Behavioral Technician résumé</option>
+              </select>
+              <div class="rfile">
+                <span class="rfname" id="rfname">…</span>
+                <button class="rswap" id="rswap" title="Upload a newer résumé PDF — it becomes the file autofill attaches">Replace</button>
+                <input type="file" id="rfinput" accept="application/pdf,.pdf" hidden>
+              </div>
+            </div>
+            <div class="foot">
+              <button class="applied" id="applied" title="Record that you submitted this application in JobPilot">Mark applied</button>
+              <button class="lnk" id="hide">Hide here</button>
+              <span class="lnk sep">·</span>
+              <button class="lnk" id="off" title="Stop the pill from appearing on any site — nothing fills until you re-enable it from the JobPilot toolbar popup.">Turn off</button>
+            </div>
           </div>
         </div>
       </div>`;
     document.documentElement.appendChild(hostEl);
 
     root.getElementById("go").onclick = run;
+    root.getElementById("close").onclick = () => { root.getElementById("panel").hidden = true; };
     const appliedBtn = root.getElementById("applied");
     appliedBtn.onclick = async () => {
       appliedBtn.disabled = true;
@@ -227,8 +267,11 @@
     root.getElementById("resume").onchange = refreshResumeMeta;
     root.getElementById("rswap").onclick = () => root.getElementById("rfinput").click();
     root.getElementById("rfinput").onchange = uploadResume;
+    root.getElementById("acct").onclick = fillAccount;
+    root.getElementById("otp").onclick = () => fetchCode(false);
     health();
     refreshResumeMeta();
+    refreshAuth();
   }
 
   // Show WHICH résumé file autofill will attach, so it can be swapped as the
@@ -295,51 +338,149 @@
     if (r) r.innerHTML = html;
   }
 
+  // ---- Account walls + verification codes (content/account.js does the DOM work) ----
+  // Fills email + the ATS password into EMPTY sign-up/sign-in fields; the user
+  // clicks Create Account / Sign In / Verify. Once an account fill happened on
+  // this host, a code box showing up within 15 min fetches the code from Gmail
+  // by itself (read-only, via the local backend).
+  const otpTried = new Set();   // hrefs we already auto-fetched a code for
+  function authState() {
+    try { return (window.__jpafAuthState && window.__jpafAuthState()) || {}; } catch (e) { return {}; }
+  }
+  function wallKind() { const k = authState().kind; return k === "create" || k === "signin" ? k : ""; }
+
+  function refreshAuth() {
+    const box = root && root.getElementById("auth");
+    if (!box || !hostEl || !hostEl.isConnected) return;
+    const st = authState(), wall = wallKind();
+    const a = root.getElementById("acct"), o = root.getElementById("otp");
+    a.hidden = !wall;
+    if (wall && !/^✓/.test(a.textContent))
+      a.textContent = wall === "create" ? "Fill account (email + ATS password)" : "Fill sign-in";
+    o.hidden = !st.otpFields;
+    box.hidden = !(wall || st.otpFields);
+    if (st.otpFields && !otpTried.has(location.href)) { otpTried.add(location.href); maybeAutoCode(); }
+  }
+
+  async function fillAccount() {
+    const a = root.getElementById("acct");
+    root.getElementById("panel").hidden = false;
+    const creds = await send({ cmd: "account_creds" });
+    if (!creds || !creds.hasPassword) {
+      setRes(`<span class="amber">Set an ATS password first</span> — click the JobPilot toolbar icon → “ATS password”. One password for every ATS account; it stays in this browser only.`);
+      return;
+    }
+    if (!creds.email) { setRes(`<span class="err">No email in your JobPilot profile.</span>`); return; }
+    const r = window.__jpafFillAccount ? window.__jpafFillAccount(creds) : { error: "account assist not loaded" };
+    if (r.error) { setRes(`<span class="err">${esc(r.error)}</span>`); return; }
+    await send({ cmd: "account_started", host: location.hostname });
+    const did = [r.email && "email", r.password && "password"].filter(Boolean).join(" + ") || "nothing new (already filled)";
+    a.textContent = "✓ Filled";
+    setRes(`Filled ${did}. Tick any agreement box and click <b>${r.kind === "create" ? "Create Account" : "Sign In"}</b> yourself — when a verification-code box appears, the code is fetched from Gmail.`);
+  }
+
+  async function maybeAutoCode() {
+    const s = await send({ cmd: "account_since", host: location.hostname });
+    if (!s || !s.ts || Date.now() - s.ts > 15 * 60 * 1000) return;   // only right after an account fill here
+    fetchCode(true, s.ts);
+  }
+
+  async function fetchCode(auto, sinceTs) {
+    const o = root.getElementById("otp");
+    root.getElementById("panel").hidden = false;
+    if (!sinceTs) {
+      const s = await send({ cmd: "account_since", host: location.hostname });
+      sinceTs = (s && s.ts && Date.now() - s.ts < 60 * 60 * 1000) ? s.ts : Date.now() - 10 * 60 * 1000;
+    }
+    o.disabled = true; o.textContent = "Checking Gmail…";
+    setRes(`${auto ? "Code box spotted — " : ""}waiting for the verification email (up to a minute)…`);
+    // three short backend polls rather than one long one: an MV3 service worker
+    // can be torn down mid-request; this content script cannot.
+    let r = null;
+    for (let i = 0; i < 3; i++) {
+      r = await send({ cmd: "gmail_code", since: new Date(sinceTs).toISOString(), hint: location.hostname, wait: 20 });
+      if (!r || r.connected === false || r.code || r.link) break;
+    }
+    o.disabled = false; o.textContent = "Get code from Gmail";
+    if (!r || r.connected === false) {
+      setRes(`<span class="amber">Gmail not connected</span> — ${esc((r && (r.reason || r.error)) || "JobPilot backend offline")}. Set it up from the dashboard (“Sync from email”).`);
+      return;
+    }
+    if (r.code) {
+      const f = window.__jpafFillOtp ? window.__jpafFillOtp(r.code) : { ok: false };
+      setRes(f.ok ? `✓ Code <b>${esc(r.code)}</b> filled from “${esc(r.subject || "")}”. Click <b>Verify / Continue</b> yourself.`
+                  : `Code <b>${esc(r.code)}</b> arrived (“${esc(r.subject || "")}”) but the box couldn't be filled — type it in.`);
+      return;
+    }
+    if (r.link) {
+      setRes(`Verification is a link, not a code: <a href="${esc(r.link)}" target="_blank" rel="noopener">open it ↗</a> (from “${esc(r.subject || "")}”).`);
+      return;
+    }
+    setRes(`No verification email yet — check spam or hit “Resend”, then click <b>Get code from Gmail</b> again.`);
+  }
+
   const SECTION_LABELS = {
+    analyze: "Analyzing form",
     contact: "Contact info", work: "Work experience", education: "Education",
     skills: "Skills", resume: "Résumé/CV", websites: "Websites", linkedin: "LinkedIn",
     source: "How you heard", identity: "Disclosures & identity",
     fields: "Contact & questions", page: "Next page",
   };
 
+  // the pending icon is the empty bordered circle itself (○)
+  const stepRow = (n) =>
+    `<div class="step" data-sec="${n}"><span class="ic"></span><span>${SECTION_LABELS[n] || n}</span><span class="nt"></span></div>`;
+
   function stepsInit(names) {
     const box = root.getElementById("steps");
     if (!box) return;
     box.hidden = false;
-    box.innerHTML = names.map((n) =>
-      `<div class="step" data-sec="${n}"><span class="ic">○</span><span>${SECTION_LABELS[n] || n}</span><span class="nt"></span></div>`
-    ).join("");
+    box.innerHTML = names.map(stepRow).join("");
   }
 
   function stepSet(name, status, note) {
-    const box = root.getElementById("steps");
+    const box = root && root.getElementById("steps");
     if (!box) return;
     let row = box.querySelector(`[data-sec="${name}"]`);
     if (!row) {  // section discovered mid-run
-      box.insertAdjacentHTML("beforeend",
-        `<div class="step" data-sec="${name}"><span class="ic">○</span><span>${SECTION_LABELS[name] || name}</span><span class="nt"></span></div>`);
+      box.insertAdjacentHTML("beforeend", stepRow(name));
       row = box.querySelector(`[data-sec="${name}"]`);
     }
     row.className = "step " + ({ start: "run", done: "done", skip: "skip", fail: "fail" }[status] || "");
-    row.querySelector(".ic").textContent = { start: "…", done: "✓", skip: "–", fail: "!" }[status] || "○";
+    row.querySelector(".ic").textContent = { start: "", done: "✓", skip: "–", fail: "!" }[status] || "";
     if (note) row.querySelector(".nt").textContent = note;
+  }
+
+  // Progress bar + "Filling 12 / 30 fields" counter, paced by fill.js's
+  // per-field events (see emit() there).
+  function progress(n, total, text) {
+    const p = root && root.getElementById("prog");
+    if (!p) return;
+    p.hidden = false;
+    root.getElementById("pfill").style.transform = "scaleX(" + (total ? n / total : 0) + ")";
+    root.getElementById("count").textContent = text;
   }
 
   window.addEventListener("jpaf-progress", (e) => {
     const d = e.detail || {};
     if (d.section) stepSet(d.section, d.status, d.note);
+    if (d.type === "field") {
+      const n = (d.index || 0) + 1, t = d.total || n;
+      progress(n, t, `Filling ${n} / ${t} fields`);
+    }
   });
 
-  // JobRight-style review list: fields the fill flagged, click to jump there.
+  // JobRight-style review list: fields the fill flagged, "Jump to" each.
   function renderReview(items) {
     const box = root && root.getElementById("review");
     if (!box) return;
     if (!items.length) { box.hidden = true; box.innerHTML = ""; return; }
     box.hidden = false;
-    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
     box.innerHTML = `<div class="rttl">Needs your review (${items.length})</div>` +
       items.slice(0, 10).map((r) =>
-        `<button class="rl" data-rid="${esc(r.id)}" title="${esc(r.label)}">${esc(r.label)}</button>`).join("");
+        `<div class="rrow"><span class="rlab" title="${esc(r.label)}">${esc(r.label)}</span>` +
+        `<button class="rl" data-rid="${esc(r.id)}">Jump to</button></div>`).join("");
     box.querySelectorAll(".rl").forEach((b) => {
       b.onclick = () => {
         const el = document.querySelector(`[data-jpaf-id="${b.dataset.rid}"]`);
@@ -374,11 +515,12 @@
     }
 
     const fields = window.__jpafScan ? window.__jpafScan() : [];
+    stepSet("analyze", "done", `${fields.length} field${fields.length === 1 ? "" : "s"}`);
     if (!fields.length) {
-      if (mode.steps) stepSet("fields", "skip", "none left");
+      stepSet("fields", "skip", "none left");
       return { filled: wizardFilled, needs_review: 0, file_flags: 0, scanned: 0, wizard: wizardFilled };
     }
-    if (mode.steps) stepSet("fields", "start");
+    stepSet("fields", "start");
     const ctx = {
       url: location.href,
       title: document.title,
@@ -391,7 +533,7 @@
     plan._scanMeta = fields;  // lets fill.js know which ids are aria/combo widgets
     plan._ctx = { company: ctx.company, title: ctx.h1 || ctx.title };
     const stats = window.__jpafApply ? await window.__jpafApply(plan) : { filled: 0 };
-    if (mode.steps) stepSet("fields", "done", `${stats.filled || 0} filled`);
+    stepSet("fields", "done", `${stats.filled || 0} filled`);
     return {
       filled: (stats.filled || 0) + wizardFilled,
       needs_review: stats.needs_review || 0,
@@ -404,30 +546,32 @@
     };
   }
 
+  // Returns true when the page had application fields (the arm is consumed
+  // only then — a JD page / wizard landing keeps it for the form that follows).
   async function run() {
     const go = root.getElementById("go");
+    if (go.disabled) return false;   // already filling
     go.disabled = true;
     go.textContent = "Filling…";
+    root.getElementById("panel").hidden = false;
+    renderReview([]);
+    progress(0, 1, "Analyzing form…");
+    setRes("Filling — never submits. You review &amp; click Apply.");
     try {
       const isWD = window.__jpafIsWorkday && window.__jpafIsWorkday();
       const ghSecs = (!isWD && window.__jpafIsGreenhouse && window.__jpafIsGreenhouse() &&
                       window.__jpafGreenhouseSections) ? window.__jpafGreenhouseSections() : [];
-      const mode = {
-        wizard: isWD ? "workday" : (ghSecs.length ? "greenhouse" : null),
-        steps: isWD || ghSecs.length > 0,
-      };
-      if (mode.steps) {
-        root.getElementById("panel").hidden = false;
-        const secs = isWD
-          ? ((window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [])
-          : ghSecs;
-        stepsInit([...secs, "fields"]);
-      }
+      const mode = { wizard: isWD ? "workday" : (ghSecs.length ? "greenhouse" : null) };
+      const secs = isWD
+        ? ((window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [])
+        : ghSecs;
+      stepsInit(["analyze", ...secs, "fields"]);
+      stepSet("analyze", "start");
       const resumePref = root.getElementById("resume").value;
 
       // Fill this page; on Workday keep advancing (Next / Save and Continue —
       // NEVER Submit or the review step) and filling each new step.
-      let total = 0, review = 0, fileFlags = 0, kept = 0, offline = false, sawAny = 0, pages = 0;
+      let total = 0, review = 0, fileFlags = 0, kept = 0, offline = false, sawAny = 0, pages = 0, scanned = 0;
       const reviewItems = [];
       const MAX_PAGES = 7;
       while (true) {
@@ -436,41 +580,82 @@
         reviewItems.push(...(r.review_fields || []));
         offline = offline || !!r.offline;
         sawAny += r.scanned + r.filled;
+        scanned += r.scanned;
         pages++;
         if (!isWD || pages >= MAX_PAGES || !window.__jpafWorkdayNext) break;
         const nxt = await window.__jpafWorkdayNext();
         if (!nxt || !nxt.clicked) {
           if (nxt && /^at-/.test(nxt.reason || "")) stepSet("page", "done", "review step — your turn");
           else if (nxt && nxt.reason === "validation-errors") stepSet("page", "fail", "fix highlighted fields");
+          else if (nxt && nxt.reason === "no-next-button" && wallKind()) stepSet("page", "skip", "account wall — use “Fill account” below");
           break;
         }
         stepSet("page", "done", nxt.label || "next");
-        const secs = (window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [];
-        stepsInit([...secs, "fields"]);
+        const secs2 = (window.__jpafWorkdaySections && window.__jpafWorkdaySections()) || [];
+        stepsInit(["analyze", ...secs2, "fields"]);
+        stepSet("analyze", "start");
       }
 
       if (!sawAny) {
-        root.getElementById("panel").hidden = false;
+        progress(0, 1, "No fields found");
         setRes(`<span class="err">No application fields detected here.</span>`);
-        return;
+        return false;
       }
       go.textContent = `✓ ${total} filled`;
-      root.getElementById("panel").hidden = false;
+      progress(1, 1, `Filled ${total} / ${Math.max(scanned, total)} fields`);
       setRes(
-        `<b>Filled ${total}</b> field(s)` +
-        (pages > 1 ? ` across ${pages} pages` : "") +
+        `<b>✓ Filled ${total} field${total === 1 ? "" : "s"}</b>` +
+        (review ? ` · <span class="amber">${review} need your review</span>` : "") +
+        (pages > 1 ? ` · ${pages} pages` : "") +
         (kept ? ` · kept ${kept} you'd already answered` : "") +
         (fileFlags ? ` · attach file manually` : "") +
-        (review ? ` · <span class="amber">${review} need review</span>` : "") +
-        (offline ? ` · offline mode` : "")
+        (offline ? ` · offline mode` : "") +
+        `<div class="cta">Review &amp; submit yourself — JobPilot never clicks Apply.</div>`
       );
       renderReview(reviewItems);
       setTimeout(() => { if (root.getElementById("go") === go) go.textContent = "Autofill"; }, 4000);
+      return true;
     } catch (e) {
-      root.getElementById("panel").hidden = false;
-      setRes(`<span class="err">${e.message || e}</span>`);
+      setRes(`<span class="err">${esc(e.message || e)}</span>`);
+      return false;
     } finally {
       go.disabled = false;
+    }
+  }
+
+  // ---- "APPLY WITH AUTOFILL" from the dashboard ----
+  // The dashboard armed this host right before opening the link. Ask once per
+  // URL, and only once the page actually shows a form (a JD page or a Workday
+  // landing has no inputs — the arm waits for the step that does). One run per
+  // page load / SPA step; a reload of the same URL never refills.
+  const ARM_FLAG = "jpaf_armed_ran";
+  let armState = null;    // null = not asked for this URL yet; {} = not armed; {host,…} = armed
+  let armBusy = false, autoRan = false;
+
+  async function maybeAutoRun() {
+    if (!root || disabled || autoRan || armBusy) return;
+    if (visibleInputs().length < 3 || wallKind()) return;
+    if (armState === null) {
+      armBusy = true;
+      const href = location.href, host = location.hostname.replace(/^www\./, "");
+      const a = (await send({ type: "ARMED", host, url: href })) || {};
+      armBusy = false;
+      if (location.href !== href) return;   // SPA moved on mid-flight — ask again there
+      armState = a;
+      if (!root || autoRan) return;
+    }
+    if (!armState.host) return;
+    autoRan = true;
+    try { if (sessionStorage.getItem(ARM_FLAG) === location.href) return; } catch (e) { /* opaque origin */ }
+    try { sessionStorage.setItem(ARM_FLAG, location.href); } catch (e) { /* noop */ }
+    const b = root.getElementById("banner");
+    b.hidden = false;
+    b.textContent = `Autofilling for ${armState.title || "this role"} @ ${armState.company || armState.host} — from JobPilot`;
+    root.getElementById("panel").hidden = false;
+    const ok = await run();
+    if (ok) {
+      armState = {};
+      send({ type: "ARM_CONSUMED", host: location.hostname.replace(/^www\./, "") });
     }
   }
 
@@ -480,7 +665,7 @@
     // the DOM after we've built it — detect that and rebuild.
     if (hostEl && !hostEl.isConnected) { hostEl = null; root = null; }
     if (hostEl) return;
-    if (looksLikeApplication()) build();
+    if (looksLikeApplication()) { build(); maybeAutoRun(); }
   }
 
   // Kill switch: flipping it off tears the pill down everywhere; flipping it
@@ -522,7 +707,14 @@
       lastHref = location.href;
       const b = root && root.getElementById("applied");
       if (b) { b.disabled = false; b.textContent = "Mark applied"; }
+      const ab = root && root.getElementById("acct");
+      if (ab) ab.textContent = "Fill account";
+      const bn = root && root.getElementById("banner");
+      if (bn) bn.hidden = true;
+      armState = null; autoRan = false;   // a new SPA step may be the armed form
     }
     maybeShow();
+    refreshAuth();   // sign-up wall / code box can appear on any SPA step
+    maybeAutoRun();  // forms that render after load (SPA) — cheap until armed
   }, 2000);
 })();

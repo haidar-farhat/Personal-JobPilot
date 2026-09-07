@@ -31,9 +31,10 @@ companies:
     priority: high
 
   - name: "OpenAI"
+    # Moved off Greenhouse (openaisf 404s since ~Aug 2026); Ashby board verified 2026-09-01.
     career_url: "https://openai.com/careers/search"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/openaisf/jobs"
-    ats_platform: "greenhouse"
+    ashby_slug: "openai"
+    ats_platform: "ashby"
     location: "San Francisco, CA"
     priority: high
 
@@ -51,12 +52,7 @@ companies:
     location: "San Francisco, CA"
     priority: medium
 
-  - name: "Weights & Biases"
-    career_url: "https://wandb.ai/site/careers"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/weightsandbiases/jobs"
-    ats_platform: "greenhouse"
-    location: "San Francisco, CA"
-    priority: medium
+  # Weights & Biases removed 2026-09-01 — acquired by CoreWeave, board 404s.
 
   - name: "Together AI"
     career_url: "https://www.together.ai/careers"
@@ -91,13 +87,7 @@ companies:
     location: "San Francisco, CA"
     priority: medium
 
-  # Lever-based companies
-  - name: "Netflix"
-    career_url: "https://jobs.netflix.com"
-    api_url: "https://jobs.lever.co/netflix"
-    ats_platform: "lever"
-    location: "Los Gatos, CA"
-    priority: medium
+  # Netflix removed 2026-09-01 — left Lever for a custom Eightfold site with no public API.
 
   # Large tech (Workday/custom ATS - harder to scrape)
   - name: "Google"
@@ -152,33 +142,29 @@ companies:
     priority: low
 
   # Greenhouse — additional Bay Area DS/DA targets
+  # Anyscale / Snowflake / Cohere moved Greenhouse -> Ashby; slugs verified 2026-09-01.
   - name: "Anyscale"
     career_url: "https://www.anyscale.com/careers"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/anyscale1/jobs"
-    ats_platform: "greenhouse"
+    ashby_slug: "anyscale"
+    ats_platform: "ashby"
     location: "San Francisco, CA"
     priority: medium
 
   - name: "Snowflake"
     career_url: "https://careers.snowflake.com"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/snowflake/jobs"
-    ats_platform: "greenhouse"
+    ashby_slug: "snowflake"
+    ats_platform: "ashby"
     location: "San Mateo, CA"
     priority: medium
 
   - name: "Cohere"
     career_url: "https://cohere.com/careers"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/cohere/jobs"
-    ats_platform: "greenhouse"
+    ashby_slug: "cohere"
+    ats_platform: "ashby"
     location: "San Francisco, CA"
     priority: medium
 
-  - name: "Mode Analytics"
-    career_url: "https://mode.com/careers"
-    api_url: "https://boards-api.greenhouse.io/v1/boards/modeanalytics/jobs"
-    ats_platform: "greenhouse"
-    location: "San Francisco, CA"
-    priority: medium
+  # Mode Analytics removed 2026-09-01 — folded into ThoughtSpot, board 404s.
 
   - name: "Coinbase"
     career_url: "https://www.coinbase.com/careers"
@@ -203,9 +189,10 @@ companies:
     priority: high
 
   - name: "Brex"
+    # Moved Lever -> Greenhouse; verified 2026-09-01.
     career_url: "https://www.brex.com/careers"
-    api_url: "https://api.lever.co/v0/postings/brex"
-    ats_platform: "lever"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/brex/jobs"
+    ats_platform: "greenhouse"
     location: "San Francisco, CA"
     priority: medium
 
@@ -261,7 +248,7 @@ companies:
 
   - name: "Cursor (Anysphere)"
     career_url: "https://cursor.com/careers"
-    ashby_slug: "anysphere"
+    ashby_slug: "cursor"   # was "anysphere" (404); verified 2026-09-01
     ats_platform: "ashby"
     location: "San Francisco, CA"
     priority: medium
@@ -616,3 +603,226 @@ companies:
     ats_platform: "ashby"
     location: "Remote (US)"
     priority: medium        # 98 open, 59 remote
+
+  # ==========================================================================
+  # Trainable / low-barrier track (2026-08-11)
+  # ==========================================================================
+  # Employers that hire on aptitude and train you, for full-time work paying
+  # $30/hr+. Nationwide by design — these are NOT restricted to the relocation
+  # metros in settings.yaml (that list only affects scoring).
+  #
+  # Every host/tenant/site below was probed live before being added: the
+  # Workday CXS endpoint returned HTTP 200 with postings, Greenhouse/Lever
+  # boards returned a non-empty jobs array. Guessed slugs 404/422 loudly, so
+  # re-probe before editing one. (scratchpad probe scripts, 2026-08-11)
+
+  # --- Data center / critical facilities ---
+  - name: "Equinix"
+    career_url: "https://equinix.wd1.myworkdayjobs.com/EQXCareers"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 302 open; "Data Center Critical Facilities I/II/III" is the entry rung
+    workday:
+      host: "equinix.wd1.myworkdayjobs.com"
+      tenant: "equinix"
+      site: "External"
+
+  - name: "QTS Data Centers"
+    career_url: "https://qtsdatacenters.wd5.myworkdayjobs.com/qts"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 280 open
+    workday:
+      host: "qtsdatacenters.wd5.myworkdayjobs.com"
+      tenant: "qtsdatacenters"
+      site: "qts"
+
+  - name: "Vantage Data Centers"
+    career_url: "https://vantagedc.wd1.myworkdayjobs.com/Vantage"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium        # 179 open
+    workday:
+      host: "vantagedc.wd1.myworkdayjobs.com"
+      tenant: "vantagedc"
+      site: "Vantage"
+
+  - name: "Cologix"
+    career_url: "https://jobs.lever.co/cologix"
+    api_url: "https://api.lever.co/v0/postings/cologix?mode=json"
+    ats_platform: "lever"
+    location: "Nationwide"
+    priority: medium
+
+  - name: "EdgeConneX"
+    career_url: "https://www.edgeconnex.com/careers/"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/edgeconnex/jobs"
+    ats_platform: "greenhouse"
+    location: "Nationwide"
+    priority: medium
+
+  # --- Auto retail / dealership floor sales ---
+  # Carvana is already listed above (greenhouse "carvana", 1768 open) — its
+  # sales roles were being dropped by the title gate until the 2026-08-11
+  # keywords landed, not for want of a source.
+  - name: "CarMax"
+    career_url: "https://carmax.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 1221 open; no-haggle floor = salaried-ish, not pure commission
+    workday:
+      host: "carmax.wd1.myworkdayjobs.com"
+      tenant: "carmax"
+      site: "External"
+
+  - name: "Lucid Motors"
+    career_url: "https://lucidmotors.com/careers"
+    api_url: "https://boards-api.greenhouse.io/v1/boards/lucidmotors/jobs"
+    ats_platform: "greenhouse"
+    location: "Nationwide"
+    priority: medium        # EV showroom sales + maintenance techs. NOT "Lucid Software" above.
+
+  # --- Insurance claims / underwriting trainee ---
+  # Paid training, no license needed to start (employer sponsors the adjuster
+  # license), heavily remote, and $60-75k is normal. Closest thing to a
+  # white-collar apprenticeship that an MS Quant Econ walks straight into.
+  - name: "Travelers"
+    career_url: "https://travelers.wd5.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 334 open
+    workday:
+      host: "travelers.wd5.myworkdayjobs.com"
+      tenant: "travelers"
+      site: "External"
+
+  - name: "GEICO"
+    career_url: "https://geico.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 267 open
+    workday:
+      host: "geico.wd1.myworkdayjobs.com"
+      tenant: "geico"
+      site: "External"
+
+  - name: "Allstate"
+    career_url: "https://allstate.wd5.myworkdayjobs.com/allstate_careers"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high          # 439 open, many "Adjuster - Remote"
+    workday:
+      host: "allstate.wd5.myworkdayjobs.com"
+      tenant: "allstate"
+      site: "allstate_careers"
+
+  - name: "USAA"
+    career_url: "https://usaa.wd1.myworkdayjobs.com/USAAJOBSWD"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium        # 160 open; "Associate Auto Adjuster" is the trainee rung
+    workday:
+      host: "usaa.wd1.myworkdayjobs.com"
+      tenant: "usaa"
+      site: "USAAJOBSWD"
+
+  - name: "Sedgwick"
+    career_url: "https://sedgwick.wd1.myworkdayjobs.com/Sedgwick"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium        # 567 open (includes non-US — the location gate handles those)
+    workday:
+      host: "sedgwick.wd1.myworkdayjobs.com"
+      tenant: "sedgwick"
+      site: "Sedgwick"
+
+  # --- Semiconductor fab / manufacturing technicians ---
+  # "Manufacturing Technician" at a fab: 12-hr shifts, full training, $28-40/hr
+  # plus shift differential, and a documented path to Technician II/III.
+  - name: "Intel"
+    career_url: "https://intel.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high
+    workday:
+      host: "intel.wd1.myworkdayjobs.com"
+      tenant: "intel"
+      site: "External"
+
+  - name: "Micron"
+    career_url: "https://micron.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: high
+    workday:
+      host: "micron.wd1.myworkdayjobs.com"
+      tenant: "micron"
+      site: "External"
+
+  - name: "Applied Materials"
+    career_url: "https://amat.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium
+    workday:
+      host: "amat.wd1.myworkdayjobs.com"
+      tenant: "amat"
+      site: "External"
+
+  - name: "GlobalFoundries"
+    career_url: "https://globalfoundries.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium        # 572 open
+    workday:
+      host: "globalfoundries.wd1.myworkdayjobs.com"
+      tenant: "globalfoundries"
+      site: "External"
+
+  # --- Utility / energy operations ---
+  - name: "Xcel Energy"
+    career_url: "https://xcelenergy.wd1.myworkdayjobs.com/External"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium        # 165 open; plant operator + line apprentice programs
+    workday:
+      host: "xcelenergy.wd1.myworkdayjobs.com"
+      tenant: "xcelenergy"
+      site: "External"
+
+  - name: "Duke Energy"
+    career_url: "https://dukeenergy.wd1.myworkdayjobs.com/search"
+    ats_platform: "workday"
+    location: "Nationwide"
+    priority: medium
+    workday:
+      host: "dukeenergy.wd1.myworkdayjobs.com"
+      tenant: "dukeenergy"
+      site: "search"
+
+  # --- Federal (USAJOBS) — the only real channel for air traffic control ---
+  # The FAA does not post ATC jobs to any ATS. data.usajobs.gov needs an API
+  # key, but the public search page is server-rendered, so the generic
+  # Playwright scanner handles it (verified 2026-08-11: returned "Air Traffic
+  # Control Specialist - Trainee" and "Power Plant Trainee").
+  # Read the ATC caveats in docs before applying — FAA Academy hiring runs in
+  # announced bid windows and carries a max-entry-age-31 rule.
+  # Each URL yields up to MAX_DETAILS (8) postings per scan, deduped across
+  # runs, so several narrow searches beat one broad one.
+  - name: "USAJOBS — Air Traffic Control"
+    career_url: "https://www.usajobs.gov/Search/Results?k=air%20traffic%20control&hp=public"
+    ats_platform: "custom"
+    location: "Nationwide"
+    priority: high
+
+  - name: "USAJOBS — Paid Trainee Programs"
+    career_url: "https://www.usajobs.gov/Search/Results?k=trainee&hp=public"
+    ats_platform: "custom"
+    location: "Nationwide"
+    priority: medium
+
+  - name: "USAJOBS — Apprenticeships"
+    career_url: "https://www.usajobs.gov/Search/Results?k=apprentice&hp=public"
+    ats_platform: "custom"
+    location: "Nationwide"
+    priority: medium

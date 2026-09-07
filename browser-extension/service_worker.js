@@ -143,6 +143,13 @@ function jmap(field, p) {
   const nl = jnorm(field.label || ""), nn = jnorm(field.name || "");
   const n = (nl + " " + nn).trim();
   if (!n) return null;
+  // credentials: the account assist (content/account.js) owns password/OTP
+  // boxes with the user's ATS password + a Gmail code; SSN has no source.
+  // Mirrors agents/autofill_mapper.py — tests/js/credential_guard.mjs keeps them equal.
+  if (type === "password" ||
+      ["one-time-code", "new-password", "current-password"].includes(field.autocomplete || "") ||
+      /password|passcode|one time|\botp\b|verification code|security code|confirmation code|authentication code|social security|\bssn\b/.test(n))
+    return { value: null, source: "deterministic", needs_review: /social security|\bssn\b/.test(n), confidence: 1 };
   const LEAVE_EMPTY = { value: null, source: "deterministic", needs_review: true, confidence: 1 };
   // someone else's details — we hold none, so flag it rather than fill his own
   if (jSub(n + " " + jnorm(field.section || ""), ...J_THIRD_PARTY) &&
@@ -485,24 +492,13 @@ async function runAutofill(resumePref) {
   if (!sawAny) return { error: lastError || "No application fields detected on this page." };
   if (!planMeta && !grand.filled) return { error: lastError || "Could not build a fill plan." };
 
-  // Autofill success == the user is applying here — put it on the JobPilot
-  // board right away (server side is idempotent, never regresses a status).
-  let board = null;
-  try {
-    const r = await fetch(`${BACKEND}/api/applied/record`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: tab.url, title: ctx.h1 || ctx.title || "",
-                             company: ctx.company || "",
-                             lead_source: "autofill", source: "extension" }),
-    });
-    if (r.ok) board = await r.json();
-  } catch (e) { /* board tracking is best-effort — never fail the fill */ }
-
+  // Filling is not submission and must not mutate the application board.
+  // The user confirms the final review and records the application separately.
   return { ok: true, stats: grand, pages, stopped_at: stoppedAt,
            resume: planMeta && planMeta.resume_used,
            archetype: planMeta && planMeta.archetype_label,
            offline: !!(planMeta && planMeta._offline),
-           board };
+           manual_review: true };
 }
 
 // ---- Company scan / save-to-board / tailor chain ----
@@ -559,9 +555,64 @@ async function tailorCurrentJob() {
   } catch (e) { return { error: "Tailoring request failed: " + e.message }; }
 }
 
+// ---- Account walls + Gmail verification codes ----
+// The ATS password lives ONLY in chrome.storage.local (set from the popup). It
+// never touches the backend: /api/autofill/profile is CORS-readable by any page.
+const ATS_PW_KEY = "jpaf_ats_password";
+const ACCT_SINCE_KEY = "jpaf_account_since";
+
+async function accountCreds() {
+  const p = await cacheProfile();
+  const v = await chrome.storage.local.get(ATS_PW_KEY);
+  const password = (v && v[ATS_PW_KEY]) || "";
+  return { email: (p && p.identity && p.identity.email) || "", password, hasPassword: !!password };
+}
+
+async function gmailFetch(path) {
+  try {
+    const r = await fetch(`${BACKEND}${path}`, { cache: "no-store" });
+    return r.ok ? await r.json() : { ok: false, connected: false, reason: `HTTP ${r.status}` };
+  } catch (e) { return { ok: false, connected: false, reason: "JobPilot backend offline" }; }
+}
+
+// ---- "Apply with autofill" from the dashboard ----
+// The dashboard POSTs /api/autofill/arm for a job before opening its link; the
+// widget asks ARMED on landing and runs the fill once by itself, then consumes.
+async function armedFor(host, url) {
+  try {
+    const qs = new URLSearchParams({ host: host || "", url: url || "" });
+    const r = await fetch(`${BACKEND}/api/autofill/armed?${qs}`, { cache: "no-store" });
+    return r.ok ? await r.json() : {};
+  } catch (e) { return {}; }
+}
+
+async function armConsumed(host) {
+  try {
+    await fetch(`${BACKEND}/api/autofill/armed?host=${encodeURIComponent(host || "")}`, { method: "DELETE" });
+  } catch (e) { /* best effort — the 15-min TTL cleans up anyway */ }
+  return { ok: true };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
-    if (msg.cmd === "health") sendResponse(await health());
+    if (msg.type === "ARMED") sendResponse(await armedFor(msg.host, msg.url));
+    else if (msg.type === "ARM_CONSUMED") sendResponse(await armConsumed(msg.host));
+    else if (msg.cmd === "health") sendResponse(await health());
+    else if (msg.cmd === "account_creds") sendResponse(await accountCreds());
+    else if (msg.cmd === "account_started") {
+      await chrome.storage.local.set({ [ACCT_SINCE_KEY]: { host: msg.host || "", ts: Date.now() } });
+      sendResponse({ ok: true });
+    }
+    else if (msg.cmd === "account_since") {
+      const v = await chrome.storage.local.get(ACCT_SINCE_KEY);
+      const s = v && v[ACCT_SINCE_KEY];
+      sendResponse(s && s.host === (msg.host || "") ? s : {});
+    }
+    else if (msg.cmd === "gmail_code") {
+      const qs = new URLSearchParams({ since: msg.since || "", hint: msg.hint || "", wait: String(msg.wait || 20) });
+      sendResponse(await gmailFetch(`/api/gmail/code?${qs}`));
+    }
+    else if (msg.cmd === "gmail_health") sendResponse(await gmailFetch("/api/gmail/health"));
     else if (msg.cmd === "profile") sendResponse(await cacheProfile());
     else if (msg.cmd === "autofill") sendResponse(await runAutofill(msg.resumePref));
     else if (msg.cmd === "plan") { await cacheProfile(); sendResponse(await fetchPlan(msg.fields, msg.ctx, msg.resumePref)); }

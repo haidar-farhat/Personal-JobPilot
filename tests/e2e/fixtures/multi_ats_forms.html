@@ -144,6 +144,15 @@
     <option value="">--</option><option>Home Economics</option><option>Agricultural Economics</option>
   </select>
 
+  <!-- a 9-word OTP label used to read as an essay and reach the LLM; only the
+       account assist may fill this, from a code in Gmail -->
+  <label for="tp_otp">Enter the 6-digit verification code we emailed you</label>
+  <input id="tp_otp" name="verification_code" type="text" inputmode="numeric">
+
+  <!-- never in the profile -->
+  <label for="tp_ssn">Social Security Number</label>
+  <input id="tp_ssn" name="ssn" type="text">
+
   <button type="submit">Save</button>
 </form>
 

@@ -16,40 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 class TestDispatch:
     """The runner picks the right applier for each ATS source identifier."""
 
-    def test_greenhouse_source_maps_to_greenhouse_applier(self):
+    # 2026-09-07: every form-based ATS routes to the extension-backed mapper engine.
+    @pytest.mark.parametrize("source", ["greenhouse:anthropic", "ashby:replit", "lever:netflix",
+                                        "custom:apple", "smartrecruiters:foo", "brand_new_ats:foo", None])
+    def test_form_ats_sources_map_to_mapper_engine(self, source):
         from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.greenhouse import GreenhouseAutoApplier
-        assert _applier_for_source("greenhouse:anthropic") is GreenhouseAutoApplier
-
-    def test_ashby_source_maps_to_ashby_applier(self):
-        from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.ashby import AshbyAutoApplier
-        assert _applier_for_source("ashby:replit") is AshbyAutoApplier
-
-    def test_lever_source_maps_to_lever_applier(self):
-        from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.lever import LeverAutoApplier
-        assert _applier_for_source("lever:netflix") is LeverAutoApplier
+        from agents.auto_applier.mapper_engine import MapperApplier
+        assert _applier_for_source(source) is MapperApplier
 
     def test_workday_source_maps_to_workday_applier(self):
         from agents.auto_applier.runner import _applier_for_source
         from agents.auto_applier.workday import WorkdayAutoApplier
         assert _applier_for_source("workday:kaiser") is WorkdayAutoApplier
-
-    def test_custom_source_maps_to_generic_applier(self):
-        from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.generic import GenericAutoApplier
-        assert _applier_for_source("custom:apple") is GenericAutoApplier
-
-    def test_unknown_source_falls_back_to_generic(self):
-        from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.generic import GenericAutoApplier
-        assert _applier_for_source("brand_new_ats:foo") is GenericAutoApplier
-
-    def test_none_source_falls_back_to_generic(self):
-        from agents.auto_applier.runner import _applier_for_source
-        from agents.auto_applier.generic import GenericAutoApplier
-        assert _applier_for_source(None) is GenericAutoApplier
 
 
 # ============================================================

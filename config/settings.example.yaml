@@ -333,21 +333,33 @@ ollama:
 
 # Which LLM serves JobPilot (autofill essays, cover letters, tailoring,
 # ranking — everything routes through utils/ollama_client.py).
-#   provider "openai": GPT-5.6 via the official API — fast (~3-10s vs 30-90s
-#     local). Needs the OPENAI_API_KEY env var; set once with
+#   provider "openai": a configured model via the official API. This can be
+#     faster than local inference, but it is a paid network call. It needs the
+#     OPENAI_API_KEY env var; set once with
 #       setx OPENAI_API_KEY sk-...   (then restart JobPilot)
 #     Never put the key in this file (it's git-tracked). Missing key or a
 #     failed call falls back to local Ollama automatically.
-#   provider "ollama": local gemma4 (free, slower). Falls back to OpenAI
-#     when the key is set and Ollama is down.
+#   provider "ollama": local gemma4 (free, slower). This is the default.
+#     Cloud fallback is disabled even if a key happens to be present; opt in
+#     explicitly with allow_openai_fallback: true.
 # NOTE: a ChatGPT Plus subscription does NOT cover API calls — the key is
 # separate pay-per-token billing at platform.openai.com. Routing Plus OAuth
 # tokens into the API is unsupported/ToS-risky; if OpenAI ever ships
 # subscription OAuth for the API, only the key source changes.
+#   provider "anthropic": Claude via the official SDK (added 2026-09-01). Paid;
+#     key from the ANTHROPIC_API_KEY env var only (setx ANTHROPIC_API_KEY sk-ant-...).
+#     Default model is Claude Fable 5.1; anthropic_effort low|medium|high|xhigh|max
+#     trades reasoning depth for cost. Same rule as OpenAI: a key alone is not
+#     permission — opt into outage fallback with allow_anthropic_fallback: true.
 llm:
-  provider: "openai"
-  openai_model: "gpt-5.6-terra"  # gpt-5.6-luna = cheaper/faster, gpt-5.6-sol = strongest
+  provider: "ollama"
+  allow_openai_fallback: false
+  openai_model: "gpt-5.6-terra"
   openai_timeout: 120
+  allow_anthropic_fallback: false
+  anthropic_model: "claude-fable-5-1"
+  anthropic_effort: "medium"
+  anthropic_timeout: 180
 
 # Dashboard configuration
 dashboard:
@@ -366,10 +378,14 @@ google_sheets:
 
 # Tailor / resume-optimizer (hiring-agent-style JD-relative audit)
 tailor:
+  cover_letter_default: true   # dashboard/extension default; per run: POST …/tailor?cover_letter=0
+  attach_format: pdf           # what autofill attaches when the tailor made a Word-verified PDF: pdf | docx
   optimizer:
     enabled: true
     min_score: 75      # regenerate once with feedback when the audit scores below this
     max_retries: 1
+
+# Gmail connector (read-only IMAP) lives in config/gmail.yaml — see config/gmail.example.yaml.
 
 # Notifications
 notifications:

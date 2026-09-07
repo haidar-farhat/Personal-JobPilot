@@ -138,6 +138,13 @@ def test_full_tailor_chain(base_url):
                          params={"company": company, "job_title": title},
                          timeout=60)
         assert f.status_code == 200
-        assert t["resume_filename"] in f.headers.get("content-disposition", "")
+        # the Word-verified one-page PDF is preferred when the tailor made one
+        # (settings tailor.attach_format: pdf); the .docx otherwise
+        expected = t.get("pdf_filename") or t["resume_filename"]
+        served = f.headers.get("content-disposition", "")
+        assert expected in served, (expected, served)
+        if t.get("pdf_filename"):
+            assert t["pages"] == 1, t
+            assert f.headers.get("content-type", "").startswith("application/pdf")
     finally:
         _cleanup_job(job_id)

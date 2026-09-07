@@ -41,6 +41,7 @@ credentials.json
 token.json
 *.json.bak
 config/google_credentials.json
+config/gmail.yaml
 .env
 .env.local
 
@@ -60,3 +61,9 @@ playwright-report/
 test-results/
 config/*.pdf
 config/*.meta.json
+
+# Personal data pulled from JobRight (2026-09-07) and dashboard QA screenshots — never publish
+config/jobright_applied_export.json
+tests/qa-screenshots/*.png
+tests/qa-screenshots/*.pdf
+tests/qa-screenshots/*.docx

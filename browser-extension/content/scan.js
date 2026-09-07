@@ -7,8 +7,17 @@
     if (el.getAttribute("aria-label")) return txt(el.getAttribute("aria-label"));
     const lblBy = el.getAttribute("aria-labelledby");
     if (lblBy) {
-      const n = document.getElementById(lblBy);
-      if (n) return txt(n.innerText);
+      // aria-labelledby is an IDREF *list*. Workday, Oracle and many
+      // Simplify-style forms split the prompt, required marker and helper text
+      // across multiple nodes. Reading only the whole string as one id loses
+      // the label completely.
+      const label = lblBy.split(/\s+/)
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .map((n) => txt(n.innerText || n.textContent))
+        .filter(Boolean)
+        .join(" ");
+      if (label) return label;
     }
     if (el.id) {
       const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
@@ -77,7 +86,8 @@
     // route the fill into the wrong element.
     document.querySelectorAll("[data-jpaf-id]").forEach((el) => el.removeAttribute("data-jpaf-id"));
     const nodes = document.querySelectorAll("input, select, textarea");
-    const SKIP = new Set(["hidden", "submit", "button", "image", "reset"]);
+    // password: never part of a fill-plan — content/account.js handles sign-up walls
+    const SKIP = new Set(["hidden", "submit", "button", "image", "reset", "password"]);
     const out = [];
     const seen = new Set();  // elements already emitted by THIS scan
     let i = 0;
@@ -128,7 +138,12 @@
                     el.getAttribute("aria-autocomplete") === "list" ||
                     el.getAttribute("aria-haspopup") === "listbox";
       out.push({ id, label, name: el.name || el.id || "", type,
-                 options, required: !!el.required, section: sectionFor(el),
+                 options,
+                 required: !!el.required || el.getAttribute("aria-required") === "true",
+                 section: sectionFor(el),
+                 autocomplete: el.getAttribute("autocomplete") || "",
+                 inputmode: el.getAttribute("inputmode") || "",
+                 automation_id: el.getAttribute("data-automation-id") || "",
                  ...(combo ? { combo: true } : {}) });
     });
 
@@ -150,6 +165,8 @@
       out.push({ id, label: labelFor(el),
                  name: el.getAttribute("name") || el.getAttribute("data-automation-id") || el.id || "",
                  type: "aria_select", options: null, section: sectionFor(el),
+                 autocomplete: el.getAttribute("autocomplete") || "",
+                 automation_id: el.getAttribute("data-automation-id") || "",
                  required: el.getAttribute("aria-required") === "true" });
     });
     return out;

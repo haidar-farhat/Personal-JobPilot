@@ -46,8 +46,9 @@ def test_applied_view_shows_applied_jobs(page, base_url):
     )
     rows = page.locator("#appliedList .ap-row").count()
     assert rows == expected, f"expected {expected} applied rows, saw {rows}"
-    # Status sub-tabs render with counts
-    assert page.locator("#apTabs .ap-tab").count() == 6
+    # Status sub-tabs render with counts (JobRight set: All · Applied · Response ·
+    # Interviewing · Offer Received · Rejected · Archived)
+    assert page.locator("#apTabs .ap-tab").count() == 7
 
 
 def test_applied_tab_filters_by_status(page, base_url):

@@ -41,6 +41,8 @@ TRAPS = {
     "#tp_degree": "a degree he does not hold",
     "#tp_school": "a university he did not attend",
     "#tp_major": "a field of study he did not study",
+    "#tp_otp": "LLM prose in a verification-code box",
+    "#tp_ssn": "a social security number",
 }
 
 

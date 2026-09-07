@@ -178,7 +178,7 @@ Every action is logged to `auto_apply_log` (JSON) on the Application row so I ca
 |---|---|---|
 | **Language** | Python 3.14 | Type hints, `dataclass`, `match` statements |
 | **Database** | SQLite + SQLAlchemy 2.0 | Zero-ops, single-file, plenty fast for this scale |
-| **LLM** | Gemma-4 27B via [Ollama](https://ollama.com) | Local, free, no rate limits, ~50 tok/s on consumer GPU |
+| **LLM** | Gemma-4 27B via [Ollama](https://ollama.com); opt-in cloud providers (OpenAI, Claude Fable 5.1 via the Anthropic SDK) behind `settings.yaml → llm` | Local, free, no rate limits, ~50 tok/s on consumer GPU — cloud only when explicitly selected and keyed via env vars |
 | **Scheduler** | APScheduler (BlockingScheduler) | Cron-like jobs in pure Python |
 | **Web framework** | FastAPI + Uvicorn | Async, SSE-friendly, OpenAPI for free |
 | **Scraping** | requests + BeautifulSoup4 (Greenhouse/Lever/Ashby JSON APIs) + Playwright (EdJoin + JS-rendered pages) | Right tool per source |
@@ -500,7 +500,7 @@ Net effect: the system is genuinely fire-and-forget. Reboot your machine and the
 ## What's next
 
 - [x] ~~Browser extension for one-click autofill from any application page~~ — **shipped** (see above)
-- [ ] Email auto-tracking — parse LinkedIn / ATS "application received / interview" emails via the Gmail API and auto-advance the Kanban board (design spec'd in `docs/`)
+- [x] ~~Email auto-tracking~~ — **shipped** as a review queue: read-only Gmail IMAP (`config/gmail.example.yaml`) reads confirmation / rejection / interview mail and proposes board updates you approve in "Sync from email"; it also fetches ATS verification codes for the extension
 - [ ] Bayesian fit-score calibration — re-weight dims based on which past applications got responses
 - [ ] Anonymized weekly digest export for accountability buddies
 - [ ] Multi-applicant mode (turn it into a service for friends who are job searching)

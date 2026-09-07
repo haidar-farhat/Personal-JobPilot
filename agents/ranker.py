@@ -67,9 +67,20 @@ def _target_locations_text() -> str:
     return ", ".join(str(loc) for loc in locs) or "Remote (US)"
 
 
-def _salary_floor() -> int:
-    """Full-time base-salary floor used to anchor comp_range scoring."""
-    return int((_settings().get("comp", {}) or {}).get("min_annual_full_time", 85000))
+def _salary_floor(archetype: str | None = None) -> int:
+    """Full-time base-salary floor used to anchor comp_range scoring.
+
+    The $85k default is the AI/data track's "can I afford to live alone" number.
+    The trainable tracks (2026-08-11: technician / sales / ops-trainee) are
+    judged against their own floor — $62,400 = $30/hr × 2080 — otherwise every
+    $70k data-center-tech posting scores as underpaid against a number that was
+    never meant for it.
+    """
+    comp = _settings().get("comp", {}) or {}
+    by_arch = comp.get("min_annual_by_archetype", {}) or {}
+    if archetype and archetype in by_arch:
+        return int(by_arch[archetype])
+    return int(comp.get("min_annual_full_time", 85000))
 
 
 def _load_resume_summary(archetype: str | None = None) -> str:
@@ -366,7 +377,7 @@ def score_dimensions(job: Job, archetype: str, resume_summary: str) -> dict:
         archetype_label=arch.get("label", archetype),
         job_description=description,
         target_locations=_target_locations_text(),
-        salary_floor=_salary_floor(),
+        salary_floor=_salary_floor(archetype),
     )
 
     result = generate_json(prompt, system_prompt=DIMENSION_SYSTEM_PROMPT)

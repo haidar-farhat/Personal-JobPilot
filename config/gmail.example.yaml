@@ -1,0 +1,17 @@
+# Gmail connector — copy to config/gmail.yaml (gitignored).
+#
+# Read-only IMAP with a Google App Password. JobPilot uses it for two things:
+#   1. the verification code an ATS emails while you create an account
+#      (the extension fills it into the code box for you);
+#   2. "Sync from email" on the dashboard — confirmation / rejection / interview
+#      emails become a review queue of proposed status changes.
+#
+# Setup (about a minute):
+#   Google Account → Security → turn on 2-Step Verification → search
+#   "App passwords" → create one named "JobPilot" → paste the 16 characters below.
+# Nothing is ever marked read, moved, sent, or deleted.
+#
+# Env overrides: JOBPILOT_GMAIL_ADDRESS / JOBPILOT_GMAIL_APP_PASSWORD.
+enabled: true
+address: "you@gmail.com"
+app_password: "abcd efgh ijkl mnop"

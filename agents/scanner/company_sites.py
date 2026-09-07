@@ -409,6 +409,16 @@ def _extract_page_text(page) -> str:
     return _clean_page_text(raw)
 
 
+# A scraped "location" is only believed if it carries a real location signal:
+# a ", XX" state/province suffix or an explicit whole-country / remote marker.
+_LOOKS_LIKE_LOCATION_RE = re.compile(
+    r",\s*[A-Z]{2}\b"
+    r"|\b(?:remote|nationwide|anywhere|multiple locations|various locations"
+    r"|united states|u\.s\.|usa)\b",
+    re.I,
+)
+
+
 class GenericCareersScanner(BaseScanner):
     """Scan custom company careers pages (no known ATS API) via Playwright.
 
@@ -489,7 +499,12 @@ class GenericCareersScanner(BaseScanner):
                 body = _extract_page_text(page)
                 description = body[:8000]
                 m = re.search(r"(?:location|based in)[:\s]+([^\n]{3,60})", body, re.I)
-                if m:
+                # Only take the match if it actually looks like a place. The word
+                # "location" shows up mid-sentence on plenty of postings, and the
+                # greedy version happily stored "ARE NOT due to lack of funding."
+                # as a location — which then feeds the ranker's location_remote
+                # dimension as pure noise. Company default is the safer fallback.
+                if m and _LOOKS_LIKE_LOCATION_RE.search(m.group(1)):
                     location = m.group(1).strip()
             except Exception as e:
                 logger.debug(f"[custom] detail fetch failed for {job_url}: {e}")

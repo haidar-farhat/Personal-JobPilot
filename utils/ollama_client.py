@@ -1,9 +1,10 @@
-"""LLM client for JobPilot: local Ollama first, optional OpenAI fallback.
+"""LLM client for JobPilot: local Ollama first, optional OpenAI / Claude cloud.
 
 Every LLM consumer (autofill essays, cover letters, tailoring, ranking) routes
-through generate_json / generate_text here, so the fallback covers all of them.
-Fallback fires only when Ollama is unreachable or returns unusable output, and
-only when OPENAI_API_KEY is set (env var — never in the tracked settings.yaml).
+through generate_json / generate_text here, so the provider chain covers all
+of them. A cloud provider is used only when settings.yaml `llm` selects it as
+primary or explicitly allows it as fallback, AND its key is in the environment
+(OPENAI_API_KEY / ANTHROPIC_API_KEY — never in the tracked settings.yaml).
 """
 
 import json
@@ -15,6 +16,9 @@ from pathlib import Path
 import requests
 import yaml
 import ollama
+
+from utils.anthropic_client import (anthropic_chat, anthropic_key_present,
+                                    DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL)
 
 
 logger = logging.getLogger(__name__)
@@ -161,27 +165,79 @@ def _llm_cfg() -> dict:
 
 
 def _openai_ready() -> bool:
-    return bool(os.environ.get("OPENAI_API_KEY"))
+    """True only when cloud use is both configured and credentialed.
+
+    Merely finding a key in the process environment is not permission to turn
+    an Ollama outage into a paid network request. OpenAI remains available
+    when explicitly selected as the primary provider, or when the operator
+    opts into fallback with ``allow_openai_fallback``.
+    """
+    cfg = _llm_cfg()
+    authorized = cfg.get("provider", "ollama") == "openai" or bool(
+        cfg.get("allow_openai_fallback", False)
+    )
+    return authorized and bool(os.environ.get("OPENAI_API_KEY"))
+
+
+def _anthropic_ready() -> bool:
+    """Same contract as _openai_ready, for Claude (`llm` settings + ANTHROPIC_API_KEY)."""
+    cfg = _llm_cfg()
+    authorized = cfg.get("provider", "ollama") == "anthropic" or bool(
+        cfg.get("allow_anthropic_fallback", False)
+    )
+    return authorized and anthropic_key_present()
+
+
+_CLOUD = {"openai": _openai_ready, "anthropic": _anthropic_ready}
+
+
+def _cloud_primary() -> str | None:
+    """The cloud provider selected as primary, if it's actually credentialed."""
+    name = _llm_cfg().get("provider", "ollama")
+    return name if name in _CLOUD and _CLOUD[name]() else None
+
+
+def _cloud_fallback() -> str | None:
+    """A cloud provider authorized to catch an Ollama failure (first ready wins)."""
+    return next((n for n, ready in _CLOUD.items() if ready()), None)
 
 
 def _openai_primary() -> bool:
-    """OpenAI-first when configured AND the key is actually present."""
-    return _llm_cfg().get("provider", "ollama") == "openai" and _openai_ready()
+    return _cloud_primary() == "openai"
+
+
+def _cloud_model(name: str) -> str:
+    cfg = _llm_cfg()
+    if name == "anthropic":
+        return cfg.get("anthropic_model", ANTHROPIC_DEFAULT_MODEL)
+    return cfg.get("openai_model", "gpt-5.6-terra")
 
 
 def llm_status() -> dict:
     """What's actually serving requests right now (for /api/autofill/health)."""
-    primary = _openai_primary()
+    primary = _cloud_primary()
     return {
-        "provider": "openai" if primary else "ollama",
+        "provider": primary or "ollama",
         "openai_ready": _openai_ready(),
-        "model": _llm_cfg().get("openai_model", "gpt-5.6-terra") if primary else None,
+        "anthropic_ready": _anthropic_ready(),
+        "model": _cloud_model(primary) if primary else None,
     }
 
 
 def llm_fallback_available() -> bool:
-    """True when the *other* provider can catch a failure."""
-    return _openai_ready() if not _openai_primary() else True  # ollama is always installed here
+    """True when another provider can catch a failure of the primary."""
+    return True if _cloud_primary() else _cloud_fallback() is not None  # ollama always installed here
+
+
+def _cloud_chat(name: str, prompt: str, system_prompt: str, json_mode: bool,
+                temperature: float) -> str:
+    if name == "anthropic":
+        return anthropic_chat(prompt, system_prompt, json_mode=json_mode, cfg=_llm_cfg())
+    return _openai_chat(prompt, system_prompt, json_mode=json_mode, temperature=temperature)
+
+
+def _cloud_json(name: str, prompt: str, system_prompt: str) -> dict:
+    return _extract_json(_cloud_chat(name, prompt, system_prompt, json_mode=True, temperature=0.3))
 
 
 def _openai_chat(prompt: str, system_prompt: str, json_mode: bool,
@@ -212,8 +268,8 @@ def _openai_chat(prompt: str, system_prompt: str, json_mode: bool,
     return content.strip()
 
 
-def _openai_json(prompt: str, system_prompt: str) -> dict:
-    content = _openai_chat(prompt, system_prompt, json_mode=True, temperature=0.3)
+def _extract_json(content: str) -> dict:
+    """Parse a cloud completion as JSON, tolerating prose around the object."""
     try:
         return json.loads(content)
     except json.JSONDecodeError:
@@ -226,47 +282,52 @@ def _openai_json(prompt: str, system_prompt: str) -> dict:
 def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
     """JSON completion via the configured provider chain (settings.yaml `llm`).
 
-    provider "openai" + key set: GPT-5.6 first, Ollama catches failures.
-    Otherwise: Ollama first, OpenAI catches failures when a key is set.
+    provider "openai"/"anthropic" + key set: that cloud first, Ollama catches
+    failures. Otherwise: Ollama first; a cloud provider is considered only when
+    its key exists AND its ``allow_*_fallback`` flag is explicitly true.
     Raises ConnectionError/ValueError only after the whole chain failed.
     """
-    if _openai_primary():
+    primary = _cloud_primary()
+    if primary:
         try:
-            return _openai_json(prompt, system_prompt)
+            return _cloud_json(primary, prompt, system_prompt)
         except Exception as e:
-            logger.warning(f"[llm] OpenAI primary failed ({e}) — falling back to Ollama")
+            logger.warning(f"[llm] {primary} primary failed ({e}) — falling back to Ollama")
             return _ollama_generate_json(prompt, system_prompt, max_retries)
     try:
         return _ollama_generate_json(prompt, system_prompt, max_retries)
     except (ConnectionError, ValueError) as ollama_err:
-        if not _openai_ready():
+        fallback = _cloud_fallback()
+        if not fallback:
             raise
-        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying OpenAI fallback")
+        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying {fallback} fallback")
         try:
-            return _openai_json(prompt, system_prompt)
+            return _cloud_json(fallback, prompt, system_prompt)
         except Exception as e:
-            logger.error(f"[llm] OpenAI fallback also failed: {e}")
+            logger.error(f"[llm] {fallback} fallback also failed: {e}")
             raise ollama_err
 
 
 def generate_text(prompt: str, system_prompt: str = "") -> str:
     """Text completion via the configured provider chain (settings.yaml `llm`)."""
-    if _openai_primary():
+    primary = _cloud_primary()
+    if primary:
         try:
-            return _openai_chat(prompt, system_prompt, json_mode=False, temperature=0.4)
+            return _cloud_chat(primary, prompt, system_prompt, json_mode=False, temperature=0.4)
         except Exception as e:
-            logger.warning(f"[llm] OpenAI primary failed ({e}) — falling back to Ollama")
+            logger.warning(f"[llm] {primary} primary failed ({e}) — falling back to Ollama")
             return _ollama_generate_text(prompt, system_prompt)
     try:
         return _ollama_generate_text(prompt, system_prompt)
     except Exception as ollama_err:
-        if not _openai_ready():
+        fallback = _cloud_fallback()
+        if not fallback:
             raise
-        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying OpenAI fallback")
+        logger.warning(f"[llm] ollama failed ({ollama_err}) — trying {fallback} fallback")
         try:
-            return _openai_chat(prompt, system_prompt, json_mode=False, temperature=0.4)
+            return _cloud_chat(fallback, prompt, system_prompt, json_mode=False, temperature=0.4)
         except Exception as e:
-            logger.error(f"[llm] OpenAI fallback also failed: {e}")
+            logger.error(f"[llm] {fallback} fallback also failed: {e}")
             raise ollama_err
 
 

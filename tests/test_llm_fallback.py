@@ -1,5 +1,4 @@
-"""utils/ollama_client provider chain: openai-primary vs ollama-primary,
-fallback in both directions, key gating. No network in these tests."""
+"""LLM provider chain: local-first, explicit cloud authorization, no network."""
 
 import httpx
 import pytest
@@ -73,7 +72,15 @@ def openai_primary(monkeypatch):
 @pytest.fixture
 def ollama_primary(monkeypatch):
     monkeypatch.setattr(oc, "_llm_cfg",
-                        lambda: {"provider": "ollama", "openai_model": "gpt-5.6-terra"})
+                        lambda: {"provider": "ollama", "openai_model": "gpt-5.6-terra",
+                                 "allow_openai_fallback": False})
+
+
+@pytest.fixture
+def ollama_with_authorized_fallback(monkeypatch):
+    monkeypatch.setattr(oc, "_llm_cfg",
+                        lambda: {"provider": "ollama", "openai_model": "gpt-5.6-terra",
+                                 "allow_openai_fallback": True})
 
 
 # ---- openai-primary (the shipped default) ----
@@ -114,8 +121,16 @@ def test_openai_primary_without_key_uses_ollama_silently(openai_primary, no_key,
 
 # ---- ollama-primary (provider: "ollama") ----
 
-def test_ollama_primary_falls_back_to_openai(ollama_primary, with_key,
-                                             dead_ollama, monkeypatch):
+def test_ollama_primary_does_not_infer_cloud_permission_from_key(
+        ollama_primary, with_key, dead_ollama, monkeypatch):
+    monkeypatch.setattr(oc.requests, "post",
+                        lambda *a, **k: pytest.fail("must not call OpenAI"))
+    with pytest.raises(ConnectionError):
+        oc.generate_json("x", max_retries=1)
+
+
+def test_ollama_explicit_fallback_can_use_openai(
+        ollama_with_authorized_fallback, with_key, dead_ollama, monkeypatch):
     fake = _FakeHTTP()
     monkeypatch.setattr(oc.requests, "post", fake.post)
     assert oc.generate_json("x JSON", max_retries=1) == {"from": "openai"}
@@ -136,7 +151,7 @@ def test_ollama_primary_healthy_never_calls_openai(ollama_primary, with_key,
     assert oc.generate_json("x", max_retries=1) == {"from": "ollama"}
 
 
-def test_both_dead_reraises_ollama_error(ollama_primary, with_key,
+def test_both_dead_reraises_ollama_error(ollama_with_authorized_fallback, with_key,
                                          dead_ollama, monkeypatch):
     fake = _FakeHTTP(status=500)
     monkeypatch.setattr(oc.requests, "post", fake.post)
