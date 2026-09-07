@@ -44,7 +44,7 @@ ATS_DOMAINS = (
     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkday.com", "workday.com", "icims.com",
     "smartrecruiters.com", "taleo.net", "jobvite.com", "successfactors.com", "workable.com",
     "bamboohr.com", "rippling.com", "breezy.hr", "applytojob.com", "dayforce", "phenom",
-    "oraclecloud.com", "paylocity.com", "linkedin.com", "indeed.com", "hire.com", "recruitee",
+    "oraclecloud.com", "paylocity.com", "linkedin.com", "indeed.com", "hire.com", "recruitee", "gem.com",
 )
 
 
@@ -330,21 +330,27 @@ def _from_domain(sender: str) -> str:
     return mt.group(1).lower() if mt else ""
 
 
+def _has_words(key: str, hay: str) -> bool:
+    """Whole-word match: "revi" must not hit "reviewing" or "appreview.gem.com"."""
+    return re.search("(?<![a-z0-9])" + re.escape(key) + "(?![a-z0-9])", hay) is not None
+
+
 def header_matches_company(sender: str, subject: str, company: str) -> bool:
     key = company_key(company)
     if len(key) < 3:
         return False
-    if key in _norm(sender + " " + subject):
+    if _has_words(key, _norm(sender + " " + subject)):
         return True
     first = key.split(" ")[0]
-    return len(first) >= 4 and first in _from_domain(sender).replace("-", "").replace(".", "")
+    labels = _from_domain(sender).replace("-", "").split(".")
+    return len(first) >= 4 and any(lbl.startswith(first) for lbl in labels)
 
 
 def message_matches_company(msg: dict, company: str) -> bool:
     if header_matches_company(msg.get("from", ""), msg.get("subject", ""), company):
         return True
     key = company_key(company)
-    return len(key) >= 3 and key in _norm(msg.get("text", "")[:3000])
+    return len(key) >= 3 and _has_words(key, _norm(msg.get("text", "")[:3000]))
 
 
 def is_ats_sender(sender: str) -> bool:

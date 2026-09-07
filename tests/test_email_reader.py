@@ -92,6 +92,12 @@ def test_company_matching_by_subject_or_domain():
     assert er.header_matches_company("no-reply@greenhouse.io", "Thank you for applying to Acme Robotics Inc", "Acme Robotics, Inc.")
     assert er.header_matches_company("talent@acmerobotics.com", "Next steps", "Acme Robotics")
     assert not er.header_matches_company("news@other.com", "Hello", "Acme Robotics")
+    # whole words only: "revi" is inside "appreview" and "reviewing" (real false positive 2026-09-07)
+    assert not er.header_matches_company("Nuvo Recruiting <no-reply@appreview.gem.com>", "Update from Nuvo", "REVI")
+    assert not er.message_matches_company({"from": "no-reply@gem.com", "subject": "Update",
+                                           "text": "After reviewing your application"}, "REVI")
+    assert er.message_matches_company({"from": "no-reply@gem.com", "subject": "Update",
+                                       "text": "Thanks for applying to REVI!"}, "REVI")
 
 
 def test_propose_builds_review_rows_and_never_steps_backwards():
