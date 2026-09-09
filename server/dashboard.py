@@ -712,11 +712,61 @@ def api_mail_health():
             "employer" if cfg.get("to_employer") else "off")
         if not cfg.get("to") and cfg.get("self_copy"):
             mode += "+self-copy"
+        try:
+            from utils.bounce_watch import load_dead
+            from utils.company_email import cache_size
+            cached, dead = cache_size(), len(load_dead())
+        except Exception:
+            cached, dead = 0, 0
         return {"ready": ready, "reason": why, "enabled": bool(cfg.get("enabled")),
                 "to": cfg.get("to") or "", "to_employer": bool(cfg.get("to_employer")),
-                "self_copy": bool(cfg.get("self_copy")), "mode": mode}
+                "self_copy": bool(cfg.get("self_copy")), "mode": mode,
+                "lookup_website": bool(cfg.get("lookup_website")),
+                "guess_addresses": bool(cfg.get("guess_addresses")),
+                "max_guessed_per_day": cfg.get("max_guessed_per_day", 20),
+                "domains_cached": cached, "dead_addresses": dead}
     except Exception as e:
         return {"ready": False, "reason": str(e)}
+
+
+@app.get("/api/application/{app_id}/recipient")
+def api_preview_recipient(app_id: int):
+    """Dry preview: which address WOULD this application be emailed at, and why.
+
+    Sends nothing. This is the safe way to inspect what `guess_addresses` would
+    do across a batch of jobs before switching it on.
+    """
+    from utils.mailer import find_employer_recipient
+
+    session = get_session()
+    try:
+        row = (session.query(Application, Job)
+               .join(Job, Application.job_id == Job.id)
+               .filter(Application.id == app_id).first())
+        if not row:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job = row
+        with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+            cfg = (yaml.safe_load(f) or {}).get("mail", {}) or {}
+
+        hit = find_employer_recipient(job.description or "")
+        if hit:
+            return {"company": job.company, "address": hit, "source": "description"}
+        try:
+            from utils.bounce_watch import load_dead
+            from utils.company_email import company_domain_with_origin, find_company_email
+            origin = company_domain_with_origin(job)
+            rec = find_company_email(
+                job, allow_crawl=bool(cfg.get("lookup_website", True)),
+                allow_guess=bool(cfg.get("guess_addresses", False)),
+                guess_locals=cfg.get("guess_locals"), dead=load_dead())
+            rec["company"] = job.company
+            rec["domain_origin"] = origin[1] if origin else None
+            return rec
+        except Exception as e:
+            return {"company": job.company, "address": None, "source": None, "error": str(e)}
+    finally:
+        session.close()
 
 
 @app.get("/api/job-sources")

@@ -407,3 +407,38 @@ user:
   linkedin: "linkedin.com/in/your-handle"
   github: "github.com/your-handle"
   location: "San Francisco, CA"
+
+mail:
+  enabled: true
+  to: ""                # force ONE recipient for every application (rarely wanted)
+
+  # Send yourself a copy when the employer publishes no address. Off: mailing
+  # your own inbox is not an application, and the ATS form already carried the
+  # résumé. Turn on only if you want an archive of what went out.
+  self_copy: false
+
+  # Email the EMPLOYER. Recipient is resolved most-trustworthy-first:
+  #   1. an address printed in the stored job description
+  #   2. an address on the live job page (most descriptions are empty)
+  #   3. an address published on the company's own site  (lookup_website)
+  #   4. a constructed role address, e.g. careers@domain (guess_addresses)
+  # Screened at every stage: accommodation / compliance / legal / no-reply
+  # inboxes are never used.
+  to_employer: true
+
+  # (3) Crawl the company site - homepage, /careers, /jobs, /contact, /about -
+  # and take a published recruiting address. Free, no API key. Most ATS-using
+  # companies publish nothing, so expect this to miss often; that is correct
+  # behaviour, not a failure.
+  lookup_website: true
+
+  # (4) Construct careers@domain when nothing is published. OFF by default and
+  # deliberately so: an MX record proves the DOMAIN takes mail, never that the
+  # MAILBOX exists, so some of these bounce. Guards in place - the domain must
+  # be provably the company's (its homepage must name them), the address must
+  # not be one a previous send bounced from, and sends are capped per day.
+  # Preview what it WOULD send with GET /api/application/{id}/recipient before
+  # switching this on.
+  guess_addresses: false
+  guess_locals: ["careers", "jobs", "recruiting", "talent", "hr"]
+  max_guessed_per_day: 20   # cap on constructed addresses only; published ones uncapped

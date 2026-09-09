@@ -9,11 +9,20 @@ letter attached. Two modes:
                 (a recruiter who asked for materials, a careers@ address a
                 posting explicitly names). Never bulk, never guessed.
 
-Deliberately NOT supported: harvesting or guessing employer addresses and
-mailing every application. Unsolicited CVs to addresses scraped from postings
-is spam — it burns the sender's domain reputation, is illegal in several
-jurisdictions, and the addresses that do appear in job descriptions are usually
-accessibility/accommodation inboxes that must not receive applications.
+Recipient discovery lives in utils/company_email.py and is layered by how much
+the address can be trusted: published in the posting > published on the
+company's own site > constructed (careers@domain). The constructed layer is
+opt-in (`mail.guess_addresses`), capped per day, gated on the domain provably
+belonging to that company, and fed by utils/bounce_watch.py so an address that
+bounced is never used twice.
+
+The screening below is what keeps any of that acceptable: an accessibility,
+accommodation, compliance or no-reply inbox must NEVER receive an application,
+whichever layer produced it. Those channels exist for other purposes and people
+depend on them. Volume discipline matters for the same reason — bulk mail to
+unverified addresses burns the sender's reputation and is regulated in several
+jurisdictions, which is why constructed addresses are capped and published ones
+are not.
 """
 
 from __future__ import annotations
@@ -61,12 +70,12 @@ def is_safe_recipient(addr: str) -> bool:
 
 
 def find_employer_recipient(description: str | None) -> str | None:
-    """The best application address PUBLISHED IN the posting, or None.
+    """The best application address PUBLISHED IN the given text, or None.
 
-    Only returns addresses the employer actually printed in its own job text.
-    Addresses are never guessed or constructed from a company name: a guessed
-    address usually bounces, and when it doesn't it reaches someone who never
-    advertised a vacancy.
+    This function itself never guesses — it only reads addresses the employer
+    actually printed. Constructing an address from a company name is a separate,
+    opt-in path in utils/company_email.py with its own guards, kept apart so
+    "the employer published this" and "we made this up" never get confused.
     """
     if not description:
         return None

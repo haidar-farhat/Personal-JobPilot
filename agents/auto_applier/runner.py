@@ -36,13 +36,79 @@ _PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
                    "started_at": None, "finished_at": None}
 
 
+def _resolve_recipient(job, page_text: str, mail_cfg: dict) -> tuple[str | None, str]:
+    """(address, where_it_came_from). Each stage runs at most once — the old
+    code re-ran the lookup just to label its own log line, which would mean a
+    second network fetch now that later stages hit the web."""
+    from utils.mailer import find_employer_recipient
+
+    hit = find_employer_recipient(getattr(job, "description", ""))
+    if hit:
+        return hit, "description"
+    hit = find_employer_recipient(page_text)
+    if hit:
+        return hit, "live page"
+
+    if not (mail_cfg.get("lookup_website") or mail_cfg.get("guess_addresses")):
+        return None, ""
+    try:
+        from utils.bounce_watch import load_dead
+        from utils.company_email import find_company_email
+        rec = find_company_email(
+            job,
+            allow_crawl=bool(mail_cfg.get("lookup_website", True)),
+            allow_guess=bool(mail_cfg.get("guess_addresses", False)),
+            guess_locals=mail_cfg.get("guess_locals"),
+            dead=load_dead(),
+        )
+    except Exception as e:
+        logger.warning(f"[auto_apply] company-email lookup failed: {e}")
+        return None, ""
+
+    if not rec.get("address"):
+        return None, ""
+    if rec.get("source") == "guess" and not _guess_quota_left(mail_cfg):
+        logger.info("[auto_apply] daily guessed-address cap reached — not emailing")
+        return None, ""
+    where = "company site" if rec["source"] == "crawl" else "constructed address"
+    if rec.get("source_url"):
+        where += f" ({rec['source_url']})"
+    return rec["address"], where
+
+
+def _guess_quota_left(mail_cfg: dict) -> bool:
+    """Cap on UNVERIFIED sends only. A constructed address can bounce, and
+    repeatedly mailing dead boxes is what gets a sender flagged; addresses the
+    employer actually published are trusted and uncapped."""
+    cap = int(mail_cfg.get("max_guessed_per_day", 20) or 0)
+    if cap <= 0:
+        return False
+    today = datetime.now(timezone.utc).date().isoformat()
+    if _GUESS_SENT.get("day") != today:
+        _GUESS_SENT.update(day=today, count=0)
+    if _GUESS_SENT["count"] >= cap:
+        return False
+    _GUESS_SENT["count"] += 1
+    return True
+
+
+_GUESS_SENT: dict = {"day": None, "count": 0}
+
+
 def _email_application(profile: dict, config: dict | None, job, app,
                        page_text: str = "") -> None:
     """Email the resume + cover letter for an application just submitted.
 
-    Controlled by settings.yaml `mail:`. Default is a self-copy — a record in
-    your own inbox — because ATS postings do not publish an address to apply
-    to, and mailing guessed employer addresses would be spam.
+    Controlled by settings.yaml `mail:`. Recipient resolution, most trustworthy
+    first — the first hit wins:
+
+      1. the stored job description
+      2. the live page as rendered (descriptions are often empty or truncated)
+      3. the company website (an address the employer published itself)
+      4. a constructed role address, if mail.guess_addresses is on
+
+    Every candidate is screened by is_safe_recipient(), so accommodation,
+    compliance and no-reply inboxes are never used at any stage.
     """
     mail_cfg = ((config or {}).get("mail") or {})
     if not mail_cfg.get("enabled"):
@@ -57,14 +123,9 @@ def _email_application(profile: dict, config: dict | None, job, app,
     # Email the employer when THEIR OWN posting publishes an application
     # address (screened: accommodation/compliance inboxes are never used).
     if not to_addr and mail_cfg.get("to_employer"):
-        # Look in the stored description AND the page as actually rendered —
-        # scraped descriptions are often truncated or empty, so an address
-        # printed in the JD would otherwise be missed.
-        found = (find_employer_recipient(getattr(job, "description", ""))
-                 or find_employer_recipient(page_text))
+        found, src = _resolve_recipient(job, page_text, mail_cfg)
         if found:
             to_addr, self_copy = found, False
-            src = "description" if find_employer_recipient(getattr(job, "description", "")) else "live page"
             logger.info(f"[auto_apply] application address found in {src} -> {found}")
 
     if to_addr and to_addr != identity.get("email", ""):
@@ -351,6 +412,17 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
         )
     finally:
         session.close()
+
+    # Learn which addresses bounced since last cycle, so a bad constructed
+    # address is dropped after one failure instead of being retried forever.
+    if ((config or {}).get("mail") or {}).get("guess_addresses"):
+        try:
+            from utils.bounce_watch import scan_bounces
+            b = scan_bounces()
+            if b.get("new_dead"):
+                logger.info(f"[auto_apply] bounce scan: {b['new_dead']} new dead address(es)")
+        except Exception as e:
+            logger.warning(f"[auto_apply] bounce scan failed: {e}")
 
     _progress_start(min(len(candidates), remaining_quota))
     summary = {

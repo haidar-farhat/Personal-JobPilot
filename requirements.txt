@@ -28,6 +28,9 @@ google-auth-oauthlib>=1.2
 # UI
 streamlit>=1.30
 
+# Employer-email lookup (MX validation before mailing a constructed address)
+dnspython>=2.6
+
 # Deduplication
 thefuzz>=0.22
 python-Levenshtein>=0.25
