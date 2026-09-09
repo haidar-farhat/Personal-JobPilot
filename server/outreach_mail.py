@@ -63,7 +63,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, nulls_last
 from sqlalchemy.exc import IntegrityError
@@ -116,8 +116,16 @@ _lo_scan_optouts = getattr(_lo, "scan_optouts", None) if _lo else None
 #: settings.yaml degrades to the safest configuration rather than an unlimited
 #: one — `enabled: False` in particular means a broken config sends nothing.
 OUTREACH_DEFAULTS: dict = {
+    # enabled stays False. Arming the sender is the one thing that puts mail on
+    # the wire under the user's own name, so it is an explicit act (one toggle
+    # on the Outreach screen) rather than something a default decides for them.
     "enabled": False,
-    "daily_cap": 8,
+    # Raised 8 -> 25. Eight was a placeholder that made the screen feel broken.
+    # 25/day is a real working rate for a job search and stays well inside what
+    # a personal Gmail tolerates; min_seconds_between_sends is what actually
+    # keeps the pattern from looking like a burst, and it matters more than the
+    # ceiling. The cap is editable up to 200 from the Outreach settings panel.
+    "daily_cap": 25,
     "max_batch": 10,
     "max_per_company_per_day": 1,
     "per_recipient_cooldown_days": 30,
@@ -127,6 +135,15 @@ OUTREACH_DEFAULTS: dict = {
     "list_unsubscribe_header": True,
     "opt_out_line": True,
     "scan_optouts_hours": 168,
+    # Generate the CV/cover letter BEFORE looking for an address. Costs ~3.5 min
+    # of local inference on a job that may turn out to be unmailable, but the
+    # materials are useful anyway (you can apply by hand with them) and it means
+    # a later address recheck never has to re-tailor.
+    "materials_first": True,
+    # A constructed address can point at a mailbox that does not exist. After a
+    # bounce the agent re-resolves a DIFFERENT address and tries again; this caps
+    # how many times, so a company with a broken mail server is not retried forever.
+    "max_retries": 2,
 }
 
 # Job.source values the Outreach screen considers. The first two are what the
@@ -161,12 +178,116 @@ def _cfg() -> dict:
         return {}
 
 
+#: UI-editable overrides live in their OWN file, not in settings.yaml.
+#: settings.yaml is hand-maintained and heavily commented; a round-trip through
+#: yaml.safe_dump would silently delete every one of those comments. Same
+#: reasoning and same shape as config/agent_preferences.yaml, which is also
+#: gitignored because it is per-machine runtime state, not project config.
+OVERRIDES_PATH = PROJECT_ROOT / "config" / "outreach_settings.yaml"
+
+#: Values a user may change from the dashboard, with their hard ceilings. The
+#: ceiling is not paternalism about volume — it is about the SHAPE Gmail's abuse
+#: detection reacts to. A personal account that suddenly emits dozens of
+#: near-identical messages with attachments to strangers gets its sending
+#: disabled, and that is the same address the user's real applications go from.
+EDITABLE: dict[str, tuple[type, object, object]] = {
+    #  key                          type   min   max
+    "enabled":                     (bool, None, None),
+    "daily_cap":                   (int,  0,    200),
+    "max_batch":                   (int,  1,    50),
+    "max_per_company_per_day":     (int,  1,    10),
+    "per_recipient_cooldown_days": (int,  0,    365),
+    "min_seconds_between_sends":   (int,  0,    600),
+    "require_attachments":         (bool, None, None),
+    "reply_to":                    (str,  None, None),
+    "opt_out_line":                (bool, None, None),
+    "scan_optouts_hours":          (int,  1,    2160),
+    "materials_first":             (bool, None, None),
+    "max_retries":                 (int,  0,    5),
+}
+
+
+def _overrides() -> dict:
+    """Dashboard-set overrides, or {} when absent/unreadable."""
+    try:
+        if not OVERRIDES_PATH.exists():
+            return {}
+        return yaml.safe_load(OVERRIDES_PATH.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        logger.warning(f"[outreach] could not read {OVERRIDES_PATH.name}: {e}")
+        return {}
+
+
+def _coerce(key: str, value):
+    """Clamp/convert one editable value, or None when unusable."""
+    spec = EDITABLE.get(key)
+    if spec is None:
+        return None
+    typ, lo, hi = spec
+    try:
+        if typ is bool:
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            return bool(value)
+        if typ is int:
+            v = int(value)
+            if lo is not None:
+                v = max(lo, v)
+            if hi is not None:
+                v = min(hi, v)
+            return v
+        return str(value).strip()[:320]
+    except (TypeError, ValueError):
+        return None
+
+
+def save_overrides(patch: dict) -> dict:
+    """Merge a partial update into the overrides file. Returns the new effective config."""
+    current = _overrides()
+    for key, raw in (patch or {}).items():
+        val = _coerce(key, raw)
+        if val is not None:
+            current[key] = val
+    OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OVERRIDES_PATH.write_text(
+        "# Outreach settings set from the dashboard. Safe to delete — the values\n"
+        "# fall back to mail.outreach in settings.yaml, then to OUTREACH_DEFAULTS.\n"
+        + yaml.safe_dump(current, allow_unicode=True, sort_keys=True),
+        encoding="utf-8")
+    logger.info(f"[outreach] settings updated: {sorted(patch)}")
+    return _outreach_cfg()
+
+
+def _overridden_keys() -> list[str]:
+    """Editable keys whose effective value differs from the built-in default.
+
+    Deliberately not "keys present in the overrides file": the UI saves the
+    whole form, so every key lands in that file and a presence-based list would
+    report all ten as customised even when nine still hold their default value.
+    """
+    cfg = _outreach_cfg()
+    return sorted(k for k in EDITABLE
+                  if k in OUTREACH_DEFAULTS and cfg.get(k) != OUTREACH_DEFAULTS[k])
+
+
 def _outreach_cfg() -> dict:
-    """mail.outreach merged over OUTREACH_DEFAULTS. Never raises."""
-    raw = ((_cfg().get("mail") or {}).get("outreach") or {})
+    """Effective config: OUTREACH_DEFAULTS < settings.yaml mail.outreach < UI overrides.
+
+    Never raises — a broken file at any layer degrades to the safer layer below,
+    and OUTREACH_DEFAULTS has enabled=False, so the failure mode is "sends
+    nothing" rather than "sends unrestricted".
+    """
     out = dict(OUTREACH_DEFAULTS)
+    raw = ((_cfg().get("mail") or {}).get("outreach") or {})
     if isinstance(raw, dict):
         out.update({k: v for k, v in raw.items() if k in OUTREACH_DEFAULTS})
+    ov = _overrides()
+    if isinstance(ov, dict):
+        for k, v in ov.items():
+            if k in EDITABLE:
+                c = _coerce(k, v)
+                if c is not None:
+                    out[k] = c
     return out
 
 
@@ -586,6 +707,18 @@ class _Candidate:
         return _exists(self.resume_path) and _exists(self.cover_letter_path)
 
 
+def _age_hours(dt) -> float | None:
+    """Hours since a posting was published, for the date-posted filter.
+
+    Falls back to date_found when date_posted is absent, which is the common
+    case for scraped rows — a board card rarely carries a publish timestamp.
+    """
+    d = _naive_utc(dt)
+    if d is None:
+        return None
+    return round(max(0.0, (_utc_now().replace(tzinfo=None) - d).total_seconds() / 3600.0), 1)
+
+
 def _recipient_source_for(job_source: str, edited: bool) -> str:
     if edited:
         return "manual"
@@ -785,6 +918,26 @@ def list_candidates(limit: int = Query(50, ge=1, le=200),
                 "already_sent": already_sent,
                 "blocked": blocked,
                 "eligible": blocked is None,
+                # --- filterable facets. Populated by utils/job_enrich at scan
+                # time and backfilled by scripts/backfill_job_enrichment.py.
+                # None means "not established", which the UI must render
+                # distinctly from a determined value — an unset work_mode is
+                # not the same claim as "onsite".
+                "work_mode": getattr(job, "work_mode", None),
+                "is_remote": bool(job.is_remote),
+                "seniority": job.seniority_level or None,
+                "employment_type": (job.employment_type
+                                    if job.employment_type not in (None, "", "unknown") else None),
+                "pay_period": (job.pay_period
+                               if job.pay_period not in (None, "", "unknown") else None),
+                "salary_min": job.salary_min, "salary_max": job.salary_max,
+                "hourly_min": job.hourly_min, "hourly_max": job.hourly_max,
+                "archetype": (score.archetype if score else None),
+                "ai_intensity": (score.ai_intensity if score else None),
+                "date_posted": _iso(_naive_utc(job.date_posted)),
+                "age_hours": _age_hours(job.date_posted or job.date_found),
+                "materials_ready": cand.materials_ready,
+                "confidence": (cand.contact or {}).get("confidence"),
             })
         return {
             "candidates": out,
@@ -1246,6 +1399,36 @@ def batch_status() -> dict:
 # Status / ledger
 # --------------------------------------------------------------------------
 
+@router.get("/settings")
+def get_settings() -> dict:
+    """Effective outreach settings plus the bounds the UI should enforce."""
+    cfg = _outreach_cfg()
+    return {
+        "settings": {k: cfg.get(k) for k in EDITABLE},
+        "bounds": {k: {"type": t.__name__, "min": lo, "max": hi}
+                   for k, (t, lo, hi) in EDITABLE.items()},
+        "overrides_path": str(OVERRIDES_PATH),
+        "overridden": _overridden_keys(),
+    }
+
+
+@router.post("/settings")
+async def post_settings(request: Request) -> dict:
+    """Update outreach settings from the dashboard.
+
+    Writes config/outreach_settings.yaml — never settings.yaml, whose comments a
+    YAML round-trip would destroy. Values are clamped to EDITABLE's bounds
+    server-side; the UI's own limits are a convenience, not the enforcement.
+    """
+    body = await request.json() if await request.body() else {}
+    unknown = sorted(set(body) - set(EDITABLE))
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"not editable: {', '.join(unknown)}")
+    cfg = save_overrides(body)
+    return {"ok": True, "settings": {k: cfg.get(k) for k in EDITABLE},
+            "overridden": _overridden_keys()}
+
+
 @router.get("/status")
 def status() -> dict:
     cfg = _outreach_cfg()
@@ -1463,6 +1646,37 @@ def unsuppress(suppression_id: int) -> dict:
 
 _SCAN = {"active": False}
 _SCAN_LOCK = threading.Lock()
+
+
+@router.post("/scan-optouts")
+def scan_optouts_now() -> dict:
+    """Read recent replies for STOP / unsubscribe and record suppressions.
+
+    Distinct from POST /scan, which runs the LinkedIn PROVIDERS. The dashboard
+    button was pointed at that one by mistake, so "Scan opt-outs" was silently
+    kicking off a job scrape and reporting its result as an opt-out count.
+
+    FAILS CLOSED: ok=False means the mailbox could not be read, i.e. "we do not
+    know whether anyone opted out" — the caller must not treat that as "nobody
+    did". Read-only IMAP; nothing is marked read, moved, sent or deleted.
+    """
+    if _lo_scan_optouts is None:
+        return {"ok": False, "new_suppressions": 0,
+                "reason": "utils.linkedin_outreach.scan_optouts is unavailable"}
+    hours = _int(_outreach_cfg(), "scan_optouts_hours")
+    try:
+        res = _lo_scan_optouts(hours=hours) or {}
+    except Exception as e:                     # pragma: no cover - defensive
+        logger.warning(f"[outreach] opt-out scan failed: {e}")
+        return {"ok": False, "new_suppressions": 0, "reason": str(e)[:200]}
+    session = get_session()
+    try:
+        total = session.query(OutreachSuppression).count()
+    finally:
+        session.close()
+    return {"ok": bool(res.get("ok")), "new_suppressions": int(res.get("new_suppressions") or 0),
+            "scanned": res.get("scanned"), "hours": hours,
+            "reason": res.get("reason") or "", "suppressions_total": total}
 
 
 @router.post("/scan")

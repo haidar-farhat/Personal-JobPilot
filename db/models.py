@@ -90,6 +90,12 @@ class Job(Base):
 
     # Hourly comp + employment type (added in migration 005) — Behavioral Technician track
     pay_period = Column(String(20), nullable=True)       # hourly | annual | unknown
+    # remote | hybrid | onsite | NULL. Added in migration 007: is_remote is a
+    # Boolean defaulting to False, so it cannot distinguish "not remote" from
+    # "never determined" and cannot express hybrid at all — which is the LARGEST
+    # group in the corpus (62 hybrid vs 23 remote vs 20 onsite over 223 scored
+    # descriptions). NULL here means undetermined, which the facet counts need.
+    work_mode = Column(String(20), nullable=True)
     hourly_min = Column(Float, nullable=True)
     hourly_max = Column(Float, nullable=True)
     employment_type = Column(String(20), nullable=True)  # part_time | full_time | contract | per_diem | unknown
@@ -435,3 +441,73 @@ class OutreachSuppression(Base):
 
     def __repr__(self):
         return f"<OutreachSuppression({self.scope}='{self.value}')>"
+
+
+class MailQueueItem(Base):
+    """One job waiting to be emailed — the Mail Agent's work list.
+
+    Deliberately NOT ApplicationStatus.QUEUED: that queue belongs to the
+    auto-applier (form submission), and a job can legitimately be in one, the
+    other, both, or neither. Overloading the status enum would make "queued for
+    apply" and "queued for mail" indistinguishable and couple two pipelines that
+    fail for completely different reasons.
+
+    The lifecycle is intentionally longer than the apply queue's because the
+    hard part of emailing is not sending, it is having something to send TO:
+
+        queued -> preparing -> ready -> sending -> sent
+                             |-> blocked (no address, no CV, suppressed, capped)
+                             |-> failed  (transport error; retryable)
+
+    `ready` means a preview exists and a human could look at it. Nothing moves
+    from ready to sending without an explicit action — the preview-first rule is
+    enforced by this column, not by the UI.
+
+    No migration file: db.database.init_db() calls Base.metadata.create_all,
+    which creates brand-new tables AND their indexes. Adding a column here LATER,
+    once the table exists in a live jobpilot.db, WILL need an ALTER migration —
+    see db/migrations/005 and 007.
+    """
+
+    __tablename__ = "mail_queue"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+
+    # queued | preparing | ready | sending | sent | blocked | failed
+    status = Column(String(20), nullable=False, default="queued")
+    # jobs_filter | outreach | manual — so a bad bulk add can be identified later
+    added_from = Column(String(20), nullable=True)
+
+    # Resolved during prepare. Kept here rather than re-derived at send time so
+    # the row the user approved is the row that goes out.
+    recipient = Column(String(320), nullable=True)
+    recipient_source = Column(String(30), nullable=True)
+    subject = Column(String(500), nullable=True)
+    body = Column(Text, nullable=True)
+    preview_hash = Column(String(64), nullable=True)
+    resume_path = Column(String(1000), nullable=True)
+    cover_letter_path = Column(String(1000), nullable=True)
+
+    block_reason = Column(String(120), nullable=True)
+    error = Column(Text, nullable=True)
+    attempts = Column(Integer, default=0, nullable=False)
+
+    # Set once the send lands, linking to the immutable outreach ledger row.
+    outreach_send_id = Column(Integer, ForeignKey("outreach_sends.id"), nullable=True)
+
+    added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    prepared_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        # One live queue row per application. Re-adding a job that is already
+        # queued must be a no-op, not a duplicate email.
+        UniqueConstraint("application_id", name="uq_mail_queue_application"),
+        Index("idx_mail_queue_status", "status"),
+        Index("idx_mail_queue_added_at", "added_at"),
+    )
+
+    def __repr__(self):
+        return f"<MailQueueItem(app={self.application_id}, status='{self.status}')>"

@@ -67,3 +67,6 @@ config/jobright_applied_export.json
 tests/qa-screenshots/*.png
 tests/qa-screenshots/*.pdf
 tests/qa-screenshots/*.docx
+
+# Outreach settings set from the dashboard (per-machine runtime state)
+config/outreach_settings.yaml

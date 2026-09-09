@@ -577,7 +577,7 @@
   @media print{
     body{background:#fff;color:#000}
     header,.hero,.topnav,.topicons,main,.resultsbar,#boardView,#companiesView,#insights,
-    #upskillView,#outreachView,.modal-backdrop,.toast,.no-print{display:none!important}
+    #upskillView,#outreachView,#mailAgentView,.modal-backdrop,.toast,.no-print{display:none!important}
     #advisorView{display:block!important}
     #advisorView[hidden]{display:none!important}
     .adv-hdr{display:block;font-size:18px;font-weight:800;margin:0 0 4px}
@@ -823,7 +823,7 @@
   .copybtn{border-radius:999px}
 
   /* View sections — soft settle */
-  #appliedView:not([hidden]),#boardView:not([hidden]),#companiesView:not([hidden]),#advisorView:not([hidden]),#upskillView:not([hidden]),#outreachView:not([hidden]){animation:viewIn .3s ease-out both}
+  #appliedView:not([hidden]),#boardView:not([hidden]),#companiesView:not([hidden]),#advisorView:not([hidden]),#upskillView:not([hidden]),#outreachView:not([hidden]),#mailAgentView:not([hidden]){animation:viewIn .3s ease-out both}
   @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .board-title{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:-.3px}
 
@@ -1232,7 +1232,7 @@
   @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
   /* ---- Applied view ---- */
-  #appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView{padding:20px 28px 56px}
+  #appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView,#mailAgentView{padding:20px 28px 56px}
   .board-title{font-size:20px;font-weight:800;letter-spacing:.3px}
   .board-sub{font-size:12.5px}
   .ap-tabs{gap:2px;border-bottom:1px solid var(--border);margin:6px 0 16px;flex-wrap:nowrap;overflow-x:auto}
@@ -1352,41 +1352,98 @@
     .pf-wrap{grid-template-columns:1fr}
     .pf-tabs{position:static;flex-direction:row;flex-wrap:wrap}
     #copilot{right:8px;left:8px;width:auto}
-    .jr-top,.jr-chips,main,.detail,#appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView{padding-left:12px;padding-right:12px}
+    .jr-top,.jr-chips,main,.detail,#appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView,#mailAgentView{padding-left:12px;padding-right:12px}
     .jr-search{margin-left:0;width:100%}
   }
   @media print{ header{display:none!important} body{padding-left:0} }
 
   /* --- Outreach (controlled batch) ------------------------------------- */
-  #outreachView .ob-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  :is(#outreachView,#mailAgentView) .ob-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
     padding:12px 14px;border:1px solid var(--border);border-radius:12px;
     background:var(--surface);margin:0 0 14px}
-  #outreachView .ob-cap{font-size:12.5px;color:var(--muted);margin-left:auto;
+  :is(#outreachView,#mailAgentView) .ob-cap{font-size:12.5px;color:var(--muted);margin-left:auto;
     display:flex;align-items:center;gap:8px}
-  #outreachView .ob-cap b{color:var(--text)}
-  #outreachView .ob-meter{height:6px;width:120px;border-radius:99px;
+  :is(#outreachView,#mailAgentView) .ob-cap b{color:var(--text)}
+  :is(#outreachView,#mailAgentView) .ob-meter{height:6px;width:120px;border-radius:99px;
     background:var(--ring-track);overflow:hidden}
-  #outreachView .ob-meter i{display:block;height:100%;background:var(--mint);transition:width .3s}
-  #outreachView .ocard{border:1px solid var(--border);border-radius:14px;background:var(--surface);
+  :is(#outreachView,#mailAgentView) .ob-meter i{display:block;height:100%;background:var(--mint);transition:width .3s}
+  :is(#outreachView,#mailAgentView) .ocard{border:1px solid var(--border);border-radius:14px;background:var(--surface);
     padding:14px 16px;margin:10px 0;box-shadow:var(--shadow)}
-  #outreachView .ocard.blocked{opacity:.6}
-  #outreachView .ocard.sel{border-color:var(--mint)}
-  #outreachView .ohead{display:flex;gap:10px;align-items:flex-start}
-  #outreachView .ohead h3{margin:0;font-size:15px;font-weight:700;color:var(--text)}
-  #outreachView .ometa{color:var(--muted);font-size:12.5px;margin-top:2px}
-  #outreachView .chip{display:inline-block;padding:2px 8px;border-radius:var(--radius-pill);
+  :is(#outreachView,#mailAgentView) .ocard.blocked{opacity:.6}
+  :is(#outreachView,#mailAgentView) .ocard.sel{border-color:var(--mint)}
+  :is(#outreachView,#mailAgentView) .ohead{display:flex;gap:10px;align-items:flex-start}
+  :is(#outreachView,#mailAgentView) .ohead h3{margin:0;font-size:15px;font-weight:700;color:var(--text)}
+  :is(#outreachView,#mailAgentView) .ometa{color:var(--muted);font-size:12.5px;margin-top:2px}
+  :is(#outreachView,#mailAgentView) .chip{display:inline-block;padding:2px 8px;border-radius:var(--radius-pill);
     font-size:11.5px;background:var(--surface-2);color:var(--muted);margin-right:6px}
-  #outreachView .chip.ok{background:var(--success-bg);color:var(--success-fg)}
-  #outreachView .chip.warn{background:var(--warn-bg);color:var(--warn-fg)}
-  #outreachView .chip.bad{background:var(--danger-bg);color:var(--danger-fg)}
-  #outreachView .opreview{margin-top:10px;border-top:1px solid var(--divider);padding-top:10px}
-  #outreachView .opreview pre{white-space:pre-wrap;font-family:var(--font);font-size:13px;
+  :is(#outreachView,#mailAgentView) .chip.ok{background:var(--success-bg);color:var(--success-fg)}
+  :is(#outreachView,#mailAgentView) .chip.warn{background:var(--warn-bg);color:var(--warn-fg)}
+  :is(#outreachView,#mailAgentView) .chip.bad{background:var(--danger-bg);color:var(--danger-fg)}
+  :is(#outreachView,#mailAgentView) .opreview{margin-top:10px;border-top:1px solid var(--divider);padding-top:10px}
+  :is(#outreachView,#mailAgentView) .opreview pre{white-space:pre-wrap;font-family:var(--font);font-size:13px;
     color:var(--text);background:var(--surface-2);border-radius:10px;padding:12px;margin:6px 0;
     max-height:280px;overflow:auto}
   #outreachView .ohist{margin-top:26px}
   #outreachView .ohrow{display:flex;gap:10px;align-items:center;padding:8px 12px;
     border:1px solid var(--border);border-radius:10px;margin:6px 0;background:var(--surface);font-size:13px}
-  #outreachView .oempty{color:var(--muted);padding:28px 4px;font-size:14px}
+  :is(#outreachView,#mailAgentView) .oempty{color:var(--muted);padding:28px 4px;font-size:14px}
+  #outreachView .osettings .osgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:10px 18px;margin-top:12px}
+  #outreachView .osrow{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text)}
+  #outreachView .osrow.osfull{grid-column:1/-1}
+  #outreachView .osrow span{color:var(--muted)}
+  #outreachView .osrow.osfull span{color:var(--text)}
+  #outreachView .osrow input[type=number]{width:88px}
+  #outreachView .osrow input[type=number],#outreachView .osrow input[type=text]{
+    font:inherit;padding:6px 8px;border:1px solid var(--border);border-radius:8px;
+    background:var(--surface-2);color:var(--text)}
+  #outreachView .osrow input:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+  #outreachView code{background:var(--surface-2);padding:1px 5px;border-radius:5px;font-size:12px}
+  /* --- Outreach filters --- */
+  #outreachView .ofilters{border:1px solid var(--border);border-radius:12px;
+    background:var(--surface);padding:12px 14px;margin:0 0 14px}
+  #outreachView .ofsearch{display:flex;gap:10px;align-items:center}
+  #outreachView .ofsearch svg{color:var(--muted);flex:none}
+  #outreachView .ofsearch input[type=search]{flex:1;min-width:0;font:inherit;padding:8px 10px;
+    border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text)}
+  #outreachView .ofsearch select{font:inherit;padding:8px 10px;border:1px solid var(--border);
+    border-radius:9px;background:var(--surface-2);color:var(--text);cursor:pointer}
+  #outreachView .ofsearch input:focus-visible,#outreachView .ofsearch select:focus-visible{
+    outline:2px solid var(--focus-ring);outline-offset:1px}
+  :is(#outreachView,#mailAgentView) .offacets{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  :is(#outreachView,#mailAgentView) .ofgroup{position:relative}
+  :is(#outreachView,#mailAgentView) .ofbtn{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:var(--radius-pill);
+    border:1px solid var(--border);background:var(--surface-2);color:var(--muted);cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px}
+  :is(#outreachView,#mailAgentView) .ofbtn:hover{border-color:var(--border-strong);color:var(--text)}
+  :is(#outreachView,#mailAgentView) .ofbtn.on{background:var(--success-bg);color:var(--success-fg);border-color:transparent;font-weight:700}
+  :is(#outreachView,#mailAgentView) .ofbtn .n{opacity:.65;font-variant-numeric:tabular-nums}
+  :is(#outreachView,#mailAgentView) .ofbtn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+  #outreachView .ofpop{position:absolute;z-index:40;top:calc(100% + 6px);left:0;min-width:210px;
+    max-height:280px;overflow:auto;background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;box-shadow:var(--shadow);padding:8px}
+  #outreachView .ofpop label{display:flex;align-items:center;gap:8px;padding:5px 6px;
+    font-size:13px;color:var(--text);border-radius:6px;cursor:pointer}
+  #outreachView .ofpop label:hover{background:var(--surface-2)}
+  #outreachView .ofpop .n{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  #outreachView .ofpop .unk{color:var(--muted);font-style:italic}
+  #outreachView .ofrange{display:flex;align-items:center;gap:8px;padding:6px}
+  #outreachView .ofrange input[type=range]{flex:1}
+  #outreachView #obCount{margin-top:10px}
+  :is(#outreachView,#mailAgentView) .oxbtn{font:inherit;font-size:15px;line-height:1;
+    padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:transparent;
+    color:var(--muted);cursor:pointer;flex:none}
+  :is(#outreachView,#mailAgentView) .oxbtn:hover{color:var(--danger-fg);
+    background:var(--danger-bg);border-color:transparent}
+  :is(#outreachView,#mailAgentView) .ohead input[type=checkbox]{margin-top:3px;flex:none}
+  :is(#outreachView,#mailAgentView) .ocard.blocked{opacity:1}
+  :is(#outreachView,#mailAgentView) .ocard.blocked h3{color:var(--muted)}
+  #mailAgentView .mawhy{margin-top:8px;padding:8px 10px;border-radius:8px;
+    background:var(--surface-2);color:var(--muted);font-size:12.5px;line-height:1.5}
+  #mailAgentView .mawhy b{color:var(--text)}
+  #mailAgentView .manote{border:1px solid var(--border);border-radius:12px;
+    background:var(--surface);padding:12px 14px;margin:0 0 14px;font-size:13px;color:var(--muted)}
+  #mailAgentView .manote b{color:var(--text)}
 </style>
 </head>
 <body>
@@ -1400,6 +1457,7 @@
     <a data-view="applied" id="navApplied" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Applied<span class="nav-ct" id="navAppliedCt" hidden></span></a>
     <a data-view="companies" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6M9 10h.01M15 10h.01M9 14h.01M15 14h.01"/></svg>Companies</a>
     <a data-view="outreach" id="navOutreach" role="button" tabindex="0"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>Outreach<span class="nav-ct" id="navOutreachCt" hidden></span></a>
+    <a data-view="mailagent" id="navMailAgent" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M3 8l9 5 9-5"/><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 21l2-3M17 21l-2-3"/></svg>Mail Agent<span class="nav-ct" id="navMailAgentCt" hidden></span></a>
     <a data-view="advisor" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>Coaching</a>
     <a data-view="skills" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Skills</a>
   </nav>
@@ -1430,6 +1488,8 @@
     <button class="jr-tab" data-jtab="external">External<span class="ct" id="jtExternal"></span></button>
     <button class="jr-tab" id="jrAddAll" title="Queue every scored job, ignoring the filters">＋ Add all to agent queue</button>
     <button class="jr-tab" id="jrAddFiltered" title="Queue only the jobs matching the filters you have set right now">＋ Add current filter to agent</button>
+    <button class="jr-tab" id="jrMailFiltered" title="Queue the jobs matching your current filters for emailed applications">✉ Mail current filter</button>
+    <button class="jr-tab" id="jrMailAll" title="Queue every scored job for emailed applications">✉ Mail all</button>
   </div>
   <div class="jr-search">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
@@ -1551,19 +1611,114 @@
     <button class="btn" id="obPreview">Preview selected</button>
     <button class="btn primary" id="obSend">Send selected&hellip;</button>
     <button class="btn" id="obScanOptouts" title="Read recent replies for STOP / unsubscribe requests">Scan opt-outs</button>
+    <button class="btn" id="obSettingsBtn" aria-expanded="false" aria-controls="obSettings">Settings</button>
     <span class="ob-cap" id="obCap">
       <span class="ob-meter"><i id="obMeter" style="width:0%"></i></span>
       <span id="obCapText">&mdash;</span>
     </span>
   </div>
 
+  <div class="ocard osettings" id="obSettings" hidden>
+    <div class="ohead"><div style="flex:1">
+      <h3>Outreach settings</h3>
+      <div class="ometa">Saved to <code>config/outreach_settings.yaml</code>. Your
+        <code>settings.yaml</code> is never rewritten, so its comments stay intact.</div>
+    </div></div>
+    <div class="osgrid">
+      <label class="osrow osfull"><input type="checkbox" id="os-enabled">
+        <span><b>Enable sending.</b> Off means preview-only: every button works except the
+          one that actually mails anyone.</span></label>
+
+      <label class="osrow"><span>Daily cap</span>
+        <input type="number" id="os-daily_cap" min="0" max="200" step="1"></label>
+      <label class="osrow"><span>Max per batch</span>
+        <input type="number" id="os-max_batch" min="1" max="50" step="1"></label>
+      <label class="osrow"><span>Seconds between sends</span>
+        <input type="number" id="os-min_seconds_between_sends" min="0" max="600" step="5"></label>
+      <label class="osrow"><span>Max per company / day</span>
+        <input type="number" id="os-max_per_company_per_day" min="1" max="10" step="1"></label>
+      <label class="osrow"><span>Re-contact cooldown (days)</span>
+        <input type="number" id="os-per_recipient_cooldown_days" min="0" max="365" step="1"></label>
+      <label class="osrow"><span>Opt-out scan window (hours)</span>
+        <input type="number" id="os-scan_optouts_hours" min="1" max="2160" step="24"></label>
+
+      <label class="osrow osfull"><input type="checkbox" id="os-materials_first">
+        <span>Write the CV and cover letter <b>before</b> looking for an address &mdash; keeps the
+          materials even when the job turns out to be unmailable (slower per job)</span></label>
+      <label class="osrow"><span>Bounce retries</span>
+        <input type="number" id="os-max_retries" min="0" max="5" step="1"></label>
+      <label class="osrow osfull"><input type="checkbox" id="os-require_attachments">
+        <span>Refuse to send a row with no CV attached</span></label>
+      <label class="osrow osfull"><input type="checkbox" id="os-opt_out_line">
+        <span>Include an opt-out line in every message</span></label>
+      <label class="osrow osfull"><span>Reply-To (blank = your sending address)</span>
+        <input type="text" id="os-reply_to" placeholder="you@example.com" style="flex:1"></label>
+    </div>
+    <div class="ometa" id="obSettingsNote" style="margin-top:10px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn primary" id="obSettingsSave">Save</button>
+      <button class="btn" id="obSettingsReset" title="Delete the overrides file and go back to defaults">Reset to defaults</button>
+    </div>
+  </div>
+
   <div id="obStatus" class="ometa" style="margin:0 0 12px"></div>
+
+  <div class="ofilters" id="obFilters">
+    <div class="ofsearch">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <input id="obSearch" type="search" placeholder="Search title, company, location or address" aria-label="Search candidates" autocomplete="off">
+      <select id="obSort" aria-label="Sort candidates">
+        <option value="ready">Ready to send first</option>
+        <option value="fit">Match score</option>
+        <option value="newest">Newest posting</option>
+        <option value="company">Company A–Z</option>
+        <option value="title">Title A–Z</option>
+        <option value="salary">Highest pay</option>
+      </select>
+      <button class="btn" id="obMailFiltered" title="Queue every row matching these filters for the Mail Agent">&#9993; Add filtered to mail agent</button>
+      <button class="btn" id="obClearFilters" hidden>Clear all</button>
+    </div>
+    <div class="offacets" id="obFacets"></div>
+    <div class="ometa" id="obCount" role="status" aria-live="polite"></div>
+  </div>
+
   <div id="obList"><div class="oempty">Click <b>Find candidates</b> to look for postings that publish an application address.</div></div>
 
   <div class="ohist">
     <div class="board-title" style="font-size:13px">SEND HISTORY</div>
     <div id="obHistory"><div class="oempty">Nothing sent yet.</div></div>
   </div>
+</section>
+
+
+<section id="mailAgentView" hidden>
+  <div class="board-head">
+    <div>
+      <div class="board-title">MAIL AGENT <span style="color:var(--subtle);font-weight:400">›</span></div>
+      <div class="board-sub">Queue any job here. The agent finds an application address, writes a
+        r&eacute;sum&eacute; and cover letter tailored to that posting, and builds the email &mdash; then stops
+        and waits for you. Nothing is sent until you look at it and say so.</div>
+    </div>
+  </div>
+
+  <div class="ob-bar">
+    <button class="btn primary" id="maPrepare">Prepare queue</button>
+    <button class="btn" id="maStop" hidden>Stop</button>
+    <button class="btn" id="maSend">Send ready&hellip;</button>
+    <button class="btn" id="maRecheck" title="Look for bounces, then find a different address for anything that bounced">Recheck bounces</button>
+    <button class="btn" id="maRefresh">Refresh</button>
+    <button class="btn" id="maClearDone" title="Remove sent and blocked rows from the list">Clear finished</button>
+    <span class="ob-cap" id="maCap">
+      <span class="ob-meter"><i id="maMeter" style="width:0%"></i></span>
+      <span id="maCapText">&mdash;</span>
+    </span>
+  </div>
+
+  <div id="maNote" class="manote" hidden></div>
+  <div id="maProgress" class="ometa" style="margin:0 0 10px" hidden></div>
+  <div class="offacets" id="maStatusTabs" style="margin:0 0 12px"></div>
+  <div id="maBody"><div class="oempty">Nothing queued yet. Use <b>&#9993; Mail current filter</b> on the
+    Jobs screen, or <b>Add filtered to mail agent</b> on the Outreach screen.</div></div>
 </section>
 
 <div class="wz-backdrop" id="wizard" hidden>
@@ -3137,8 +3292,8 @@ function showView(v){
   });
   const board=v==="board", companies=v==="companies", advisor=v==="advisor", applied=v==="applied", skills=v==="skills",
         detail=v==="detail", resume=v==="resume", profile=v==="profile", agent=v==="agent",
-        outreach=v==="outreach";
-  const hideMain=board||companies||advisor||applied||skills||detail||resume||profile||agent||outreach;
+        outreach=v==="outreach", mailagent=v==="mailagent";
+  const hideMain=board||companies||advisor||applied||skills||detail||resume||profile||agent||outreach||mailagent;
   const m=document.querySelector("main"); if(m) m.style.display=hideMain?"none":"";
   const jt=$("#jrTop"), jc=document.querySelector(".jr-chips"), rc=$("#resultCount");
   [jt,jc,rc].forEach(el=>{ if(el) el.style.display=hideMain?"none":""; });
@@ -3150,6 +3305,7 @@ function showView(v){
   $("#profileView").hidden=!profile;
   $("#agentView").hidden=!agent;
   const ov=$("#outreachView"); if(ov) ov.hidden=!outreach;
+  const mv=$("#mailAgentView"); if(mv) mv.hidden=!mailagent;
   const av=$("#advisorView"); if(av) av.hidden=!advisor;
   const uv=$("#upskillView"); if(uv) uv.hidden=!skills;
   $("#insights").classList.toggle("open", v==="insights");
@@ -3161,6 +3317,7 @@ function showView(v){
   if(profile) renderProfile();
   if(agent) renderAgent();
   if(outreach) renderOutreach();
+  if(mailagent) renderMailAgent();
   if(advisor && av && !av.querySelector(".adv-stats")) runAdvisorReport();
   if(skills && uv && !uv.dataset.loaded) loadUpskill();
   if(!hideMain||detail) window.scrollTo({top:0});
@@ -3990,12 +4147,28 @@ function obCard(c){
 
 function obPaint(){
   const list = $("#obList"); if(!list) return;
-  if(!obState.candidates.length){
+  const total = obState.candidates.length;
+  const rows = total ? obVisible() : [];
+  const count = $("#obCount");
+  if(count){
+    count.textContent = !total ? ""
+      : (rows.length === total ? total + " candidate" + (total===1?"":"s")
+         : rows.length + " of " + total + " shown");
+  }
+  const filt = $("#obFilters"); if(filt) filt.hidden = !total;
+  if(!total){
     list.innerHTML = '<div class="oempty">No candidates. A job qualifies when its posting publishes an '
       + 'application address and it already has a tailored CV.</div>';
     return;
   }
-  list.innerHTML = obState.candidates.map(obCard).join("");
+  if(!rows.length){
+    list.innerHTML = '<div class="oempty">No candidate matches these filters. '
+      + '<a href="#" id="obNoMatchClear">Clear all filters</a>.</div>';
+    const a = $("#obNoMatchClear");
+    if(a) a.onclick = function(e){ e.preventDefault(); obClearFilters(); };
+    return;
+  }
+  list.innerHTML = rows.map(obCard).join("");
   list.querySelectorAll("[data-ob-sel]").forEach(function(cb){
     cb.onchange = function(){
       const id = +cb.dataset.obSel;
@@ -4052,7 +4225,7 @@ async function obFindCandidates(){
     if(sb) sb.innerHTML = '<div>' + (c.eligible||0) + ' ready &middot; ' + (c.no_recipient||0)
       + ' publish no address &middot; ' + (c.already_sent||0) + ' already contacted &middot; '
       + (c.no_materials||0) + ' need a CV first</div>' + sb.innerHTML;
-    obPaint();
+    obApplyFilters();
   }catch(e){
     if(list) list.innerHTML = '<div class="oempty">Search failed: ' + esc(e.message) + '</div>';
   }
@@ -4081,7 +4254,15 @@ async function obSendSelected(){
     + "Each goes to one employer with its own tailored CV. This cannot be undone, "
     + "and each company/role can only ever be contacted once.")) return;
   try{
-    const d = await obPost("/api/outreach/send-batch", {application_ids: ids, confirm: true, dry_run: false});
+    // The endpoint takes confirm:"SEND" (an exact string, not a boolean) and
+    // `items` carrying each row's preview_hash — the hash is what makes a send
+    // refuse a preview the user never actually saw.
+    const d = await obPost("/api/outreach/send-batch", {
+      confirm: "SEND",
+      items: ids.map(function(i){
+        return {application_id: i, preview_hash: (obState.previews[i] || {}).preview_hash || ""};
+      })
+    });
     const results = d.results || [];
     const sent = results.filter(function(r){ return r.sent; }).length;
     toast(sent + " sent, " + (results.length - sent) + " blocked or failed");
@@ -4092,7 +4273,8 @@ async function obSendSelected(){
 
 async function obScanOptouts(){
   try{
-    const d = await obPost("/api/outreach/scan", {});
+    // /scan runs the LinkedIn PROVIDERS; the opt-out reader is /scan-optouts.
+    const d = await obPost("/api/outreach/scan-optouts", {});
     toast(d.ok ? ("Opt-out scan: " + (d.new_suppressions||0) + " new")
                : "Opt-out scan could not read the mailbox — sending stays blocked", !d.ok);
     await renderOutreach();
@@ -4107,6 +4289,728 @@ document.addEventListener("DOMContentLoaded", function(){
   wire("#obScanOptouts", obScanOptouts);
 });
 
+
+
+// --- Outreach settings panel ------------------------------------------------
+// Writes config/outreach_settings.yaml via the API, never settings.yaml — a
+// YAML round-trip of that hand-commented file would delete every comment in it.
+// Bounds shown here are a convenience; the server clamps independently.
+const OB_SETTING_KEYS = ["enabled", "daily_cap", "max_batch", "min_seconds_between_sends",
+  "max_per_company_per_day", "per_recipient_cooldown_days", "scan_optouts_hours",
+  "require_attachments", "opt_out_line", "reply_to", "materials_first", "max_retries"];
+
+function obFillSettings(d){
+  const st = (d && d.settings) || {};
+  OB_SETTING_KEYS.forEach(function(k){
+    const el = $("#os-" + k); if(!el) return;
+    if(el.type === "checkbox") el.checked = !!st[k];
+    else el.value = st[k] == null ? "" : st[k];
+  });
+  const note = $("#obSettingsNote");
+  if(note){
+    const ov = (d && d.overridden) || [];
+    note.innerHTML = ov.length
+      ? "Overridden here: <b>" + ov.map(esc).join(", ") + "</b>. Everything else uses the built-in defaults."
+      : "No overrides yet — all values are the built-in defaults.";
+  }
+}
+
+async function obLoadSettings(){
+  try{ obFillSettings(await obGet("/api/outreach/settings")); }
+  catch(e){
+    const note = $("#obSettingsNote");
+    if(note) note.textContent = "Could not load settings: " + e.message;
+  }
+}
+
+async function obSaveSettings(){
+  const patch = {};
+  OB_SETTING_KEYS.forEach(function(k){
+    const el = $("#os-" + k); if(!el) return;
+    if(el.type === "checkbox") patch[k] = el.checked;
+    else if(el.type === "number"){ if(el.value !== "") patch[k] = Number(el.value); }
+    else patch[k] = el.value;
+  });
+  // Arming the sender is the one change worth a confirmation: everything else
+  // is reversible, and this one puts mail on the wire.
+  if(patch.enabled && !obState.enabled){
+    if(!confirm("Enable sending?\n\nFrom now on the Send button will actually email employers. "
+      + "Every message is still previewed first and capped at "
+      + (patch.daily_cap != null ? patch.daily_cap : "the daily cap") + " per day.")) return;
+  }
+  try{
+    const d = await obPost("/api/outreach/settings", patch);
+    obFillSettings(d);
+    toast("Outreach settings saved");
+    await renderOutreach();
+  }catch(e){ toast("Save failed: " + e.message, true); }
+}
+
+async function obResetSettings(){
+  if(!confirm("Reset outreach settings to defaults?\n\nSending will be turned OFF.")) return;
+  try{
+    const d = await obPost("/api/outreach/settings",
+      {enabled:false, daily_cap:8, max_batch:10, min_seconds_between_sends:45,
+       max_per_company_per_day:1, per_recipient_cooldown_days:30, scan_optouts_hours:168,
+       require_attachments:true, opt_out_line:true, reply_to:""});
+    obFillSettings(d);
+    toast("Reset to defaults — sending is off");
+    await renderOutreach();
+  }catch(e){ toast("Reset failed: " + e.message, true); }
+}
+
+function obToggleSettings(){
+  const panel = $("#obSettings"), btn = $("#obSettingsBtn");
+  if(!panel) return;
+  const open = panel.hidden;
+  panel.hidden = !open;
+  if(btn) btn.setAttribute("aria-expanded", String(open));
+  if(open) obLoadSettings();
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  const wire = function(id, fn){ const el = $(id); if(el) el.onclick = fn; };
+  wire("#obSettingsBtn", obToggleSettings);
+  wire("#obSettingsSave", obSaveSettings);
+  wire("#obSettingsReset", obResetSettings);
+});
+
+
+// ============================================================
+// Outreach filters
+// ------------------------------------------------------------
+// Filtering is CLIENT-SIDE. /candidates returns at most 200 rows and each one
+// already carries every facet value, so a round trip per keystroke would buy
+// nothing and cost latency. The server still owns eligibility and the caps —
+// this only decides what is shown.
+//
+// A facet value of null means "not established", which is rendered as its own
+// "unknown" option rather than folded into a real value: an unset work_mode is
+// not the same claim as "onsite", and 470 of the rows in this database have no
+// description to have established anything from.
+// ============================================================
+const OB_FILTER_DEFAULTS = {
+  q: "", sort: "ready",
+  work_mode: [], seniority: [], employment_type: [], source: [], archetype: [],
+  recipient: "any",        // any | has | none
+  materials: "any",        // any | ready | missing
+  contacted: "any",        // any | no | yes
+  age: "any",              // any | 24 | 72 | 168 | 720   (hours)
+  minFit: 0,
+  minSalary: 0,
+  eligibleOnly: false,
+};
+const OB_FILTER_KEY = "jobpilot.outreach.filters";
+
+let obFilters = Object.assign({}, OB_FILTER_DEFAULTS);
+try {
+  const saved = JSON.parse(localStorage.getItem(OB_FILTER_KEY) || "{}");
+  Object.keys(OB_FILTER_DEFAULTS).forEach(function (k) {
+    if (saved[k] !== undefined) obFilters[k] = saved[k];
+  });
+} catch (e) { /* corrupt or unavailable storage is just "no saved filters" */ }
+
+function obSaveFilters() {
+  try { localStorage.setItem(OB_FILTER_KEY, JSON.stringify(obFilters)); } catch (e) {}
+}
+
+function obFiltersActive() {
+  return Object.keys(OB_FILTER_DEFAULTS).some(function (k) {
+    if (k === "sort") return false;
+    const a = obFilters[k], b = OB_FILTER_DEFAULTS[k];
+    return Array.isArray(b) ? a.length > 0 : a !== b;
+  });
+}
+
+// --- facet definitions -------------------------------------------------------
+const OB_FACETS = [
+  { key: "work_mode",       label: "Work mode",  order: ["remote", "hybrid", "onsite"] },
+  { key: "seniority",       label: "Seniority",  order: ["intern", "entry", "junior", "mid", "senior", "staff", "principal", "lead", "director", "executive"] },
+  { key: "employment_type", label: "Job type",   order: ["full_time", "part_time", "contract", "internship", "per_diem"] },
+  { key: "source",          label: "Source",     order: null },
+  { key: "archetype",       label: "Role type",  order: null },
+];
+const OB_RADIOS = [
+  { key: "recipient", label: "Address", opts: [["any", "Any"], ["has", "Has an address"], ["none", "No address"]] },
+  { key: "materials", label: "CV",      opts: [["any", "Any"], ["ready", "CV ready"], ["missing", "Needs a CV"]] },
+  { key: "contacted", label: "Contacted", opts: [["any", "Any"], ["no", "Not contacted"], ["yes", "Already contacted"]] },
+  { key: "age",       label: "Posted",  opts: [["any", "Any time"], ["24", "Last 24 hours"], ["72", "Last 3 days"], ["168", "Last week"], ["720", "Last month"]] },
+];
+
+function obPretty(v) {
+  if (v === null || v === undefined || v === "") return "Not stated";
+  return String(v).replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+}
+
+function obFacetValue(c, key) {
+  const v = c[key];
+  return (v === undefined || v === null || v === "") ? null : String(v);
+}
+
+/** Counts for one facet, computed over rows passing every OTHER filter, so a
+ *  count never shows 0 for something you can actually still pick. */
+function obFacetCounts(key) {
+  const rows = obState.candidates.filter(function (c) { return obMatches(c, key); });
+  const counts = new Map();
+  rows.forEach(function (c) {
+    const v = obFacetValue(c, key);
+    counts.set(v, (counts.get(v) || 0) + 1);
+  });
+  return counts;
+}
+
+function obMatches(c, skipKey) {
+  const f = obFilters;
+  if (skipKey !== "q" && f.q) {
+    const hay = [c.title, c.company, c.location, c.recipient, c.archetype].join(" ").toLowerCase();
+    if (!f.q.toLowerCase().split(/\s+/).filter(Boolean).every(function (t) { return hay.indexOf(t) >= 0; })) return false;
+  }
+  for (const fc of OB_FACETS) {
+    if (skipKey === fc.key) continue;
+    const sel = f[fc.key];
+    if (sel && sel.length) {
+      const v = obFacetValue(c, fc.key);
+      if (sel.indexOf(v === null ? "__unknown__" : v) < 0) return false;
+    }
+  }
+  if (skipKey !== "recipient" && f.recipient !== "any") {
+    if (f.recipient === "has" && !c.recipient) return false;
+    if (f.recipient === "none" && c.recipient) return false;
+  }
+  if (skipKey !== "materials" && f.materials !== "any") {
+    if (f.materials === "ready" && !c.materials_ready) return false;
+    if (f.materials === "missing" && c.materials_ready) return false;
+  }
+  if (skipKey !== "contacted" && f.contacted !== "any") {
+    if (f.contacted === "yes" && !c.already_sent) return false;
+    if (f.contacted === "no" && c.already_sent) return false;
+  }
+  if (skipKey !== "age" && f.age !== "any") {
+    // A row with no timestamp is EXCLUDED by an explicit age filter — including
+    // it would silently pad "last 24 hours" with rows of unknown age.
+    if (c.age_hours == null || c.age_hours > Number(f.age)) return false;
+  }
+  if (skipKey !== "minFit" && f.minFit > 0) {
+    if (c.fit_score == null || c.fit_score < f.minFit) return false;
+  }
+  if (skipKey !== "minSalary" && f.minSalary > 0) {
+    const annual = c.salary_max || c.salary_min ||
+      ((c.hourly_max || c.hourly_min) ? (c.hourly_max || c.hourly_min) * 2080 : null);
+    if (annual == null || annual < f.minSalary) return false;
+  }
+  if (skipKey !== "eligibleOnly" && f.eligibleOnly && !c.eligible) return false;
+  return true;
+}
+
+function obVisible() {
+  const rows = obState.candidates.filter(function (c) { return obMatches(c); });
+  const dir = { ready: 0, fit: 0, newest: 0, company: 0, title: 0, salary: 0 };
+  const s = obFilters.sort;
+  rows.sort(function (a, b) {
+    if (s === "fit") return (b.fit_score || -1) - (a.fit_score || -1);
+    if (s === "newest") return (a.age_hours == null ? 1e9 : a.age_hours) - (b.age_hours == null ? 1e9 : b.age_hours);
+    if (s === "company") return String(a.company || "").localeCompare(String(b.company || ""));
+    if (s === "title") return String(a.title || "").localeCompare(String(b.title || ""));
+    if (s === "salary") {
+      const v = function (c) { return c.salary_max || c.salary_min || ((c.hourly_max || c.hourly_min) || 0) * 2080; };
+      return v(b) - v(a);
+    }
+    // "ready": what you can actually act on, first.
+    const rank = function (c) { return (c.eligible ? 0 : 2) + (c.recipient ? 0 : 1); };
+    return rank(a) - rank(b) || (b.fit_score || -1) - (a.fit_score || -1);
+  });
+  return rows;
+}
+
+// --- rendering ---------------------------------------------------------------
+function obRenderFacets() {
+  const box = $("#obFacets"); if (!box) return;
+  const parts = [];
+
+  OB_FACETS.forEach(function (fc) {
+    const counts = obFacetCounts(fc.key);
+    if (counts.size === 0) return;
+    const known = Array.from(counts.keys()).filter(function (v) { return v !== null; });
+    if (!known.length && !counts.get(null)) return;
+    known.sort(function (a, b) {
+      if (fc.order) {
+        const ia = fc.order.indexOf(a), ib = fc.order.indexOf(b);
+        if (ia >= 0 || ib >= 0) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      }
+      return (counts.get(b) || 0) - (counts.get(a) || 0);
+    });
+    const sel = obFilters[fc.key] || [];
+    const rows = known.map(function (v) {
+      return '<label><input type="checkbox" data-of="' + fc.key + '" value="' + esc(v) + '"'
+        + (sel.indexOf(v) >= 0 ? " checked" : "") + '>' + esc(obPretty(v))
+        + '<span class="n">' + counts.get(v) + '</span></label>';
+    });
+    if (counts.get(null)) {
+      rows.push('<label class="unk"><input type="checkbox" data-of="' + fc.key + '" value="__unknown__"'
+        + (sel.indexOf("__unknown__") >= 0 ? " checked" : "") + '>Not stated'
+        + '<span class="n">' + counts.get(null) + '</span></label>');
+    }
+    parts.push('<span class="ofgroup"><button class="ofbtn ' + (sel.length ? "on" : "")
+      + '" data-ofpop="' + fc.key + '" aria-haspopup="true" aria-expanded="false">'
+      + esc(fc.label) + (sel.length ? ' <span class="n">' + sel.length + '</span>' : "")
+      + '</button><div class="ofpop" data-pop="' + fc.key + '" hidden>' + rows.join("") + '</div></span>');
+  });
+
+  OB_RADIOS.forEach(function (r) {
+    const cur = obFilters[r.key];
+    const on = cur !== OB_FILTER_DEFAULTS[r.key];
+    const rows = r.opts.map(function (o) {
+      return '<label><input type="radio" name="ofr-' + r.key + '" data-ofr="' + r.key
+        + '" value="' + o[0] + '"' + (cur === o[0] ? " checked" : "") + '>' + esc(o[1]) + '</label>';
+    });
+    const label = on ? (r.opts.find(function (o) { return o[0] === cur; }) || [])[1] || r.label : r.label;
+    parts.push('<span class="ofgroup"><button class="ofbtn ' + (on ? "on" : "")
+      + '" data-ofpop="' + r.key + '" aria-haspopup="true" aria-expanded="false">' + esc(label)
+      + '</button><div class="ofpop" data-pop="' + r.key + '" hidden>' + rows.join("") + '</div></span>');
+  });
+
+  parts.push('<span class="ofgroup"><button class="ofbtn ' + (obFilters.minFit > 0 ? "on" : "")
+    + '" data-ofpop="minFit" aria-haspopup="true" aria-expanded="false">'
+    + (obFilters.minFit > 0 ? "Match &ge; " + obFilters.minFit : "Match score")
+    + '</button><div class="ofpop" data-pop="minFit" hidden><div class="ofrange">'
+    + '<input type="range" id="obMinFit" min="0" max="100" step="5" value="' + obFilters.minFit + '">'
+    + '<span class="n" id="obMinFitVal">' + obFilters.minFit + '</span></div></div></span>');
+
+  parts.push('<span class="ofgroup"><button class="ofbtn ' + (obFilters.minSalary > 0 ? "on" : "")
+    + '" data-ofpop="minSalary" aria-haspopup="true" aria-expanded="false">'
+    + (obFilters.minSalary > 0 ? "Pay &ge; $" + (obFilters.minSalary / 1000) + "k" : "Minimum pay")
+    + '</button><div class="ofpop" data-pop="minSalary" hidden><div class="ofrange">'
+    + '<input type="range" id="obMinSal" min="0" max="300000" step="10000" value="' + obFilters.minSalary + '">'
+    + '<span class="n" id="obMinSalVal">' + (obFilters.minSalary ? "$" + obFilters.minSalary / 1000 + "k" : "any") + '</span></div>'
+    + '<div class="ometa" style="padding:0 6px 4px">Hourly rates are compared at 2080 h/yr. '
+    + 'Rows with no stated pay are hidden while this is set.</div></div></span>');
+
+  parts.push('<button class="ofbtn ' + (obFilters.eligibleOnly ? "on" : "") + '" id="obEligibleOnly">'
+    + 'Ready to send only</button>');
+
+  box.innerHTML = parts.join("");
+
+  box.querySelectorAll("[data-ofpop]").forEach(function (btn) {
+    btn.onclick = function (e) {
+      e.stopPropagation();
+      const key = btn.dataset.ofpop;
+      const pop = box.querySelector('[data-pop="' + key + '"]');
+      const opening = pop.hidden;
+      box.querySelectorAll(".ofpop").forEach(function (p) { p.hidden = true; });
+      box.querySelectorAll("[data-ofpop]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+      pop.hidden = !opening;
+      btn.setAttribute("aria-expanded", String(opening));
+    };
+  });
+  box.querySelectorAll(".ofpop").forEach(function (p) { p.onclick = function (e) { e.stopPropagation(); }; });
+  box.querySelectorAll("[data-of]").forEach(function (cb) {
+    cb.onchange = function () {
+      const k = cb.dataset.of, arr = obFilters[k].slice(), v = cb.value;
+      const i = arr.indexOf(v);
+      if (cb.checked) { if (i < 0) arr.push(v); } else if (i >= 0) arr.splice(i, 1);
+      obFilters[k] = arr; obApplyFilters();
+    };
+  });
+  box.querySelectorAll("[data-ofr]").forEach(function (rb) {
+    rb.onchange = function () { obFilters[rb.dataset.ofr] = rb.value; obApplyFilters(); };
+  });
+  const mf = $("#obMinFit");
+  if (mf) {
+    mf.oninput = function () { $("#obMinFitVal").textContent = mf.value; };
+    mf.onchange = function () { obFilters.minFit = Number(mf.value); obApplyFilters(); };
+  }
+  const ms = $("#obMinSal");
+  if (ms) {
+    ms.oninput = function () { $("#obMinSalVal").textContent = ms.value === "0" ? "any" : "$" + ms.value / 1000 + "k"; };
+    ms.onchange = function () { obFilters.minSalary = Number(ms.value); obApplyFilters(); };
+  }
+  const eo = $("#obEligibleOnly");
+  if (eo) eo.onclick = function () { obFilters.eligibleOnly = !obFilters.eligibleOnly; obApplyFilters(); };
+}
+
+function obApplyFilters() {
+  obSaveFilters();
+  const btn = $("#obClearFilters"); if (btn) btn.hidden = !obFiltersActive();
+  obRenderFacets();
+  obPaint();
+}
+
+function obClearFilters() {
+  const sort = obFilters.sort;
+  obFilters = Object.assign({}, OB_FILTER_DEFAULTS, { sort: sort });
+  const q = $("#obSearch"); if (q) q.value = "";
+  obApplyFilters();
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  const q = $("#obSearch");
+  if (q) {
+    q.value = obFilters.q || "";
+    let t = null;
+    q.oninput = function () {
+      clearTimeout(t);
+      t = setTimeout(function () { obFilters.q = q.value.trim(); obApplyFilters(); }, 180);
+    };
+  }
+  const sort = $("#obSort");
+  if (sort) {
+    sort.value = obFilters.sort;
+    sort.onchange = function () { obFilters.sort = sort.value; obApplyFilters(); };
+  }
+  const clear = $("#obClearFilters");
+  if (clear) clear.onclick = obClearFilters;
+  document.addEventListener("click", function () {
+    const box = $("#obFacets"); if (!box) return;
+    box.querySelectorAll(".ofpop").forEach(function (p) { p.hidden = true; });
+    box.querySelectorAll("[data-ofpop]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+  });
+});
+
+
+// ============================================================
+// Mail Agent — queue, prepare, review, send
+// ------------------------------------------------------------
+// The Outreach screen could only show jobs that ALREADY had both a tailored CV
+// and a published address, which measured 0 of 843 rows — nothing to act on.
+// This screen inverts that: queue anything, and the agent does the preparation
+// (find an address, write the materials, build the email) that makes a job
+// sendable. It stops at "ready" by design; sending stays an explicit act.
+// ============================================================
+const maState = { items: [], counts: {}, cap: null, tab: "all", polling: null, enabled: false };
+
+const MA_TABS = [
+  ["all", "All"], ["queued", "Queued"], ["ready", "Ready"],
+  ["sent", "Sent"], ["blocked", "Blocked"], ["failed", "Failed"],
+];
+const MA_STATUS_CLASS = { ready: "ok", sent: "ok", blocked: "warn", failed: "bad",
+                          preparing: "", sending: "", queued: "" };
+
+async function maGet(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error((r.status + " " + await r.text()).slice(0, 200));
+  return r.json();
+}
+async function maPost(path, body){
+  const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"},
+                               body: JSON.stringify(body || {})});
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok){
+    var m = typeof d.detail === "string" ? d.detail
+          : (d.detail && d.detail.detail) ? d.detail.detail : ("HTTP " + r.status);
+    throw new Error(m);
+  }
+  return d;
+}
+
+// Plain-language reason for every block, plus what the user can actually do.
+// A bare "no_recipient" chip told nobody anything: the honest answer is that
+// most employers using an ATS never publish an address, which is a fact about
+// the posting, not a failure of the agent.
+const MA_WHY = {
+  no_recipient: ["No application address exists for this job.",
+    "Neither the posting nor the company’s own site publishes one. Most employers "
+    + "recruiting through an ATS never do — they want you in their form. "
+    + "Apply through the posting instead, or add an address by hand if you find one."],
+  already_emailed: ["You have already emailed this company about this role.",
+    "One message per company per role, ever — enforced by the database, not a setting."],
+  suppressed: ["Someone at this address asked not to be contacted.",
+    "Recorded from a STOP / unsubscribe reply. This is permanent and deliberate."],
+  dead_address: ["A previous email to this address bounced.",
+    "The mailbox does not exist, so it is never reused."],
+  unsafe_recipient: ["The only address found is not an application inbox.",
+    "It looks like an accommodation, legal, compliance or no-reply address. Those exist "
+    + "for other purposes and people depend on them, so they never receive a CV."],
+  no_attachments: ["No résumé or cover letter was produced for this job.",
+    "Nothing is sent without materials attached."],
+  cap_reached: ["Today’s send cap is used up.",
+    "Raise it in Outreach → Settings, or wait for the counter to reset at UTC midnight."],
+  cooldown: ["This address was contacted very recently.",
+    "A cooldown stops the same inbox getting several of your applications at once."],
+  no_alternate_address: ["The address bounced and no other one could be found.",
+    "The agent re-checked the posting and the company’s site after the bounce and came "
+    + "back with nothing new. The materials are kept, so you can still apply by hand."],
+  retries_exhausted: ["Tried the maximum number of times.",
+    "Every address found for this employer bounced. Raise the retry limit in "
+    + "Outreach → Settings if you want it to keep trying."],
+  company_capped: ["This company already received a message today.",
+    "Capped per company per day so one employer never gets a burst."],
+};
+
+function maCard(it){
+  const chips = [];
+  const cls = MA_STATUS_CLASS[it.status] !== undefined ? MA_STATUS_CLASS[it.status] : "";
+  chips.push('<span class="chip ' + cls + '">' + esc(it.status) + '</span>');
+  if(it.recipient) chips.push('<span class="chip ok">' + esc(it.recipient) + '</span>');
+  if(it.recipient_source) chips.push('<span class="chip">via ' + esc(it.recipient_source) + '</span>');
+  if(it.fit_score != null) chips.push('<span class="chip">fit ' + it.fit_score + '</span>');
+  if(it.resume_path) chips.push('<span class="chip ok">CV ready</span>');
+  if(it.error) chips.push('<span class="chip bad">' + esc(String(it.error).slice(0, 60)) + '</span>');
+
+  const why = MA_WHY[it.block_reason];
+  const canSend = it.status === "ready";
+  return '<div class="ocard ' + (canSend ? "" : "blocked") + '" data-ma="' + it.id + '">'
+    + '<div class="ohead">'
+    + '<input type="checkbox" data-ma-sel="' + it.id + '" ' + (canSend ? "" : "disabled")
+    + ' aria-label="Select ' + esc(it.title || "job") + '">'
+    + '<div style="flex:1;min-width:0">'
+    + '<h3>' + esc(it.title || "(untitled)") + '</h3>'
+    + '<div class="ometa">' + esc(it.company || "") + (it.location ? " &middot; " + esc(it.location) : "") + '</div>'
+    + '<div style="margin-top:6px">' + chips.join("") + '</div>'
+    + '</div>'
+    + (it.body ? '<button class="btn" data-ma-view="' + it.id + '">View email</button>' : "")
+    + '<button class="oxbtn" data-ma-del="' + it.id + '" title="Remove from the queue" '
+    + 'aria-label="Remove from the queue">&times;</button>'
+    + '</div>'
+    + (why ? '<div class="mawhy">' + esc(why[0]) + '</div>'
+           : (it.block_reason ? '<div class="mawhy">Blocked: ' + esc(it.block_reason) + '</div>' : ""))
+    + (it._open && it.body
+        ? '<div class="opreview"><div class="ometa"><b>To</b> ' + esc(it.recipient || "")
+          + ' &middot; <b>Subject</b> ' + esc(it.subject || "") + '</div><pre>' + esc(it.body) + '</pre></div>'
+        : "")
+    + '</div>';
+}
+
+function maRenderTabs(){
+  const box = $("#maStatusTabs"); if(!box) return;
+  const c = maState.counts || {};
+  box.innerHTML = MA_TABS.map(function(t){
+    const n = t[0] === "all"
+      ? Object.keys(c).reduce(function(a, k){ return a + (c[k] || 0); }, 0)
+      : (c[t[0]] || 0);
+    if(t[0] !== "all" && !n) return "";
+    return '<button class="ofbtn ' + (maState.tab === t[0] ? "on" : "") + '" data-ma-tab="' + t[0] + '">'
+      + t[1] + ' <span class="n">' + n + '</span></button>';
+  }).join("");
+  box.querySelectorAll("[data-ma-tab]").forEach(function(b){
+    b.onclick = function(){ maState.tab = b.dataset.maTab; maPaint(); };
+  });
+}
+
+function maPaint(){
+  const body = $("#maBody"); if(!body) return;
+  maRenderTabs();
+  const rows = maState.tab === "all"
+    ? maState.items
+    : maState.items.filter(function(i){ return i.status === maState.tab; });
+  if(!maState.items.length){
+    body.innerHTML = '<div class="oempty">Nothing queued yet. Use <b>&#9993; Mail current filter</b> on the '
+      + 'Jobs screen, or <b>Add filtered to mail agent</b> on the Outreach screen.</div>';
+    return;
+  }
+  if(!rows.length){ body.innerHTML = '<div class="oempty">Nothing in this state.</div>'; return; }
+  body.innerHTML = rows.map(maCard).join("");
+  body.querySelectorAll("[data-ma-del]").forEach(function(b){
+    b.onclick = async function(){
+      try{
+        await fetch("/api/mail-agent/queue/" + b.dataset.maDel, {method:"DELETE"});
+        await maLoad();
+      }catch(e){ toast("Remove failed: " + e.message, true); }
+    };
+  });
+  body.querySelectorAll("[data-ma-view]").forEach(function(b){
+    b.onclick = function(){
+      const it = maState.items.find(function(x){ return String(x.id) === b.dataset.maView; });
+      if(it){ it._open = !it._open; maPaint(); }
+    };
+  });
+}
+
+function maRenderCap(st){
+  const cap = (st && st.cap) || {};
+  maState.cap = cap;
+  // the API calls this sending_enabled; `enabled` here would be silently undefined
+  maState.enabled = !!(st && st.sending_enabled);
+  const used = cap.daily_cap ? (cap.sent_today / cap.daily_cap) * 100 : 0;
+  const m = $("#maMeter"); if(m) m.style.width = Math.min(100, used) + "%";
+  const t = $("#maCapText");
+  if(t) t.innerHTML = "<b>" + (cap.sent_today || 0) + "</b> / " + (cap.daily_cap || 0)
+    + " sent today" + (cap.remaining != null ? " &middot; " + cap.remaining + " left" : "");
+  // "Why is Send greyed out?" must be answerable without hovering. There are two
+  // separate reasons and they need different actions, so say which one applies.
+  const ready = (maState.counts && maState.counts.ready) || 0;
+  const send = $("#maSend");
+  if(send){
+    send.disabled = !maState.enabled || !ready;
+    send.textContent = ready ? "Send " + ready + " ready…" : "Send ready…";
+  }
+  const note = $("#maNote");
+  if(note){
+    const msgs = [];
+    if(!maState.enabled){
+      msgs.push('<b>Sending is off.</b> Nothing can leave this screen until you turn it on in '
+        + '<b>Outreach → Settings → Enable sending</b>. Everything else works meanwhile: '
+        + 'queue, prepare and read the exact emails.');
+    }
+    const blocked = maState.counts.blocked || 0;
+    if(blocked){
+      // Name the reason that actually dominates, and explain it once here
+      // rather than repeating the same paragraph on every card.
+      const tally = {};
+      maState.items.forEach(function(i){
+        if(i.status === "blocked" && i.block_reason)
+          tally[i.block_reason] = (tally[i.block_reason] || 0) + 1;
+      });
+      const top = Object.keys(tally).sort(function(a,b){ return tally[b]-tally[a]; })[0];
+      const why = top && MA_WHY[top];
+      if(why){
+        msgs.push("<b>" + blocked + " blocked</b> — " + esc(why[0]).replace(/\.$/, "")
+          + (tally[top] < blocked ? " (most of them). " : ". ") + esc(why[1]));
+      }
+    }
+    if(st && st.blocked && st.prepared === 0 && st.phase === "done"){
+      msgs.push('Tip: jobs scraped from a company’s own careers page resolve an address far '
+        + 'more often than job-board postings, because the domain is knowable.');
+    }
+    note.innerHTML = msgs.map(function(m){ return "<div>" + m + "</div>"; }).join("");
+    note.hidden = !msgs.length;
+  }
+  const prog = $("#maProgress"), stop = $("#maStop"), prep = $("#maPrepare");
+  const active = !!(st && st.active);
+  if(prog){
+    prog.hidden = !active;
+    if(active) prog.innerHTML = "Preparing <b>" + (st.done || 0) + "</b> of " + (st.total || 0)
+      + (st.phase ? " &middot; " + esc(st.phase) : "");
+  }
+  if(stop) stop.hidden = !active;
+  if(prep) prep.disabled = active;
+  if(active && !maState.polling){
+    maState.polling = setInterval(maLoad, 4000);
+  } else if(!active && maState.polling){
+    clearInterval(maState.polling); maState.polling = null;
+  }
+}
+
+async function maLoad(){
+  try{
+    const [q, st] = await Promise.all([
+      maGet("/api/mail-agent/queue"),
+      maGet("/api/mail-agent/status"),
+    ]);
+    const open = {};
+    maState.items.forEach(function(i){ if(i._open) open[i.id] = true; });
+    maState.items = (q.items || []).map(function(i){ i._open = !!open[i.id]; return i; });
+    maState.counts = q.counts_by_status || st.counts_by_status || {};
+    maRenderCap(st);
+    maPaint();
+    const badge = $("#navMailAgentCt");
+    if(badge){
+      const n = (maState.counts.queued || 0) + (maState.counts.ready || 0);
+      badge.textContent = n; badge.hidden = !n;
+    }
+  }catch(e){
+    const body = $("#maBody");
+    if(body) body.innerHTML = '<div class="oempty">Mail Agent API unavailable: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function renderMailAgent(){ await maLoad(); }
+
+async function maPrepareQueue(){
+  try{
+    const d = await maPost("/api/mail-agent/prepare", {});
+    toast("Preparing " + (d.total || 0) + " job(s) — finding addresses, then writing materials");
+    await maLoad();
+  }catch(e){
+    // 409 is the singleton guard, not a failure.
+    if(/already active|already running/i.test(e.message)) toast("A prepare run is already going", true);
+    else toast("Prepare failed: " + e.message, true);
+    await maLoad();
+  }
+}
+
+async function maStopRun(){
+  try{ await maPost("/api/mail-agent/stop", {}); toast("Stopping after the current job"); await maLoad(); }
+  catch(e){ toast("Stop failed: " + e.message, true); }
+}
+
+async function maSendReady(){
+  const ids = Array.from(document.querySelectorAll("[data-ma-sel]:checked"))
+    .map(function(cb){ return Number(cb.dataset.maSel); });
+  if(!ids.length){ toast("Tick the ready rows you want to send", true); return; }
+  const cap = maState.cap || {};
+  if(cap.remaining != null && ids.length > cap.remaining){
+    toast("Daily cap: only " + cap.remaining + " send(s) left today", true); return;
+  }
+  if(!confirm("Send " + ids.length + " application email(s)?\n\n"
+    + "Each goes to one employer with its own tailored CV. This cannot be undone, and each "
+    + "company/role can only ever be contacted once.")) return;
+  try{
+    const d = await maPost("/api/mail-agent/send", {ids: ids, confirm: "SEND"});
+    const res = d.results || [];
+    const ok = res.filter(function(r){ return r.sent; }).length;
+    toast(ok + " sent, " + (res.length - ok) + " blocked or failed");
+    await maLoad();
+  }catch(e){ toast("Send failed: " + e.message, true); }
+}
+
+async function maRecheck(){
+  // A constructed address can name a mailbox that does not exist. This reads
+  // recent bounces, marks those addresses dead, and re-resolves a DIFFERENT one
+  // for each affected row — reusing the materials, never regenerating them.
+  const btn = $("#maRecheck"), label = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = "Checking…"; }
+  try{
+    const d = await maPost("/api/mail-agent/recheck", {});
+    const b = d.bounced || 0, r = d.retried || 0;
+    toast(!b ? "No bounces found"
+             : b + " bounce(s) — " + r + " row(s) got a new address to try");
+    await maLoad();
+  }catch(e){ toast("Recheck failed: " + e.message, true); }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
+}
+
+async function maClearFinished(){
+  if(!confirm("Remove sent and blocked rows from the queue?\n\nThe send history is kept.")) return;
+  try{
+    await maPost("/api/mail-agent/queue/clear", {status: "sent"});
+    await maPost("/api/mail-agent/queue/clear", {status: "blocked"});
+    await maLoad();
+  }catch(e){ toast("Clear failed: " + e.message, true); }
+}
+
+/** Shared by every "add to mail agent" entry point. */
+async function maQueueApplications(ids, source, btn){
+  if(!ids || !ids.length){ toast("Nothing to queue", true); return 0; }
+  if(!confirm("Queue " + ids.length + " job" + (ids.length === 1 ? "" : "s") + " for the Mail Agent?\n\n"
+    + "It will look for an application address and write tailored materials for each. "
+    + "Nothing is emailed until you review and send.")) return 0;
+  const label = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = "Queueing…"; }
+  try{
+    const d = await maPost("/api/mail-agent/queue", {application_ids: ids, added_from: source});
+    const added = d.added || 0, skipped = d.skipped || 0;
+    toast(added + " queued for the Mail Agent" + (skipped ? " · " + skipped + " already queued" : "") + " ✓");
+    return added;
+  }catch(e){ toast("Queueing failed: " + e.message, true); return 0; }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  const wire = function(id, fn){ const el = $(id); if(el) el.onclick = fn; };
+  wire("#maPrepare", maPrepareQueue);
+  wire("#maStop", maStopRun);
+  wire("#maSend", maSendReady);
+  wire("#maRefresh", maLoad);
+  wire("#maRecheck", maRecheck);
+  wire("#maClearDone", maClearFinished);
+
+  // Jobs screen entry points — mirror the existing agent-queue buttons.
+  const mf = $("#jrMailFiltered");
+  if(mf) mf.onclick = function(){
+    maQueueApplications(filterApps().map(function(a){ return a.id; }), "jobs_filter", mf);
+  };
+  const ml = $("#jrMailAll");
+  if(ml) ml.onclick = function(){
+    maQueueApplications(state.apps.filter(function(a){ return a.status === "scored"; })
+      .map(function(a){ return a.id; }), "jobs_filter", ml);
+  };
+
+  // Outreach screen entry point — respects that screen's own filters.
+  const of = $("#obMailFiltered");
+  if(of) of.onclick = function(){
+    maQueueApplications(obVisible().map(function(c){ return c.application_id; }), "outreach", of);
+  };
+});
 
 async function renderAgent(){
   const box=$("#agentBody"); if(!box) return;

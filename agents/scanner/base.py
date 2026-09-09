@@ -309,6 +309,34 @@ class BaseScanner(ABC):
                 employment_type=emp_type,
                 dedup_hash=generate_dedup_hash(raw_job.company, raw_job.title, raw_job.location),
             )
+
+            # Fill what the scanner could not determine, from the title/location/
+            # description text. Only ever ADDS: enrich() is passed what is already
+            # set and omits any key that already holds a real value, so a provider
+            # that reported a field authoritatively is never second-guessed.
+            # Without this, every scraped row arrives with employment_type
+            # 'unknown', seniority NULL and no comp, and the dashboard's filters
+            # have nothing to filter on.
+            try:
+                from utils.job_enrich import enrich
+                existing = {
+                    "is_remote": raw_job.is_remote,
+                    "seniority_level": raw_job.seniority_level,
+                    "employment_type": emp_type,
+                    "pay_period": pay_period if pay_period != "unknown" else None,
+                    "salary_min": raw_job.salary_min,
+                    "salary_max": raw_job.salary_max,
+                    "hourly_min": hourly[0] if hourly else None,
+                    "hourly_max": hourly[1] if hourly else None,
+                }
+                for key, value in enrich(raw_job.title, raw_job.location,
+                                         raw_job.description or "",
+                                         existing=existing).items():
+                    setattr(job, key, value)
+            except Exception as e:
+                logger.debug(f"[{self.source_name}] enrichment skipped for "
+                             f"{raw_job.title!r}: {e}")
+
             session.add(job)
 
             # Create initial application record

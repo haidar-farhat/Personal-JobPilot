@@ -150,6 +150,15 @@ try:
 except Exception as _e:            # pragma: no cover - defensive
     logging.getLogger(__name__).warning(f"[dashboard] outreach router unavailable: {_e}")
 
+# Mail Agent — queue any job, prepare materials + recipient, review, then send.
+# Same guard: this pulls in the tailor and the mailer, and neither should be
+# able to take the dashboard down on import.
+try:
+    from server.mail_agent import router as mail_agent_router
+    app.include_router(mail_agent_router)
+except Exception as _e:            # pragma: no cover - defensive
+    logging.getLogger(__name__).warning(f"[dashboard] mail-agent router unavailable: {_e}")
+
 # Initialize DB
 init_db()
 
@@ -530,8 +539,24 @@ def _get_scan_logs(limit=15):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
+    """The dashboard shell.
+
+    Explicitly uncacheable. The whole app is one 285KB hand-edited HTML file
+    served with no validators, so a browser applies heuristic caching and keeps
+    showing a stale copy after an edit — a new nav entry simply does not appear,
+    which reads as "the feature was never built" rather than as a cache hit.
+    The file is read from disk per request anyway, so there is nothing to gain
+    by letting it be cached.
+    """
     html_path = STATIC_DIR / "index.html"
-    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/healthz")
