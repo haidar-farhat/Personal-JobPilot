@@ -193,3 +193,67 @@ def test_unsafe_local_part_is_refused_even_when_published(monkeypatch):
         "reason": "unsafe"})
     addr, _ = om._company_fallback_recipient(_Job("Acme", "https://acme.com/jobs/1"), set())
     assert addr is None, "an accommodation inbox must never receive an application"
+
+
+# --- the accommodations-inbox screen, and how a real address evaded it -------
+# Found in production data on 2026-09-10: Qualcomm's own live posting reads
+# "You may e-mail disability-accomodations@qualcomm.com" — one 'm'. The
+# blocklist held the correctly spelled "accommodation", so the address passed
+# the screen and was stored on a queue row. The person staffing that inbox
+# handles accessibility requests from disabled applicants.
+
+_MUST_BLOCK = [
+    "disability-accomodations@qualcomm.com",   # the real, misspelled address
+    "accomodation@acme.com",
+    "acommodations@acme.com",
+    "accomadation@acme.com",
+    "accommodations@acme.com",
+    "dis.ability.accommodations@acme.com",     # punctuation must not hide it
+    "disability@acme.com",
+    "disabilities@acme.com",
+    "accessibility@acme.com",
+    "ada-requests@acme.com",
+    "ADA@acme.com",
+    "eeo@acme.com",
+    "ethics@acme.com",
+    "whistleblower@acme.com",
+    "harassment@acme.com",
+    "legal@acme.com",
+    "compliance@acme.com",
+    "no-reply@acme.com",
+    "noreply@acme.com",
+]
+
+_MUST_PASS = [
+    "careers@acme.com", "recruiting@acme.com", "jobs@acme.com", "hr@acme.com",
+    "talent@acme.com", "apply@acme.com", "people@acme.com", "hiring@acme.com",
+    "recruitment@acme.com", "employment@acme.com", "work@acme.com",
+]
+
+
+@pytest.mark.parametrize("addr", _MUST_BLOCK)
+def test_these_inboxes_never_receive_an_application(addr):
+    from utils.mailer import is_safe_recipient
+    assert is_safe_recipient(addr) is False, f"{addr} would have received a CV"
+
+
+@pytest.mark.parametrize("addr", _MUST_PASS)
+def test_real_recruiting_inboxes_are_not_over_blocked(addr):
+    """The screen must not be so broad that it blocks the addresses we want."""
+    from utils.mailer import is_safe_recipient
+    assert is_safe_recipient(addr) is True, f"{addr} was wrongly refused"
+
+
+def test_separators_cannot_hide_a_blocked_word():
+    """The local part is matched with punctuation stripped as well as as-written."""
+    from utils.mailer import is_safe_recipient
+    for sep in ("-", ".", "_"):
+        assert is_safe_recipient(f"disability{sep}accommodations@acme.com") is False
+
+
+def test_the_screen_applies_to_every_source():
+    """Published, crawled or constructed — the screen is the same one."""
+    from utils.mailer import find_employer_recipient
+    posting = ("Apply online. For accommodations e-mail "
+               "disability-accomodations@qualcomm.com or call us.")
+    assert find_employer_recipient(posting) is None

@@ -329,11 +329,11 @@ def test_crawl_finds_an_address_on_a_standard_path(monkeypatch):
 
 def test_crawl_follows_a_promising_link_to_a_nonstandard_path(monkeypatch):
     _pages(monkeypatch, {
-        "acme.com/": "<a href='/join-the-crew'>Work with us</a>",
         "/join-the-crew": "Email <a href='mailto:hiring@acme.com'>hiring@acme.com</a>",
+        "acme.com": "<a href='/join-the-crew'>Work with us</a>",
     })
     hits = M.deep_crawl_for_email("acme.com")
-    assert any(h["address"] == "hiring@acme.com" for h in hits), \
+    assert any(a == "hiring@acme.com" for a, _url in hits), \
         "a careers page on a non-standard path must still be reachable"
 
 
@@ -366,7 +366,7 @@ def test_crawl_obeys_robots_disallow(monkeypatch):
 
 def test_crawl_stays_on_the_one_host(monkeypatch):
     seen = _pages(monkeypatch, {
-        "acme.com/": "<a href='https://elsewhere.example/careers'>Careers</a>"})
+        "acme.com": "<a href='https://elsewhere.example/careers'>Careers</a>"})
     M.deep_crawl_for_email("acme.com")
     assert not any("elsewhere.example" in u for u in seen)
 

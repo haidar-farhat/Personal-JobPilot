@@ -47,9 +47,22 @@ SMTP_PORT = 465          # implicit TLS
 # Mailing a CV to a disability-accommodation or compliance inbox is not just
 # ineffective, it misuses a channel people rely on for legal requests.
 BLOCKED_LOCAL = (
-    "accommodation", "accessibility", "ada", "compliance", "legal", "privacy",
-    "security", "abuse", "noreply", "no-reply", "donotreply", "postmaster",
-    "unsubscribe", "press", "media", "investor", "support", "help", "billing",
+    # --- accessibility / accommodation, INCLUDING the ways employers misspell it.
+    # This is not pedantry: Qualcomm's own live posting says "You may e-mail
+    # disability-accomodations@qualcomm.com" — one 'm' — and the correctly
+    # spelled entry did not match it, so the address passed the screen. The
+    # person staffing that inbox handles accessibility requests from disabled
+    # applicants; a CV arriving there is both useless and a misuse of a channel
+    # people depend on.
+    "accommodation", "accomodation", "acommodation", "accomadation",
+    "accessibility", "accessable", "accessible", "ada", "disability",
+    "disabilities", "disabled", "reasonableaccom",
+    # --- legal / compliance / ethics channels
+    "compliance", "legal", "privacy", "security", "abuse", "ethics",
+    "whistleblow", "harassment", "eeo", "affirmativeaction", "grievance",
+    # --- automated or wrong-audience inboxes
+    "noreply", "no-reply", "donotreply", "postmaster", "unsubscribe",
+    "press", "media", "investor", "support", "help", "billing",
     "sales", "marketing", "info", "webmaster",
 )
 # Local-parts that read as a real application/recruiting inbox.
@@ -61,12 +74,22 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
 def is_safe_recipient(addr: str) -> bool:
-    """False for inboxes that should not receive an unsolicited application."""
+    """False for inboxes that should not receive an unsolicited application.
+
+    The local part is compared BOTH as written and with its separators removed,
+    so "disability-accomodations", "disability.accommodations" and
+    "disabilityaccommodations" are one address to this screen rather than three
+    spellings that each need their own blocklist entry. Punctuation is the
+    cheapest way for a real address to slip past a substring match, and the cost
+    of one slipping past is a CV in an accessibility inbox.
+    """
     addr = (addr or "").strip().lower()
     if "@" not in addr or addr.endswith((".png", ".jpg", ".gif", ".svg")):
         return False
     local = addr.split("@", 1)[0]
-    return not any(b in local for b in BLOCKED_LOCAL)
+    squashed = re.sub(r"[^a-z0-9]", "", local)
+    return not any(b in local or b.replace("-", "") in squashed
+                   for b in BLOCKED_LOCAL)
 
 
 def find_employer_recipient(description: str | None) -> str | None:

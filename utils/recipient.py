@@ -461,6 +461,36 @@ def _verdict(ev: dict[str, Any]) -> tuple[bool, str]:
     return False, "generic_name_without_ownership_signal"
 
 
+def _domain_is_attested(job, domain: str | None) -> bool:
+    """Is this domain vouched for by a source that needs no further proof?
+
+    utils.company_domain layers the evidence already in this repo — the curated
+    config/target_companies.yaml, the companies table, the employer's own
+    posting host. When one of those names the SAME domain we are about to build
+    an address on, the homepage ownership check is redundant.
+
+    Measured over 60 real jobs: a domain was already found for 57 of them, so
+    DISCOVERY was never the problem — 33 of those 57 are attested this way, and
+    each one previously died as `domain_unconfirmed`.
+
+    The domains must MATCH. An authoritative answer about acme.com says nothing
+    about a constructed address at acmejobs.net, and treating it as though it
+    did would be the same class of error as trusting a board host. A careers
+    domain is refused for the same reason: curated or not, mail does not land
+    on kaiserpermanentejobs.org.
+    """
+    if not domain:
+        return False
+    try:
+        from utils.company_domain import resolve_domain
+        rec = resolve_domain(job, allow_network=False)
+    except Exception:                        # pragma: no cover - defensive
+        return False
+    if not rec.get("authoritative") or rec.get("is_careers_domain"):
+        return False
+    return (rec.get("domain") or "").lower() == domain.lower()
+
+
 def domain_confidently_belongs_to(domain: str, company: str, *,
                                   page_text: str | None = None) -> bool:
     """Does this domain really belong to that company? Strictly.
@@ -737,8 +767,10 @@ def resolve(job, *, mail_cfg: dict, dead: set[str] | None = None,
         # name must prove itself — this is the check that used to let
         # moab.com/"Moab" through, and the reason the Mail Agent refused
         # constructed addresses wholesale instead.
-        if origin != "url" and not domain_confidently_belongs_to(
-                domain or "", getattr(job, "company", "") or ""):
+        if (origin != "url"
+                and not _domain_is_attested(job, domain)
+                and not domain_confidently_belongs_to(
+                    domain or "", getattr(job, "company", "") or "")):
             refuse(address, REASON_DOMAIN_UNCONFIRMED)
             return finish(REASON_DOMAIN_UNCONFIRMED)
 
