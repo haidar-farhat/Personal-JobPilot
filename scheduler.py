@@ -289,7 +289,7 @@ def main():
     # Tailoring (run periodically for queued jobs)
     scheduler.add_job(
         task_tailor_resumes,
-        IntervalTrigger(minutes=20),
+        IntervalTrigger(minutes=intervals.get("tailor_minutes", 20)),
         id="tailor_resumes",
         name="Resume Tailor",
         max_instances=1,

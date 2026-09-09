@@ -593,9 +593,17 @@ def _heading_key(line: str) -> str | None:
     n_toks = len(stripped.split())
     low = stripped.translate(_PUNCT_FOLD).lower()
 
+    if stripped[-1] in ".,;!?":
+        # A heading does not end in sentence punctuation. Without this the
+        # extremely common bullet opener "Must have ..." matches the
+        # `must[- ]haves?` heading alternative and swallows the line.
+        return None
     if n_toks <= 8:
         for rx, key in SECTION_HEADINGS:
-            if rx.search(low):
+            m = rx.search(low)
+            # The cue has to BE the heading, not merely start the line: a
+            # two-word cue in front of a full sentence is a bullet.
+            if m and (n_toks <= 3 or m.end() >= 0.5 * len(low)):
                 return key
     if ends_colon and n_toks <= 6:
         words = [w for w in stripped.split() if any(c.isalpha() for c in w)]
@@ -749,30 +757,39 @@ def extract_keywords(jd_or_sections: Any, *, top_n: int = MAX_KEYWORDS,
     sections = _as_sections(jd_or_sections)
     lexicon = tech_lexicon(base_resume_path)
     original = "\n".join(sections.values())
-    whole_hay = normalize(original)
 
+    # n-grams come from one LINE at a time, never across two. A posting's line
+    # breaks are where its phrases end, so a gram spanning two bullets
+    # ("services build machine") is an artefact of concatenation naming a term
+    # no résumé could legitimately contain. Occurrence counts are summed the
+    # same way, for the same reason.
+    line_hays: list[str] = []
     accepted: dict[str, dict[str, Any]] = {}
     for section, text in sections.items():
         if not text:
             continue
         ws = SECTION_WEIGHTS.get(section, SECTION_WEIGHTS["unknown"])
-        section_hay = normalize(text)
-        for gram, _idx in ngrams(tokens(text), 3):
-            rec = accepted.get(gram)
-            if rec is not None:
-                if ws > rec["ws"]:
-                    rec["ws"] = ws
-                    rec["section"] = section
+        for line in text.splitlines():
+            line_hay = normalize(line)
+            if not line_hay:
                 continue
-            n = gram.count(" ") + 1
-            if not _accept_gram(gram, n, section_hay, lexicon, original):
-                continue
-            accepted[gram] = {"ws": ws, "section": section, "n": n}
+            line_hays.append(line_hay)
+            for gram, _idx in ngrams(tokens(line), 3):
+                rec = accepted.get(gram)
+                if rec is not None:
+                    if ws > rec["ws"]:
+                        rec["ws"] = ws
+                        rec["section"] = section
+                    continue
+                n = gram.count(" ") + 1
+                if not _accept_gram(gram, n, line_hay, lexicon, original):
+                    continue
+                accepted[gram] = {"ws": ws, "section": section, "n": n}
 
     keywords: dict[str, Keyword] = {}
     first_at: dict[str, int] = {}
     for gram, rec in accepted.items():
-        count = _count_phrase(whole_hay, gram)
+        count = sum(_count_phrase(h, gram) for h in line_hays)
         if count <= 0:
             continue
         parts = gram.split()
@@ -879,6 +896,35 @@ def _requirement_units(section_text: str) -> list[str]:
     return units
 
 
+def _requirement_terms(kws: list[Keyword], *, max_terms: int = 5) -> tuple[str, ...]:
+    """The distinct concepts one requirement line demands.
+
+    Two adjustments to a plain "top 5 by weight". Technical terms sort first,
+    because a requirement's identity is the technology it names, not the prose
+    wrapped around it. And a candidate sharing any token with an already-chosen
+    term is skipped, so one noun phrase cannot occupy all five slots as five
+    overlapping windows of itself — that would push ``need`` to 3 and make the
+    requirement unmatchable by any résumé that had not copied the posting's
+    sentence structure verbatim.
+    """
+    if not kws:
+        return ()
+    floor = 0.15 * max(k.weight for k in kws)
+    chosen: list[str] = []
+    used: set[str] = set()
+    for kw in sorted(kws, key=lambda k: (not k.is_technical, -k.weight, k.term)):
+        if kw.weight < floor:
+            continue
+        parts = set(kw.term.split())
+        if parts & used:
+            continue
+        chosen.append(kw.term)
+        used |= parts
+        if len(chosen) >= max_terms:
+            break
+    return tuple(chosen)
+
+
 def _classify_kind(unit: str, section: str) -> str:
     low = unit.translate(_PUNCT_FOLD).lower()
     if any(cue in low for cue in NICE_CUES):
@@ -963,8 +1009,7 @@ def extract_requirements(jd: str, *, max_requirements: int = 24,
                                    base_resume_path=base_resume_path)
             if not kws:
                 continue
-            top_w = kws[0].weight
-            terms = tuple(k.term for k in kws[:5] if k.weight >= 0.15 * top_w)
+            terms = _requirement_terms(kws)
             if not terms:
                 continue
 
