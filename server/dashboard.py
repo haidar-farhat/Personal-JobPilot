@@ -616,8 +616,13 @@ def api_mail_health():
         with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
             cfg = (yaml.safe_load(f) or {}).get("mail", {}) or {}
         ready, why = mailer_ready()
+        mode = ("forced:" + cfg["to"]) if cfg.get("to") else (
+            "employer" if cfg.get("to_employer") else "off")
+        if not cfg.get("to") and cfg.get("self_copy"):
+            mode += "+self-copy"
         return {"ready": ready, "reason": why, "enabled": bool(cfg.get("enabled")),
-                "to": cfg.get("to") or "", "mode": "direct" if cfg.get("to") else "self-copy"}
+                "to": cfg.get("to") or "", "to_employer": bool(cfg.get("to_employer")),
+                "self_copy": bool(cfg.get("self_copy")), "mode": mode}
     except Exception as e:
         return {"ready": False, "reason": str(e)}
 
