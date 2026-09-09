@@ -1298,6 +1298,15 @@
   .ag-pill.run .dot-m{background:var(--mint);animation:pulse 1.6s infinite}
   .ag-status .sum{font-size:12.5px;color:var(--muted)}
   .ag-status .btn-mint{margin-left:auto}
+  /* Agent run indicator: green bulb while a cycle is live, red when idle. */
+  .ag-bulb{width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.25)}
+  .ag-bulb.off{background:#e5484d;box-shadow:0 0 6px rgba(229,72,77,.75)}
+  .ag-bulb.on{background:#30d158;box-shadow:0 0 10px 2px rgba(48,209,88,.85);animation:pulse 1.6s infinite}
+  .ag-prog{flex-basis:100%;margin-top:4px}
+  .ag-prog .bar{height:6px;border-radius:99px;background:var(--border);overflow:hidden}
+  .ag-prog .bar>i{display:block;height:100%;background:var(--mint);border-radius:99px;transition:width .4s ease}
+  .ag-prog .lbl{font-size:12px;color:var(--muted);margin-top:5px;display:flex;justify-content:space-between;gap:12px}
+  .ag-prog .lbl b{color:var(--text);font-variant-numeric:tabular-nums}
   .ag-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start}
   .ag-col h4{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--subtle)}
   .ag-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;align-items:center}
@@ -1378,6 +1387,8 @@
     <button class="jr-tab" data-jtab="liked">Liked<span class="ct" id="jtLiked"></span></button>
     <button class="jr-tab" data-jtab="applied">Applied<span class="ct" id="jtApplied"></span></button>
     <button class="jr-tab" data-jtab="external">External<span class="ct" id="jtExternal"></span></button>
+    <button class="jr-tab" id="jrAddAll" title="Queue every scored job, ignoring the filters">＋ Add all to agent queue</button>
+    <button class="jr-tab" id="jrAddFiltered" title="Queue only the jobs matching the filters you have set right now">＋ Add current filter to agent</button>
   </div>
   <div class="jr-search">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
@@ -2718,6 +2729,42 @@ async function changeStatus(id, status){
     if(!wasApplied && APPLIED_TRACK.has(status)) toast("Moved to your Applied tab ✓");
   }catch(e){ console.error("status update failed:", e); toast("Couldn't update stage — try again", true); }
 }
+// Bulk-queue helper shared by "Add all to agent queue" (Jobs) and
+// "Add all to start" (Agent). One request, then patch local state in place.
+async function bulkStatus(ids, status){
+  if(!ids.length) return 0;
+  try{
+    const r=await fetch("/api/applications/bulk-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,status})});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const d=await r.json();
+    const set=new Set(ids);
+    state.apps.forEach(a=>{ if(set.has(a.id)){ a.status=status; a.status_meta=STATUS_META[status]||{label:status.toUpperCase()}; } });
+    render();
+    return d.changed??ids.length;
+  }catch(e){ console.error("bulk status failed:", e); toast("Couldn't queue those jobs — try again", true); return 0; }
+}
+// Jobs screen — two scopes: every scored job, or only what the filters show.
+async function queueScored(btn, targets, scopeLabel){
+  if(!targets.length){ toast(`No scored jobs (${scopeLabel}) left to queue — already in the agent queue ✓`); return; }
+  if(!confirm(`Add ${targets.length} job${targets.length===1?"":"s"} (${scopeLabel}) to the agent queue?\n\nThe agent applies to its queue automatically. Anything queued here can be submitted for real.`)) return;
+  btn.disabled=true; const label=btn.textContent; btn.textContent="Adding…";
+  const n=await bulkStatus(targets.map(a=>a.id),"queued");
+  btn.disabled=false; btn.textContent=label;
+  if(n) toast(`Added ${n} job${n===1?"":"s"} to your Agent queue ✓`);
+}
+const _addFilteredBtn=$("#jrAddFiltered");
+if(_addFilteredBtn) _addFilteredBtn.onclick=()=>
+  queueScored(_addFilteredBtn, filterApps().filter(a=>a.status==="scored"), "current filter");
+const _addAllBtn=$("#jrAddAll");
+if(_addAllBtn) _addAllBtn.onclick=async()=>{
+  const targets=state.apps.filter(a=>a.status==="scored");
+  if(!targets.length){ toast("Every scored job is already in the agent queue ✓"); return; }
+  if(!confirm(`Add ${targets.length} job${targets.length===1?"":"s"} to the agent queue?\n\nThe agent applies to its queue automatically. Anything queued here can be submitted for real.`)) return;
+  _addAllBtn.disabled=true; const label=_addAllBtn.textContent; _addAllBtn.textContent="Adding…";
+  const n=await bulkStatus(targets.map(a=>a.id),"queued");
+  _addAllBtn.disabled=false; _addAllBtn.textContent=label;
+  if(n) toast(`Added ${n} job${n===1?"":"s"} to your Agent queue ✓`);
+};
 async function doAction(act, id){
   if(act==="apply"){
     // Arm the extension for this job (autofill auto-runs on the company form), then open the posting.
@@ -3765,9 +3812,27 @@ async function renderAgent(){
   const queue=state.apps.filter(isLiked).sort((a,b)=>(b.fit_score||0)-(a.fit_score||0));
   const results=state.apps.filter(a=>a.auto_apply_attempted_at).sort((a,b)=>(b.auto_apply_attempted_at||"").localeCompare(a.auto_apply_attempted_at||"")).slice(0,15);
   const running=!!(st&&st.running), needRes=queue.filter(a=>!a.has_tailored_cv);
-  box.innerHTML=`<div class="ag-status"><span class="ag-pill ${running?"run":""}"><span class="dot-m"></span>${running?"Running — applying to your queue…":`Standby — ${queue.length} job${queue.length===1?"":"s"} added. Awaiting application start.`}</span>
-      <span class="sum">${st?esc(summarizeRun(st.last_summary)):"Agent status unavailable — restart the dashboard to load the new API."}</span>
-      <button class="btn-mint" id="agentStart" ${running?"disabled":""}>${running?"Running…":"Start"}</button></div>
+  const ar=(st&&st.autorun)||{};
+  // While the auto-run pipeline is queueing/generating, its own phase counters
+  // drive the bar; during the apply phase the runner's per-job progress does.
+  const usePhase=ar.active&&ar.step!=="applying";
+  const pr=usePhase?{total:ar.phase_total,done:ar.phase_done,current:ar.current}:((st&&st.progress)||{});
+  const ptot=pr.total||0, pdone=pr.done||0;
+  const pctRun=ptot?Math.round(pdone/ptot*100):0;
+  const STEP={generating:"generating résumé",applying:"applying"};
+  const PHASE={running:"Working through your queue",queueing:"Adding jobs to the queue",generating:"Generating résumés + cover letters",applying:"Applying",starting:"Starting…",done:"Finished",cancelled:"Stopped",error:"Failed"};
+  let phaseLbl=ar.active||ar.phase?(PHASE[ar.phase]||ar.phase):"";
+  if(ar.active&&ar.step&&STEP[ar.step]) phaseLbl=`Job ${ar.phase_done||0} — ${STEP[ar.step]}`;
+  box.innerHTML=`<div class="ag-status"><span class="ag-bulb ${running?"on":"off"}" title="${running?"Agent is running":"Agent is idle"}" aria-label="${running?"Agent running":"Agent stopped"}"></span>
+      <span class="ag-pill ${running?"run":""}">${running?"Running — applying to your queue…":`Standby — ${queue.length} job${queue.length===1?"":"s"} added. Awaiting application start.`}</span>
+      <span class="sum">${!st?"Agent status unavailable — restart the dashboard to load the new API.":(running&&ar.active?esc(`${phaseLbl}…`):esc(summarizeRun(st.last_summary)))}</span>
+      <button class="btn-link" id="agentAddAll" ${running?"disabled":""} title="Queue every scored job, then start the agent">＋ Add all to start</button>
+      <button class="btn-mint" id="agentAutoRun" ${running?"disabled":""} title="Queue everything, generate every résumé, then apply — hands-off">⚡ Auto-run everything</button>
+      ${running?`<button class="btn-link" id="agentStop" style="color:#e5484d">■ Stop</button>`:""}
+      <button class="btn-mint" id="agentStart" ${running?"disabled":""}>${running?"Running…":"Start"}</button>
+      ${ptot?`<div class="ag-prog"><div class="bar"><i style="width:${running?pctRun:100}%"></i></div>
+        <div class="lbl"><span>${running?`${phaseLbl?esc(phaseLbl)+" — ":""}<b>${pdone}</b> of <b>${ptot}</b>${pr.current?" — "+esc(pr.current):""}`:`Last run finished — <b>${pdone}</b> of <b>${ptot}</b> processed`}</span><span>${running?pctRun+"%":""}</span></div></div>`:
+      (ar.active?`<div class="ag-prog"><div class="bar"><i style="width:100%;opacity:.4"></i></div><div class="lbl"><span>${esc(phaseLbl)}…</span></div></div>`:"")}</div>
     <div class="ag-cols">
       <div class="ag-col"><h4>Queue (${queue.length})</h4>${queue.map(agQueueCard).join("")||`<div class="empty">Press <b>+ Add to Agent</b> (or ♥) on a job card to queue it.</div>`}</div>
       <div class="ag-col"><h4>Prepare materials (${needRes.length})</h4>${needRes.map(agPrepCard).join("")||`<div class="empty">Every queued job has a tailored résumé ✓</div>`}</div>
@@ -3776,13 +3841,41 @@ async function renderAgent(){
   box.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>changeStatus(+b.dataset.remove,"scored"));
   box.querySelectorAll("[data-gen]").forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent="Generating…";
     const d=await runTailor(+b.dataset.gen, coverWanted()); if(!d||!d.ok){ toast(`Tailoring failed: ${(d&&d.error)||"?"}`, true); b.disabled=false; b.textContent="Retry"; } else renderAgent(); });
+  const ab=$("#agentAddAll"); if(ab) ab.onclick=async()=>{
+    // Only jobs EARLIER than queued. Sweeping up materials_ready/applied rows
+    // would demote them out of the state auto-apply looks for.
+    const targets=homeApps().filter(a=>a.status==="scored");
+    if(targets.length && !confirm(`Add ${targets.length} job${targets.length===1?"":"s"} to the queue and start the agent?\n\nThe agent submits real applications.`)) return;
+    ab.disabled=true; ab.textContent="Adding…";
+    if(targets.length) await bulkStatus(targets.map(a=>a.id),"queued");
+    ab.textContent="Starting…";
+    try{ const d=await fetch("/api/agent/run",{method:"POST"}).then(r=>r.json());
+      toast(d&&d.started?`${targets.length} added — agent started`:`Agent: ${(d&&(d.error||d.reason))||"not started"}`, !(d&&d.started)); }
+    catch(e){ toast("Couldn't start the agent", true); }
+    setTimeout(renderAgent, 800); };
+  const ar2=$("#agentAutoRun"); if(ar2) ar2.onclick=async()=>{
+    const pend=homeApps().filter(a=>a.status==="scored").length;
+    const q=state.apps.filter(a=>a.status==="queued").length;
+    if(!confirm(`Auto-run everything?\n\n• Queue ${pend} more job${pend===1?"":"s"}\n• Generate résumés for ~${q+pend} job${q+pend===1?"":"s"} (slow — minutes each)\n• Then apply automatically\n\nThis submits REAL applications. You can press Stop at any point.`)) return;
+    ar2.disabled=true; ar2.textContent="Starting…";
+    try{ const d=await fetch("/api/agent/autorun",{method:"POST"}).then(r=>r.json());
+      toast(d&&d.started?"Auto-run started — queueing, generating, then applying":`Auto-run: ${(d&&(d.error||d.reason))||"not started"}`, !(d&&d.started)); }
+    catch(e){ toast("Couldn't start the auto-run", true); }
+    setTimeout(renderAgent, 800); };
+  const stp=$("#agentStop"); if(stp) stp.onclick=async()=>{ stp.disabled=true; stp.textContent="Stopping…";
+    try{ const d=await fetch("/api/agent/stop",{method:"POST"}).then(r=>r.json());
+      toast(d&&d.stopped?"Stopping after the current job…":"Nothing to stop", !(d&&d.stopped)); }
+    catch(e){ toast("Couldn't stop the agent", true); }
+    setTimeout(renderAgent, 800); };
   const sb=$("#agentStart"); if(sb) sb.onclick=async()=>{ sb.disabled=true; sb.textContent="Starting…";
     try{ const d=await fetch("/api/agent/run",{method:"POST"}).then(r=>r.json());
       toast(d&&d.started?"Agent started — it applies only where every required field can be filled":`Agent: ${(d&&(d.error||d.reason))||"not started"}`, !(d&&d.started)); }
     catch(e){ toast("Couldn't start the agent (restart the dashboard to load the new API)", true); }
     setTimeout(renderAgent, 800); };
   clearTimeout(_agentPoll);
-  if(running) _agentPoll=setTimeout(()=>{ if(!$("#agentView").hidden) renderAgent(); }, 5000);
+  // Poll fast while a cycle runs; keep a slow beat when idle so a scheduler-
+  // started cycle lights the bulb without needing a manual refresh.
+  _agentPoll=setTimeout(()=>{ if(!$("#agentView").hidden) renderAgent(); }, running?4000:15000);
 }
 
 const _tt=$("#themeToggle"); if(_tt) _tt.onclick=toggleTheme; applyThemeIcon();

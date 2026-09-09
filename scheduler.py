@@ -66,6 +66,16 @@ def task_scan_career_pages():
                 logger.error(f"[{scanner_cls.source_name}] scanner crashed: {e}")
                 counts[scanner_cls.source_name] = 0
 
+        # Aggregator providers (Jobicy / Arbeitnow / JSearch / Adzuna / Jooble /
+        # USAJOBS). Isolated like the rest: an unkeyed or down provider is a
+        # no-op, never an aborted sweep.
+        try:
+            from agents.scanner.aggregators import AggregatorScanner
+            counts["aggregators"] = AggregatorScanner(config).run().get("jobs_new", 0)
+        except Exception as e:
+            logger.error(f"[aggregators] scanner crashed: {e}")
+            counts["aggregators"] = 0
+
         # Playwright-rendered sources are slower — isolate them too.
         for scanner_cls in (GenericCareersScanner,):
             try:

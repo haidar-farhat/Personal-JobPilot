@@ -73,6 +73,24 @@ def _resolve_model(client, target: str) -> str:
     return resolved
 
 
+def _speed_options(ollama_config: dict, temperature: float, num_ctx: int) -> dict:
+    """Sampling options, with speed knobs from settings.yaml `ollama:`.
+
+    num_predict caps how many tokens are generated — the single biggest lever
+    on wall-clock time, since generation dominates. top_k/top_p narrow the
+    sampler (less deliberation per token). Lower values = faster, less careful.
+    """
+    opts = {
+        "temperature": ollama_config.get("temperature", temperature),
+        "num_predict": ollama_config.get("num_predict", 4096),
+        "num_ctx": num_ctx,
+    }
+    for k in ("top_k", "top_p", "num_gpu", "num_thread", "num_batch"):
+        if k in ollama_config:
+            opts[k] = ollama_config[k]
+    return opts
+
+
 def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
     config = _load_config()
     ollama_config = config.get("ollama", {})
@@ -94,7 +112,7 @@ def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int
             response = client.chat(
                 model=model,
                 messages=messages,
-                options={"temperature": 0.3, "num_predict": 4096, "num_ctx": num_ctx},
+                options=_speed_options(ollama_config, 0.3, num_ctx),
                 format="json",
             )
             last_content = response.message.content.strip()
@@ -151,7 +169,7 @@ def _ollama_generate_text(prompt: str, system_prompt: str = "") -> str:
     response = client.chat(
         model=model,
         messages=messages,
-        options={"temperature": 0.4, "num_predict": 4096, "num_ctx": num_ctx},
+        options=_speed_options(ollama_config, 0.4, num_ctx),
     )
     return response.message.content.strip()
 

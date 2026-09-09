@@ -846,8 +846,12 @@ def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None =
     }
 
 
-def tailor_queued_jobs(config: dict) -> dict:
+def tailor_queued_jobs(config: dict, on_each=None) -> dict:
     """Generate materials for all queued (high-scoring) jobs.
+
+    Args:
+        on_each: optional callback(done_in_batch, label) fired after each job,
+            so a caller can show per-job progress instead of per-batch.
 
     Returns:
         Dict with results: {tailored, errors}
@@ -858,10 +862,15 @@ def tailor_queued_jobs(config: dict) -> dict:
 
     try:
         # Find queued jobs that need materials
+        # Join JobScore: an unscored job can't be tailored (no archetype, no
+        # dimensions), and without this join a batch of unscored rows at the
+        # head of the queue starves tailoring forever.
         queued_apps = (
             session.query(Application)
+            .join(JobScore, JobScore.job_id == Application.job_id)
             .filter(Application.status == ApplicationStatus.QUEUED)
             .filter(Application.resume_path.is_(None))
+            .order_by(JobScore.fit_score.desc())
             .limit(10)
             .all()
         )
@@ -884,6 +893,11 @@ def tailor_queued_jobs(config: dict) -> dict:
                 session.commit()
 
                 tailored_count += 1
+                if on_each:
+                    try:
+                        on_each(tailored_count, f"{job.title} @ {job.company}")
+                    except Exception:
+                        pass   # progress reporting must never break tailoring
 
             except Exception as e:
                 session.rollback()

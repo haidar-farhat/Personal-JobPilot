@@ -570,6 +570,70 @@ async def api_update_status(app_id: int, request: Request):
         session.close()
 
 
+@app.get("/api/job-sources")
+def api_job_sources():
+    """Per-provider status for the Jobs screen source panel."""
+    try:
+        with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        from agents.scanner.providers import provider_health
+        return {"providers": provider_health(config)}
+    except Exception as e:
+        logger.error(f"[job-sources] {e}")
+        return {"providers": [], "error": str(e)}
+
+
+@app.post("/api/job-sources/scan")
+def api_job_sources_scan():
+    """Run the aggregator providers once, now (the scheduler also does this)."""
+    def _work():
+        try:
+            with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+            from agents.scanner.aggregators import AggregatorScanner
+            AggregatorScanner(config).run()
+        except Exception:
+            logger.exception("[job-sources] manual scan failed")
+
+    threading.Thread(target=_work, name="jobpilot-source-scan", daemon=True).start()
+    return {"started": True}
+
+
+@app.post("/api/applications/bulk-status")
+async def api_bulk_update_status(request: Request):
+    """Move many applications to one status in a single round-trip.
+
+    Backs the "Add all to agent queue" / "Add all to start" buttons — 100+
+    single-row POSTs would be a request storm and could half-apply if the
+    page navigates mid-flight.
+    """
+    body = await request.json()
+    ids = body.get("ids") or []
+    new_status = body.get("status")
+
+    try:
+        status_enum = ApplicationStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="ids must be a non-empty list")
+
+    session = get_session()
+    try:
+        rows = session.query(Application).filter(Application.id.in_(ids)).all()
+        changed = 0
+        for app_obj in rows:
+            if app_obj.status == status_enum:
+                continue  # already there — don't churn the status history
+            record_status_change(session, app_obj, status_enum, source="dashboard_bulk")
+            changed += 1
+        session.commit()
+        return {"success": True, "changed": changed, "requested": len(ids),
+                "new_status": status_enum.value}
+    finally:
+        session.close()
+
+
 @app.post("/api/application/{app_id}/notes")
 async def api_update_notes(app_id: int, request: Request):
     body = await request.json()
@@ -1099,7 +1163,8 @@ def api_profile_full():
 
 
 # ponytail: one module-level thread + dict; per-user tool, one run at a time is the point.
-_AGENT = {"thread": None, "last_summary": None, "started_at": None}
+_AGENT = {"thread": None, "last_summary": None, "started_at": None,
+          "autorun": {"active": False}}
 
 
 def _agent_worker():
@@ -1110,10 +1175,139 @@ def _agent_worker():
         _AGENT["last_summary"] = {"error": str(e)}
 
 
+def _autorun_worker():
+    """One-button pipeline, run JOB BY JOB.
+
+    For each job: queue it -> generate its resume + cover letter -> apply to
+    it -> move on. The earlier version ran each phase across the whole list,
+    so nothing was ever applied to until every resume existed (hours). This
+    way the first application goes out within a minute or two.
+
+    Cancel is checked between jobs, so Stop never interrupts a half-filled form.
+    """
+    from agents.auto_applier.runner import run_auto_apply
+    from agents.tailor import tailor_for_job
+
+    st = _AGENT["autorun"]
+    totals = {"submitted": 0, "dry_run_count": 0, "failed_captcha": 0,
+              "failed_other": 0, "total_attempted": 0}
+    try:
+        with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+        # Work list: everything scored or already queued but lacking materials,
+        # best fit first. Captured once so the list can't grow under us.
+        session = get_session()
+        try:
+            rows = (session.query(Application.id)
+                    .join(JobScore, JobScore.job_id == Application.job_id)
+                    .filter(Application.status.in_([ApplicationStatus.SCORED,
+                                                    ApplicationStatus.QUEUED]))
+                    .filter(Application.resume_path.is_(None))
+                    .order_by(JobScore.fit_score.desc())
+                    .all())
+            app_ids = [r[0] for r in rows]
+        finally:
+            session.close()
+
+        st.update(phase="running", phase_done=0, phase_total=len(app_ids))
+
+        for i, app_id in enumerate(app_ids, 1):
+            if st.get("cancel"):
+                st.update(phase="cancelled")
+                return
+
+            # ---- this job: fetch, queue, tailor --------------------------
+            session = get_session()
+            try:
+                app_obj = session.query(Application).get(app_id)
+                if app_obj is None:
+                    continue
+                job = session.query(Job).get(app_obj.job_id)
+                score = session.query(JobScore).filter_by(job_id=app_obj.job_id).first()
+                if not job or not score:
+                    continue
+                label = f"{job.title} @ {job.company}"
+                st.update(phase_done=i, current=label, step="generating")
+
+                if app_obj.status != ApplicationStatus.QUEUED:
+                    record_status_change(session, app_obj, ApplicationStatus.QUEUED,
+                                         source="autorun")
+                    session.commit()
+
+                paths = tailor_for_job(job, score)
+                app_obj.resume_path = paths["resume_docx"]
+                app_obj.cover_letter_path = paths["cover_letter_docx"]
+                record_status_change(session, app_obj, ApplicationStatus.MATERIALS_READY,
+                                     source="autorun")
+                session.commit()
+                st["tailored"] = st.get("tailored", 0) + 1
+            except Exception as e:
+                session.rollback()
+                logger.error(f"[autorun] tailoring failed for app {app_id}: {e}")
+                continue
+            finally:
+                session.close()
+
+            # ---- this job: apply right away ------------------------------
+            if st.get("cancel"):
+                st.update(phase="cancelled")
+                return
+            st.update(step="applying")
+            try:
+                res = run_auto_apply(config) or {}
+                for k in totals:
+                    totals[k] += res.get(k, 0) or 0
+                _AGENT["last_summary"] = dict(totals)
+            except Exception as e:
+                logger.error(f"[autorun] apply pass failed after {label}: {e}")
+
+        st.update(phase="done", current=None, step=None)
+        _AGENT["last_summary"] = dict(totals)
+    except Exception as e:
+        logger.exception("[autorun] pipeline failed")
+        st.update(phase="error", error=str(e))
+        _AGENT["last_summary"] = {"error": str(e)}
+    finally:
+        st["active"] = False
+
+
+@app.post("/api/agent/autorun")
+def api_agent_autorun():
+    """Start the full queue -> generate -> apply pipeline in one call."""
+    t = _AGENT["thread"]
+    if t and t.is_alive():
+        return {"started": False, "reason": "already running"}
+    _AGENT["autorun"] = {"active": True, "cancel": False, "phase": "starting",
+                         "phase_done": 0, "phase_total": 0, "queued": 0, "tailored": 0}
+    t = threading.Thread(target=_autorun_worker, name="jobpilot-autorun", daemon=True)
+    _AGENT["thread"] = t
+    _AGENT["started_at"] = datetime.now(timezone.utc).isoformat()
+    t.start()
+    return {"started": True}
+
+
+@app.post("/api/agent/stop")
+def api_agent_stop():
+    """Ask a running auto-run to stop after the current batch."""
+    st = _AGENT["autorun"]
+    if not st.get("active"):
+        return {"stopped": False, "reason": "not running"}
+    st["cancel"] = True
+    return {"stopped": True, "note": "finishing current batch, then halting"}
+
+
 @app.get("/api/agent/status")
 def api_agent_status():
     t = _AGENT["thread"]
-    return {"running": bool(t and t.is_alive()), "last_summary": _AGENT["last_summary"], "started_at": _AGENT["started_at"]}
+    try:  # live per-job progress — also reflects the scheduler's own cycles
+        from agents.auto_applier.runner import get_progress
+        progress = get_progress()
+    except Exception:
+        progress = {"active": False}
+    return {"running": bool(t and t.is_alive()) or bool(progress.get("active")),
+            "progress": progress, "autorun": _AGENT["autorun"],
+            "last_summary": _AGENT["last_summary"], "started_at": _AGENT["started_at"]}
 
 
 @app.post("/api/agent/run")

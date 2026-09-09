@@ -29,6 +29,31 @@ from db.models import (Application, ApplicationStatus, Job, JobScore,
 
 logger = logging.getLogger(__name__)
 
+# Live progress for the dashboard's Agent screen. Module-level so BOTH the
+# scheduler's cycles and dashboard-triggered runs report through one place.
+# Written only by run_auto_apply (one cycle at a time), read by the API.
+_PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
+                   "started_at": None, "finished_at": None}
+
+
+def get_progress() -> dict:
+    """Snapshot of the current (or last) auto-apply cycle."""
+    return dict(_PROGRESS)
+
+
+def _progress_start(total: int) -> None:
+    _PROGRESS.update(active=True, done=0, total=total, current=None,
+                     started_at=datetime.now(timezone.utc).isoformat(), finished_at=None)
+
+
+def _progress_step(done: int, label: str | None) -> None:
+    _PROGRESS.update(done=done, current=label)
+
+
+def _progress_end() -> None:
+    _PROGRESS.update(active=False, current=None,
+                     finished_at=datetime.now(timezone.utc).isoformat())
+
 # Submit was clicked but never confirmed — retrying could double-apply.
 NEVER_RETRY = AUTO_APPLY_PERMANENT_FAILURES | {"submitted_unverified"}
 
@@ -261,6 +286,7 @@ def run_auto_apply(config: dict | None = None) -> dict:
     finally:
         session.close()
 
+    _progress_start(min(len(candidates), remaining_quota))
     summary = {
         "submitted": 0,
         "dry_run_count": 0,
@@ -300,6 +326,7 @@ def run_auto_apply(config: dict | None = None) -> dict:
                     break
 
                 summary["total_attempted"] += 1
+                _progress_step(summary["total_attempted"], f"{job.title} @ {job.company}")
                 ats_key = _ats_key_for_source(job.source)
                 applier_cls = _applier_for_source(job.source)
                 applier = applier_cls(profile=profile, dry_run=dry_run)
@@ -364,6 +391,7 @@ def run_auto_apply(config: dict | None = None) -> dict:
                 time.sleep(3)
 
         finally:
+            _progress_end()
             try:
                 context.close()
                 browser.close()
