@@ -86,15 +86,17 @@ def _salary_floor(archetype: str | None = None) -> int:
 def _load_resume_summary(archetype: str | None = None) -> str:
     """Load and format the resume for the ranking prompts.
 
-    Behavioral Technician roles score against the SFUSD/behavioral résumé
+    Behavioral Technician roles score against the behavioral résumé
     (base_resume_bt.yaml); every other archetype uses the AI/data résumé.
+
+    Resolution is shared with agents.tailor so the résumé a job is SCORED
+    against is always the one it would be TAILORED from. It also inherits the
+    unedited-template guard: scoring against a placeholder résumé silently
+    produced fit scores for a fictional candidate ("M.S. in Quantitative
+    Economics", "AWS Certified Cloud Practitioner") on every BT posting.
     """
-    fname = "base_resume_bt.yaml" if archetype == "behavioral_technician" else "base_resume.yaml"
-    base = Path(__file__).parent.parent / "config"
-    config_path = base / fname
-    if not config_path.exists():
-        config_path = base / "base_resume.yaml"
-    with open(config_path, encoding="utf-8") as f:
+    from agents.tailor import _resolve_resume_path
+    with open(_resolve_resume_path(archetype), encoding="utf-8") as f:
         resume = yaml.safe_load(f)
 
     sections = []

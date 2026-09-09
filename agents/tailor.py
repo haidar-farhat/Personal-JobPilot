@@ -20,6 +20,7 @@ from docx.oxml.ns import qn
 
 from db.database import get_session, record_status_change
 from db.models import Job, JobScore, Application, ApplicationStatus
+from agents.grounding import enforce_and_log
 from utils.ollama_client import generate_json, generate_text
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,16 @@ logger = logging.getLogger(__name__)
 
 # ============================================================
 # One-page Jake's-style hard caps applied at render time.
-# These match the canonical resume in
-#   C:\Users\matth\Downloads\Resumes\Matthew_Cromaz_new_resume.docx
-# Acts as a safety net even if Gemma over-generates.
+# Acts as a safety net even if the model over-generates.
+#
+# The candidate's real content lives ONLY in config/base_resume.yaml. Nothing
+# in this module may name a concrete skill, employer, school or certification:
+# a worked example carrying a previous candidate's data used to sit in
+# RESUME_PROMPT_TEMPLATE below, and the model copied it into 158 of 197 shipped
+# résumés (Pandas/NumPy/scikit-learn/Statsmodels, plus a Tableau and a CFA
+# certification the candidate does not hold). Keep every example value in this
+# file structural — "<from the résumé above>", never a real noun.
+# agents/grounding.py enforces this on the output as well.
 # ============================================================
 MAX_PROJECTS = 3          # entries shown in TECHNICAL PROJECTS
 MAX_EXPERIENCE = 3        # entries shown in EXPERIENCE
@@ -75,8 +83,10 @@ Location: {location}
 - MAX 3 bullets per project or experience entry (1-2 is fine for less-relevant entries)
 - Each bullet: 18-32 words, may wrap to two lines for the most important entries
 - NO professional summary section (Jake's style omits it)
-- Education: list both schools. For Reed include the Senior Thesis line. For each school
-  add ONE coursework line listing 5 relevant courses (no full sentences).
+- Education: list every school in the résumé above, exactly as written there. Include a
+  thesis line ONLY where the résumé above supplies one. For each school add ONE coursework
+  line listing up to 5 courses, chosen from that school's coursework in the résumé above
+  (no full sentences, invent nothing).
 - Skills: use the SAME category labels that appear in the candidate's résumé above
   (3-4 grouped lines). Do NOT invent or substitute category names.
 - Certifications: list each cert with its year — they will be joined into one
@@ -98,15 +108,13 @@ Respond with this exact JSON structure:
             "degree": "degree name",
             "date": "graduation date",
             "location": "city, state",
-            "senior_thesis": "optional — one-sentence thesis description for Reed; omit for other schools",
+            "senior_thesis": "include ONLY if the résumé above gives this school a thesis; otherwise omit the key",
             "coursework": "comma-separated list of 5 relevant courses"
         }}
     ],
     "skills": {{
-        "Languages": "Python, SQL, R, JavaScript, HTML/CSS, C++",
-        "Data & ML": "Pandas, NumPy, scikit-learn, Statsmodels, ...",
-        "AI Engineering": "Claude API, OpenAI API, local LLMs (Ollama), ...",
-        "Tools & Infrastructure": "Git/GitHub, FastAPI, Playwright, ..."
+        "<category label copied from the résumé above>": "<only skills listed under that same category in the résumé above, comma-separated, most JD-relevant first>",
+        "<second category label from the résumé above>": "<only skills listed under it>"
     }},
     "project_experience": [
         {{
@@ -125,8 +133,7 @@ Respond with this exact JSON structure:
         }}
     ],
     "certifications": [
-        {{"name": "Tableau Desktop Specialist", "year": "2025"}},
-        {{"name": "CFA Institute Investment Foundations Certificate", "year": "2024"}}
+        {{"name": "<certification name EXACTLY as written in the résumé above>", "year": "<its year, or empty string>"}}
     ]
 }}"""
 
@@ -159,8 +166,8 @@ Location: {location}
 Write a 3-4 paragraph cover letter that:
 1. Opens with specific interest in {company} and the {job_title} role (NOT generic "I am writing to express interest")
 2. Maps 2-3 of the candidate's strongest qualifications to specific job requirements
-3. Mentions the skills most relevant to THIS role per the ARCHETYPE GUIDANCE (e.g. behavioral/ABA + BCAT for BT roles; Claude/OpenAI APIs, agents, prompt engineering for AI roles; Python/SQL/econometrics/Tableau for analyst roles)
-4. References the most relevant background per the ARCHETYPE GUIDANCE (behavioral experience for BT; AI-engineering projects for AI roles; MS Quantitative Economics + modeling for analyst roles)
+3. Mentions the skills most relevant to THIS role per the ARCHETYPE GUIDANCE, drawn ONLY from the candidate's qualifications listed above — never a tool, framework or credential not listed there
+4. References the most relevant background per the ARCHETYPE GUIDANCE, naming only real employers, projects, schools and credentials from the qualifications above
 5. Closes with enthusiasm and a clear call to action
 6. Keeps a professional but genuine tone — avoid corporate cliches
 7. Total length: 250-350 words
@@ -177,45 +184,91 @@ def _load_config():
 def _archetype_guidance(archetype: str | None) -> str:
     """Archetype-specific tailoring guidance injected into the resume + cover prompts.
 
-    Behavioral Technician roles must lead with the BIA experience + BCAT (not the
-    software/AI projects); AI roles lead with AI-engineering work.
+    Guidance describes WHICH KIND of material to lead with and in what order —
+    never a concrete project, employer or certification. Naming real nouns here
+    is how a previous candidate's BCAT certification, trading-bot project and
+    Reed College thesis ended up being copied into this candidate's résumés; the
+    model treats any concrete noun in the instructions as content to emit.
+    Selection of specific entries is the model's job, from base_resume.yaml only.
     """
     a = (archetype or "").lower()
     if a == "behavioral_technician":
         return (
-            "This is a Behavioral Technician / ABA role. LEAD with the Behavioral "
-            "Technician (BIA) work_experience and the BCAT certification. Put "
-            '"work_experience" BEFORE "project_experience" in section_order. Emphasize '
-            "1:1 client sessions, behavioral data collection, treatment-plan implementation, "
-            "reliability, and working with children/families. Include AT MOST one technical "
-            "project, and only if it shows reliability or data rigor — do NOT lead with "
-            "software/AI work for this role."
+            "This is a Behavioral Technician / ABA role. Put \"work_experience\" BEFORE "
+            "\"project_experience\" in section_order and lead with any direct behavioral, "
+            "care, teaching or client-facing work the résumé above contains. Emphasize 1:1 "
+            "client sessions, behavioral data collection, treatment-plan implementation, "
+            "reliability and working with children/families — but ONLY where the résumé "
+            "above actually evidences them. Surface any behavioral or care certification "
+            "the résumé lists, using its exact name. Include AT MOST one technical project, "
+            "and only if it demonstrates reliability or data rigor."
         )
     if a in ("ai_engineer", "ai_solutions_engineer", "ai_analyst"):
         return (
-            "This is an AI-focused role. LEAD with the AI Engineering skills and the "
-            "LLM/agentic projects (Algorithmic Paper Trading System, JobPilot). Emphasize "
-            "Claude/OpenAI APIs, local LLMs, MCP, agents, prompt engineering, RAG, tool-use, "
-            "and full-stack delivery (FastAPI, Next.js). Keep project_experience and skills near the top."
+            "This is an AI-focused role. Keep \"skills\" and \"project_experience\" near the "
+            "top of section_order and lead with the résumé's most substantial AI/LLM work. "
+            "Emphasize the AI capabilities the résumé above actually lists — model APIs, "
+            "local inference, agents, retrieval, prompt engineering, tool calling, evaluation "
+            "— together with the delivery stack it names. Use the JD's vocabulary for those "
+            "capabilities where it differs from the résumé's wording, but never claim a tool "
+            "or framework the résumé does not list."
         )
     if a == "ml_engineer":
         return (
-            "This is a production-ML role. Emphasize Python, ML tooling, data pipelines, and "
-            "engineering rigor from the trading system; be honest about depth of production-ML experience."
+            "This is a production-ML role. Emphasize the résumé's strongest engineering "
+            "rigor — data flow, pipelines, evaluation, deployment and the languages it "
+            "lists. Be honest about depth: describe the ML work the résumé evidences, and "
+            "do not imply production-ML scale it does not claim."
         )
     return "Use the default ordering and emphasis; tailor bullets to the JD's keywords."
 
 
-def _load_resume_yaml(archetype: str | None = None) -> str:
-    """Raw résumé YAML fed to the tailoring prompt. BT roles use the SFUSD/
-    behavioral résumé; everything else uses the AI/data résumé."""
-    fname = "base_resume_bt.yaml" if archetype == "behavioral_technician" else "base_resume.yaml"
+# Markers of an unedited config/base_resume*.example.yaml copy. A résumé built
+# from one of these is not a weaker résumé, it is a different person's: a
+# behavioral-technician posting at Centria Autism received one carrying
+# "Your University" and "City, State" because base_resume_bt.yaml had never
+# been filled in and the BT route trusted it on existence alone.
+_TEMPLATE_MARKERS = ("Jane Doe", "John Doe", "Your University",
+                     "your.email@example.com", "555-555-5555", "your-handle")
+
+
+def _is_unedited_template(text: str) -> bool:
+    return any(m.lower() in text.lower() for m in _TEMPLATE_MARKERS)
+
+
+def _resolve_resume_path(archetype: str | None = None) -> Path:
+    """Which base résumé file backs this archetype.
+
+    Existence is not enough — an unedited example copy must never be used as
+    source material, so it falls back to the primary résumé.
+    """
     base = Path(__file__).parent.parent / "config"
-    path = base / fname
-    if not path.exists():
-        path = base / "base_resume.yaml"
-    with open(path, encoding="utf-8") as f:
-        return f.read()
+    primary = base / "base_resume.yaml"
+    if archetype != "behavioral_technician":
+        return primary
+    bt = base / "base_resume_bt.yaml"
+    if not bt.exists():
+        return primary
+    try:
+        if _is_unedited_template(bt.read_text(encoding="utf-8")):
+            logger.error(
+                "[tailor] config/base_resume_bt.yaml is still the unedited example "
+                "(placeholder identity) — falling back to base_resume.yaml. Fill it "
+                "in or delete it; a résumé built from it would carry another name.")
+            return primary
+    except OSError:
+        return primary
+    return bt
+
+
+def _load_resume_yaml(archetype: str | None = None) -> str:
+    """Raw résumé YAML fed to the tailoring prompt."""
+    return _resolve_resume_path(archetype).read_text(encoding="utf-8")
+
+
+def _load_resume_data(archetype: str | None = None) -> dict:
+    """Parsed base résumé — the ground truth agents/grounding.py checks against."""
+    return yaml.safe_load(_load_resume_yaml(archetype)) or {}
 
 
 _BODY_FONT = "Garamond"          # ATS-friendly serif that reads close to Jake's LaTeX template
@@ -741,6 +794,13 @@ def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None =
 
     resume_data = generate_json(resume_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
 
+    # Provenance gate — strips any claim not evidenced by the base résumé.
+    # Runs BEFORE the optimizer so the audit scores the résumé that will
+    # actually ship, not a richer one that briefly existed in memory.
+    base_resume_data = _load_resume_data(archetype)
+    resume_data = enforce_and_log(resume_data, base_resume_data,
+                                  label=f"{job.title} @ {job.company}")
+
     # Generate cover letter (optional)
     cover_text = ""
     if cover_letter:
@@ -784,6 +844,8 @@ def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None =
                 logger.info(f"[tailor] below optimizer threshold {min_score} — regenerating with feedback")
                 retry_prompt = resume_prompt + "\n\n" + feedback_block(optimizer_report)
                 retry_data = generate_json(retry_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
+                retry_data = enforce_and_log(retry_data, base_resume_data,
+                                             label=f"retry {job.title} @ {job.company}")
                 retry_report = score_materials(
                     job, job_score, render_resume_text(retry_data), cover_text)
                 logger.info(f"[tailor] retry optimizer score: {retry_report['overall']}/100")
