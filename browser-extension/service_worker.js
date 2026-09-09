@@ -52,6 +52,22 @@ async function cacheProfile() {
 // Structured work/education/skills for wizard ATSes (Workday). Cached for offline.
 // company/title route to the tailored resume's entries when one exists, so
 // filled panels match the attached tailored .docx.
+// Remember an answer the user typed into a field autofill could not fill, so
+// the same question is filled automatically next time. The backend applies the
+// same policy gate, so a refusal here is advisory rather than the only guard.
+async function saveLearned(answer) {
+  try {
+    const r = await fetch(BACKEND + "/api/autofill/learned", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(answer || {}),
+    });
+    return await r.json();
+  } catch (e) {
+    return { saved: false, reason: String(e) };
+  }
+}
+
 async function fetchHistory(company, title) {
   try {
     const qs = new URLSearchParams({ company: company || "", job_title: title || "" });
@@ -616,6 +632,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     else if (msg.cmd === "profile") sendResponse(await cacheProfile());
     else if (msg.cmd === "autofill") sendResponse(await runAutofill(msg.resumePref));
     else if (msg.cmd === "plan") { await cacheProfile(); sendResponse(await fetchPlan(msg.fields, msg.ctx, msg.resumePref)); }
+    else if (msg.cmd === "learn") sendResponse(await saveLearned(msg.answer));
     else if (msg.cmd === "history") sendResponse(await fetchHistory(msg.company, msg.title));
     else if (msg.cmd === "resume_file") sendResponse(await fetchFileB64("resume_file", msg.company, msg.title));
     else if (msg.cmd === "cover_letter_file") sendResponse(await fetchFileB64("cover_letter_file", msg.company, msg.title));

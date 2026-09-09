@@ -41,6 +41,85 @@ _CREDENTIAL_RE = re.compile(
     r"authentication code|social security|\bssn\b")
 _CREDENTIAL_AUTOCOMPLETE = ("one time code", "new password", "current password")
 
+# ---------------------------------------------------------------------------
+# Learned answers: questions the user answered by hand, replayed next time.
+# Policy lives here (pure, testable); storage and HTTP live in server/autofill.py.
+# ---------------------------------------------------------------------------
+
+# Labels too generic to key a cross-site answer on — "Other" and "Name" appear
+# on every form and mean something different each time.
+_LEARN_STOP = {"other", "name", "date", "value", "comments", "notes", "details",
+               "please specify", "additional information", "explain",
+               "description", "title", "location", "type", "country", "state"}
+
+# Answers that belong to ONE posting and must never be replayed.
+_ONEOFF_RE = re.compile(
+    r"referral code|requisition|req(uisition)?\s*(id|number)|job\s*(id|code|number)|"
+    r"application (id|number)|confirmation number|signature|initials|captcha|"
+    r"today s date|pin")
+
+
+def learned_key(label: str | None) -> str:
+    """Cross-site key for a learned answer, or "" when the label is unusable.
+
+    Deliberately just normalize(label): the composed key used by
+    map_standard_field also folds in `name` and `automation_id`, which are
+    per-ATS and would fragment the key across sites — defeating the point.
+    """
+    k = normalize(label)
+    return "" if (len(k) < 8 or k in _LEARN_STOP) else k
+
+
+def is_learnable_field(field: dict) -> tuple[bool, str]:
+    """May this question be remembered? -> (ok, reason_when_not).
+
+    Mirrors the read-path guards so the write path refuses on its own, whatever
+    the extension sent.
+    """
+    ftype = (field.get("type") or "text").lower()
+    nauto = normalize(field.get("autocomplete") or "")
+    blob = " ".join(x for x in (normalize(field.get("label") or ""),
+                                normalize(field.get("name") or ""), nauto,
+                                normalize(field.get("automation_id") or "")) if x)
+    if ftype in ("password", "file", "hidden"):
+        return False, "field-type"
+    if nauto in _CREDENTIAL_AUTOCOMPLETE or _CREDENTIAL_RE.search(blob):
+        return False, "credential"          # password / OTP / SSN
+    if _ONEOFF_RE.search(blob):
+        return False, "one-off"
+    if not learned_key(field.get("label")):
+        return False, "weak-key"
+    return True, ""
+
+
+def _luhn(digits: str) -> bool:
+    total, alt = 0, False
+    for ch in reversed(digits):
+        d = ord(ch) - 48
+        if alt:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+        alt = not alt
+    return total % 10 == 0
+
+
+def is_learnable_value(value: str) -> tuple[bool, str]:
+    """Value-shape guard — catches secrets the LABEL never revealed."""
+    v = (value or "").strip()
+    if not (2 <= len(v) <= 4000):
+        return False, "length"
+    if re.fullmatch(r"\d{4,8}", v):
+        return False, "code-shaped"         # an OTP, not an answer
+    if re.fullmatch(r"\d{3}-?\d{2}-?\d{4}", v):
+        return False, "ssn-shaped"
+    digits = re.sub(r"\D", "", v)
+    if 13 <= len(digits) <= 19 and _luhn(digits):
+        return False, "card-shaped"
+    return True, ""
+
+
 # Deterministic "leave this empty" — a repeat block beyond our history must
 # stay blank, never inherit entry 0's values or reach the LLM path.
 _SKIP = {"value": None, "source": "deterministic", "confidence": 1.0, "needs_review": False}
@@ -622,10 +701,12 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
     return None
 
 
-def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_essays: int = 4) -> dict:
+def build_plan(fields, profile, archetype, resume_summary, essay_fn=None,
+               max_essays: int = 4, learned: dict | None = None) -> dict:
     """Assemble the fill-plan: deterministic mapping first, essay_fn for the rest.
 
     essay_fn(field, context) -> str | None, where context = {archetype, resume}.
+    learned: {learned_key(label): value} the user answered by hand before.
     """
     out = []
     llm_used = 0
@@ -646,6 +727,25 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None, max_es
 
         ftype = (f.get("type") or "text").lower()
         label = (f.get("label") or "").strip()
+
+        # An answer the user gave by hand beats an LLM guess, but never
+        # overrides a deterministic profile rule — hence its position AFTER
+        # map_standard_field and BEFORE the essay path.
+        lk = learned_key(label) if learned else ""
+        if lk and lk in learned:
+            ok, _ = is_learnable_field(f)
+            val = learned[lk]
+            opts = f.get("options") or []
+            if ok and val and opts:
+                # This site's option wording differs from where it was learned
+                # ("Yes, I am authorized" vs "Authorized to work"), so bind the
+                # remembered answer to a real option here or drop it.
+                val = _match_choice(val, opts)
+            if ok and val:
+                out.append({"id": f["id"], "value": val, "source": "learned",
+                            "confidence": 0.9, "needs_review": False})
+                continue
+
         # Open-ended: textareas, question-marked labels, selects — and plain
         # text inputs whose label reads like a question ("Describe your biggest
         # accomplishment", "Why do you want to work here") rather than a field name.

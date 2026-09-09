@@ -249,3 +249,50 @@ class ScanLog(Base):
 
     def __repr__(self):
         return f"<ScanLog(source='{self.source}', jobs_found={self.jobs_found}, jobs_new={self.jobs_new})>"
+
+
+class LearnedAnswer(Base):
+    """A question the user answered by hand, replayed on later applications.
+
+    Written only by POST /api/autofill/learned (the extension captures what the
+    human types into a field autofill could not fill); read by /plan. Never
+    holds credentials or per-posting values — agents.autofill_mapper's
+    is_learnable_field()/is_learnable_value() are the gate, applied on the WRITE
+    path so a bad value never reaches disk.
+
+    No migration file: db.database.init_db() calls Base.metadata.create_all,
+    which creates brand-new tables (migrations here exist only for ALTERs).
+    """
+
+    __tablename__ = "learned_answers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(500), nullable=False)     # normalized question label
+    label = Column(String(500), nullable=False)   # verbatim, for the dashboard
+
+    value = Column(Text, nullable=False)          # what to answer next time
+    field_type = Column(String(30), nullable=True)      # text|select|radio|...
+    options_seen = Column(JSON, nullable=True)          # origin site's options
+    section = Column(String(300), nullable=True)
+
+    # A learned answer starts trusted but revocable: 'active' is replayed,
+    # 'paused' is kept but ignored, so a wrong answer can be switched off
+    # without losing the record of what was answered where.
+    status = Column(String(20), nullable=False, default="active")
+    times_used = Column(Integer, default=0, nullable=False)
+    corrections = Column(Integer, default=0, nullable=False)
+
+    origin_host = Column(String(300), nullable=True)
+    origin_company = Column(String(300), nullable=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_learned_key"),
+        Index("idx_learned_key", "key"),
+    )
+
+    def __repr__(self):
+        return f"<LearnedAnswer(key='{self.key}', value='{(self.value or '')[:24]}')>"

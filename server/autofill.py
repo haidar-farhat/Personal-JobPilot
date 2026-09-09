@@ -12,12 +12,12 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import yaml
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -595,6 +595,123 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
         return fb
 
 
+class LearnRequest(BaseModel):
+    label: str
+    value: str
+    type: str | None = "text"
+    name: str | None = ""
+    section: str | None = ""
+    options: list[str] | None = None
+    automation_id: str | None = ""
+    autocomplete: str | None = ""
+    host: str | None = ""
+    company: str | None = ""
+
+
+def load_learned() -> dict:
+    """{key: value} for every active learned answer."""
+    from db.database import get_session
+    from db.models import LearnedAnswer
+    session = get_session()
+    try:
+        rows = session.query(LearnedAnswer).filter(LearnedAnswer.status == "active").all()
+        return {r.key: r.value for r in rows if r.key and r.value}
+    except Exception as e:
+        logger.warning(f"[autofill] learned answers unavailable: {e}")
+        return {}
+    finally:
+        session.close()
+
+
+@router.post("/learned")
+def save_learned(req: LearnRequest):
+    """Remember an answer the user typed into a field autofill could not fill.
+
+    The policy gate runs HERE as well as in the extension, so a bad value never
+    reaches disk even if the page sent something unexpected.
+    """
+    from agents.autofill_mapper import (is_learnable_field, is_learnable_value,
+                                        learned_key)
+    from db.database import get_session
+    from db.models import LearnedAnswer
+
+    field = {"label": req.label, "name": req.name, "type": req.type,
+             "section": req.section, "automation_id": req.automation_id,
+             "autocomplete": req.autocomplete}
+    ok, why = is_learnable_field(field)
+    if not ok:
+        return {"saved": False, "reason": why}
+    ok, why = is_learnable_value(req.value)
+    if not ok:
+        return {"saved": False, "reason": why}
+
+    key = learned_key(req.label)
+    session = get_session()
+    try:
+        row = session.query(LearnedAnswer).filter(LearnedAnswer.key == key).first()
+        if row:
+            changed = (row.value or "").strip() != req.value.strip()
+            row.value = req.value
+            row.label = req.label
+            row.updated_at = datetime.now(timezone.utc)
+            if changed:
+                # The user overrode what we replayed — count it, so a
+                # repeatedly-corrected answer is visible rather than silently
+                # re-applied on every future application.
+                row.corrections = (row.corrections or 0) + 1
+        else:
+            row = LearnedAnswer(
+                key=key, label=req.label, value=req.value, field_type=req.type,
+                options_seen=req.options or None, section=req.section or None,
+                origin_host=req.host or None, origin_company=req.company or None)
+            session.add(row)
+        session.commit()
+        logger.info(f"[autofill] learned: {key!r} -> {req.value[:40]!r}")
+        return {"saved": True, "key": key}
+    except Exception as e:
+        session.rollback()
+        logger.warning(f"[autofill] could not save learned answer: {e}")
+        return {"saved": False, "reason": str(e)}
+    finally:
+        session.close()
+
+
+@router.get("/learned")
+def list_learned():
+    """Everything remembered, newest first — so a wrong answer can be found."""
+    from db.database import get_session
+    from db.models import LearnedAnswer
+    session = get_session()
+    try:
+        rows = (session.query(LearnedAnswer)
+                .order_by(LearnedAnswer.updated_at.desc()).limit(500).all())
+        return {"answers": [{
+            "id": r.id, "label": r.label, "value": r.value, "status": r.status,
+            "type": r.field_type, "times_used": r.times_used,
+            "corrections": r.corrections, "company": r.origin_company,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        } for r in rows]}
+    finally:
+        session.close()
+
+
+@router.delete("/learned/{answer_id}")
+def forget_learned(answer_id: int):
+    """Forget one answer outright."""
+    from db.database import get_session
+    from db.models import LearnedAnswer
+    session = get_session()
+    try:
+        row = session.query(LearnedAnswer).get(answer_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        session.delete(row)
+        session.commit()
+        return {"forgotten": True}
+    finally:
+        session.close()
+
+
 @router.post("/plan")
 def plan(req: AutofillRequest):
     profile = dict(load_profile())
@@ -615,7 +732,8 @@ def plan(req: AutofillRequest):
                              req.company or "", req.page_text or "")
 
     fields = [f.model_dump() for f in req.fields]
-    result = build_plan(fields, profile, archetype, resume_summary, essay_fn=essay_fn)
+    result = build_plan(fields, profile, archetype, resume_summary,
+                        essay_fn=essay_fn, learned=load_learned())
     return {
         "archetype": archetype or "ai_default",
         "archetype_label": archetype_label,

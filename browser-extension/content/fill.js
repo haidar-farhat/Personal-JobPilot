@@ -468,6 +468,58 @@
     t._h = setTimeout(() => t.remove(), 7000);
   }
 
+  // ---- Learning: remember answers the user gives to questions we could not
+  // fill, so the same question fills itself next time. Listeners are attached
+  // once per element (data-jpaf-learn) because fill.js re-runs on SPA steps.
+  const LEARN_MARK = "data-jpaf-learn";
+
+  function learnValueOf(el) {
+    const tag = el.tagName.toLowerCase();
+    const type = (el.type || "").toLowerCase();
+    if (type === "password" || type === "file") return "";
+    if (type === "radio" || type === "checkbox") {
+      const group = el.name
+        ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const on = group.find((r) => r.checked);
+      if (!on) return "";
+      const lab = on.closest("label") ||
+        (on.id && document.querySelector(`label[for="${CSS.escape(on.id)}"]`));
+      return ((lab && lab.innerText) || on.value || "").replace(/\s+/g, " ").trim();
+    }
+    if (tag === "select") {
+      const o = el.selectedOptions && el.selectedOptions[0];
+      const t = ((o ? o.text : el.value) || "").trim();
+      return PLACEHOLDER.test(norm(t)) ? "" : t;
+    }
+    if (tag === "input" || tag === "textarea") return (el.value || "").trim();
+    return (el.innerText || "").trim();          // aria widgets
+  }
+
+  function watchForLearning(el, meta) {
+    if (!el || el.getAttribute(LEARN_MARK)) return;
+    el.setAttribute(LEARN_MARK, "1");
+    const commit = () => {
+      const value = learnValueOf(el);
+      if (!value || value.length > 4000) return;
+      try {
+        chrome.runtime.sendMessage({
+          cmd: "learn",
+          answer: {
+            label: meta.label || "", name: meta.name || "",
+            type: meta.type || (el.tagName || "").toLowerCase(),
+            section: meta.section || "", options: meta.options || null,
+            automation_id: meta.automation_id || "",
+            autocomplete: el.getAttribute("autocomplete") || "",
+            host: location.hostname, company: (window.__jpafCompany || ""),
+          },
+        });
+      } catch (e) { /* extension reloaded — nothing to do */ }
+    };
+    // change covers select/radio/checkbox; blur covers free text after typing.
+    el.addEventListener("change", commit);
+    el.addEventListener("blur", commit);
+  }
+
   window.__jpafApply = async function (plan) {
     let filled = 0, review = 0, fileFlags = 0, resumeAttached = 0, coverAttached = 0, kept = 0;
     const metaById = new Map((plan._scanMeta || []).map((m) => [m.id, m]));
@@ -510,6 +562,9 @@
       }
       if (f.value == null || f.value === "") {
         if (f.needs_review) { mark(el, false); review++; noteReview(f, el); }
+        // Nothing to fill here — so whatever the human types next IS the
+        // answer to this question. Watch it and remember it for next time.
+        watchForLearning(el, metaById.get(f.id) || {});
         return false;
       }
       // their answer wins — never overwrite one that is already there

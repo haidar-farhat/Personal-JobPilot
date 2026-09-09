@@ -217,21 +217,71 @@ def recent_messages(since: datetime, limit: int = 25, conn=None, prefilter=None)
 
 _CODE_CTX = re.compile(r"code|verif|passcode|\bpin\b|one[- ]?time|\botp\b|security|confirm|token|authenticat", re.I)
 _CODE_NUM = re.compile(r"(?<![\d\-.,/$#])(\d{4,8})(?![\d\-.,/%])")
+# Greenhouse (and others) send MIXED-CASE ALPHANUMERIC codes — a real one from
+# this mailbox is "9rryi5IW". A digits-only matcher can never find those, so the
+# feature silently found nothing on the most common ATS in the feed.
+# Requires at least one digit and one letter, which is what separates a code
+# from an ordinary word in the same sentence.
+_CODE_ALNUM = re.compile(r"(?<![A-Za-z0-9\-._/])((?=[A-Za-z0-9]{5,10}(?![A-Za-z0-9]))"
+                         r"(?=[^\s]*\d)(?=[^\s]*[A-Za-z])[A-Za-z0-9]{5,10})(?![A-Za-z0-9\-._@])")
 _LINK_OK = re.compile(r"verif|confirm|activate|validate|token=|otp|passcode", re.I)
 _LINK_BAD = re.compile(r"unsubscribe|privacy|terms|preferences|support|help|policy", re.I)
 
 
 def extract_code(subject: str, text: str) -> str | None:
-    """A 4–8 digit number that sits near a code/verify word; the subject wins."""
-    for src in (subject or "", text or ""):
-        for mt in _CODE_NUM.finditer(src):
-            n = mt.group(1)
-            if len(n) == 4 and 1900 <= int(n) <= 2100:   # a year, not a code
-                continue
-            ctx = src[max(0, mt.start() - 90): mt.end() + 90]
-            if _CODE_CTX.search(ctx):
-                return n
+    """A verification code sitting near a code/verify word; the subject wins.
+
+    Handles both shapes ATSes actually send: a 4-8 digit PIN, and a mixed
+    alphanumeric token like Greenhouse's "9rryi5IW". Digits are tried first —
+    they are the less ambiguous form — and every candidate must sit near a
+    code/verification word so ordinary prose is not mistaken for a code.
+    """
+    for pattern in (_CODE_NUM, _CODE_ALNUM):
+        for src in (subject or "", text or ""):
+            for mt in pattern.finditer(src):
+                n = mt.group(1)
+                if n.isdigit() and len(n) == 4 and 1900 <= int(n) <= 2100:
+                    continue                      # a year, not a code
+                if pattern is _CODE_ALNUM and _looks_like_word(n):
+                    continue
+                ctx = src[max(0, mt.start() - 90): mt.end() + 90]
+                # Percent-encoding and query strings are full of code-shaped
+                # junk ("%3Apage"), and a tracking link sits next to the word
+                # "security" often enough to fool the context test.
+                if pattern is _CODE_ALNUM and _in_url(src, mt.start()):
+                    continue
+                if _CODE_CTX.search(ctx):
+                    return n
     return None
+
+
+def _in_url(src: str, pos: int) -> bool:
+    """Is this match sitting inside a URL or a percent-escape?"""
+    before = src[max(0, pos - 60): pos]
+    if "%" in before[-3:] or "=" in before[-2:] or "&" in before[-2:]:
+        return True
+    seg = before.rsplit(" ", 1)[-1] if " " in before else before
+    return "://" in seg or seg.startswith("http") or "/" in seg[-25:]
+
+
+# Tokens that pass the "letters + digits" shape test but are never codes.
+_NOT_A_CODE = re.compile(
+    r"^(?:\d{1,2}(?:st|nd|rd|th)"                       # 1st, 22nd
+    r"|[a-z]+\d{1,2}|h\d|utf8|iso\d+|win\d+|x\d+|v\d+"  # h1, utf8, v2
+    r"|\d+(?:kb|mb|gb|tb|kib|mib|px|em|pt|ms|fps|dpi|hz|bit|k|x))$",  # 100KB, 60fps
+    re.I)
+
+
+def _looks_like_word(tok: str) -> bool:
+    """True for things shaped like a code but obviously not one — '2026Greenhouse',
+    'utf8', 'h1'. A real code mixes cases or is dense with digits."""
+    if _NOT_A_CODE.match(tok):
+        return True
+    digits = sum(c.isdigit() for c in tok)
+    # A genuine code is digit-dense or case-mixed; a word with one trailing
+    # digit ("Greenhouse1") is neither.
+    mixed_case = tok != tok.lower() and tok != tok.upper()
+    return digits < 2 and not mixed_case
 
 
 def extract_link(links: list[str] | None) -> str | None:
