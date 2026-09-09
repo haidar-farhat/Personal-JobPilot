@@ -1299,6 +1299,15 @@
   .ag-status .sum{font-size:12.5px;color:var(--muted)}
   .ag-status .btn-mint{margin-left:auto}
   /* Agent run indicator: green bulb while a cycle is live, red when idle. */
+  /* Results column: clear tools + the required-field chips on failed cards. */
+  .res-tools{display:flex;gap:10px;margin:-4px 0 10px}
+  .res-tools .btn-link[disabled]{opacity:.4;cursor:default}
+  .miss-wrap{margin-top:6px}
+  .miss-h{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}
+  .chip.miss{background:#fdf1d8;color:#7a5300;border:1px solid #f0d08a;font-size:11px}
+  :root:not([data-theme="light"]) .chip.miss{background:#3a2e12;color:#f0c674;border-color:#5c4a1c}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .chip.miss{background:#fdf1d8;color:#7a5300;border-color:#f0d08a}}
+  :root[data-theme="dark"] .chip.miss{background:#3a2e12;color:#f0c674;border-color:#5c4a1c}
   .ag-bulb{width:14px;height:14px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.25)}
   .ag-bulb.off{background:#e5484d;box-shadow:0 0 6px rgba(229,72,77,.75)}
   .ag-bulb.on{background:#30d158;box-shadow:0 0 10px 2px rgba(48,209,88,.85);animation:pulse 1.6s infinite}
@@ -3821,14 +3830,22 @@ function agResultCard(a){
   return `<div class="ag-card" data-id="${a.id}"><div class="logo-box">${esc(initialOf(a))}</div>
     <div><div class="t">${esc(a.title||"")}</div><div class="s">${esc(a.company||"")} · ${esc(agoLabel(a.auto_apply_attempted_at))}</div>
       ${ok?`<div class="ag-ok" style="margin-top:4px">Applied by Agent ✓</div>`:`<div class="ag-warn" style="margin-top:4px">Needs your action${reason?": "+esc(reason):""}</div>`}
-      ${a.next_action?`<div class="s">${esc(a.next_action)}</div>`:""}</div>
-    <div class="acts">${ok&&a.has_tailored_cv?`<a class="btn-link" href="/api/file/${a.has_resume_pdf?"resume_pdf":"resume"}/${a.id}">Download Resume</a>`:""}<button class="btn-link" data-open="${a.id}">Open</button></div></div>`;
+      ${a.next_action?`<div class="s">${esc(a.next_action)}</div>`:""}
+      ${!ok&&(a.missing_fields||[]).length?`<div class="miss-wrap"><div class="miss-h">You need to answer:</div>
+        <div class="chips">${a.missing_fields.map(f=>`<span class="chip miss">${esc(f)}</span>`).join("")}</div></div>`:""}</div>
+    <div class="acts">${ok&&a.has_tailored_cv?`<a class="btn-link" href="/api/file/${a.has_resume_pdf?"resume_pdf":"resume"}/${a.id}">Download Resume</a>`:""}${!ok?`<button class="btn-mint" data-continue="${a.id}" title="Open the posting with autofill armed — it refills everything it can and leaves only what needs you">Continue application</button>`:""}<button class="btn-link" data-open="${a.id}">Open</button></div></div>`;
 }
 async function renderAgent(){
   const box=$("#agentBody"); if(!box) return;
   const st=await fetch("/api/agent/status").then(r=>r.ok?r.json():null).catch(()=>null);
   const queue=state.apps.filter(isLiked).sort((a,b)=>(b.fit_score||0)-(a.fit_score||0));
-  const results=state.apps.filter(a=>a.auto_apply_attempted_at).sort((a,b)=>(b.auto_apply_attempted_at||"").localeCompare(a.auto_apply_attempted_at||"")).slice(0,15);
+  // Dismissed cards drop out BEFORE the 15-card window, so clearing reveals
+  // older results instead of just blanking the column.
+  const allResults=state.apps.filter(a=>a.auto_apply_attempted_at&&!a.result_dismissed)
+    .sort((a,b)=>(b.auto_apply_attempted_at||"").localeCompare(a.auto_apply_attempted_at||""));
+  const results=allResults.slice(0,15);
+  const isRunOk=a=>a.auto_applied||a.status==="applied"||/^submitted/.test(a.auto_apply_status||"");
+  const nOk=allResults.filter(isRunOk).length, nBad=allResults.length-nOk;
   const running=!!(st&&st.running), needRes=queue.filter(a=>!a.has_tailored_cv);
   const ar=(st&&st.autorun)||{};
   // While the auto-run pipeline is queueing/generating, its own phase counters
@@ -3855,8 +3872,39 @@ async function renderAgent(){
     <div class="ag-cols">
       <div class="ag-col"><h4>Queue (${queue.length})</h4>${queue.map(agQueueCard).join("")||`<div class="empty">Press <b>+ Add to Agent</b> (or ♥) on a job card to queue it.</div>`}</div>
       <div class="ag-col"><h4>Prepare materials (${needRes.length})</h4>${needRes.map(agPrepCard).join("")||`<div class="empty">Every queued job has a tailored résumé ✓</div>`}</div>
-      <div class="ag-col"><h4>Results</h4>${results.map(agResultCard).join("")||`<div class="empty">No agent runs yet.</div>`}</div></div>`;
+      <div class="ag-col"><h4>Results${allResults.length>results.length?` <span class="muted" style="font-weight:400">(${results.length} of ${allResults.length})</span>`:""}</h4>
+        <div class="res-tools"><button class="btn-link" id="clrOk" ${nOk?"":"disabled"} title="Hide the successful ones — the record and the Applied tab are kept">Clear applied${nOk?` (${nOk})`:""}</button>
+          <button class="btn-link" id="clrBad" ${nBad?"":"disabled"} title="Hide the failed ones — nothing is deleted or re-queued">Clear failed${nBad?` (${nBad})`:""}</button></div>
+        ${results.map(agResultCard).join("")||`<div class="empty">No agent runs yet.</div>`}</div></div>`;
   box.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openDetail(+b.dataset.open));
+  // Continue: arm autofill for this job, then open the posting. The extension
+  // only ever fills blanks (fill.js alreadyAnswered), so this resumes rather
+  // than overwrites — the human supplies just the flagged fields.
+  box.querySelectorAll("[data-continue]").forEach(b=>b.onclick=async()=>{
+    const id=+b.dataset.continue, a=state.apps.find(x=>x.id===id)||{}, miss=(a.missing_fields||[]).length;
+    b.disabled=true; b.textContent="Opening…";
+    try{
+      await fetch("/api/autofill/arm",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({app_id:id})});
+      fetch(`/api/application/${id}/open-link`,{method:"POST"});
+      toast(miss?`Opening — autofill will refill the form; ${miss} field${miss===1?"":"s"} need${miss===1?"s":""} your answer.`
+                :"Opening the posting — autofill is armed. Review, then submit it yourself.");
+    }catch(e){ toast("Couldn't arm autofill — is the extension installed?", true); }
+    b.disabled=false; b.textContent="Continue application"; });
+  const dismiss=async(btn,scope,label)=>{
+    const n=scope==="applied"?nOk:nBad;
+    if(!n) return;
+    if(!confirm(`Hide ${n} ${label} result${n===1?"":"s"} from this column?\n\nNothing is deleted — the applications, their logs and the Applied tab are untouched.`)) return;
+    btn.disabled=true; btn.textContent="Clearing…";
+    try{
+      const d=await fetch("/api/agent/results/dismiss",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({scope})}).then(r=>r.json());
+      // patch local state so the column updates without a full reload
+      state.apps.forEach(a=>{ if(a.auto_apply_attempted_at&&!a.result_dismissed
+        &&(scope==="all"||isRunOk(a)===(scope==="applied"))) a.result_dismissed=true; });
+      toast(`Cleared ${d.dismissed??n} result${(d.dismissed??n)===1?"":"s"} ✓`);
+    }catch(e){ toast("Couldn't clear those results", true); }
+    renderAgent(); };
+  const cOk=$("#clrOk"); if(cOk) cOk.onclick=()=>dismiss(cOk,"applied","applied");
+  const cBad=$("#clrBad"); if(cBad) cBad.onclick=()=>dismiss(cBad,"failed","failed");
   box.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>changeStatus(+b.dataset.remove,"scored"));
   box.querySelectorAll("[data-gen]").forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent="Generating…";
     const d=await runTailor(+b.dataset.gen, coverWanted()); if(!d||!d.ok){ toast(`Tailoring failed: ${(d&&d.error)||"?"}`, true); b.disabled=false; b.textContent="Retry"; } else renderAgent(); });

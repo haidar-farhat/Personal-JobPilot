@@ -22,6 +22,7 @@ Statuses this engine adds (both permanent in the runner):
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -213,6 +214,10 @@ class MapperApplier(BaseAutoApplier):
         fields = self._scan(page)
         empty = page.evaluate(_EMPTY_REQUIRED_JS, fields)
         if empty:
+            # Keep the full, untruncated list too: the dashboard shows these
+            # labels so the human knows exactly what to finish. `message` stays
+            # capped because it is the one-line card text.
+            result.add_step("required_unfilled", json.dumps([str(e) for e in empty]))
             return self._fail(result, "failed_required_fields_unfilled",
                               "Required fields left empty: " + "; ".join(str(e)[:60] for e in empty[:8]))
 
@@ -235,7 +240,7 @@ class MapperApplier(BaseAutoApplier):
         humanize_delay(800, 1500)
         if not self._click_first(page, SUBMIT_CONTROLS, result, "submit"):
             return self._fail(result, "failed_no_submit_button", "No visible submit button on the form")
-        status, msg = self._verify_submit(page, form_url, before, fields)
+        status, msg = self._verify_submit(page, form_url, before, fields, result)
         result.status = status
         result.success = status == "submitted"
         result.message = f"{msg} ({summary})"
@@ -387,7 +392,8 @@ class MapperApplier(BaseAutoApplier):
 
     # ----- submit verification ------------------------------------------------------
 
-    def _verify_submit(self, page, form_url: str, before_text: str, fields: list[dict]) -> tuple[str, str]:
+    def _verify_submit(self, page, form_url: str, before_text: str, fields: list[dict],
+                       result: ApplyResult | None = None) -> tuple[str, str]:
         labels = {f["id"]: f.get("label") or f.get("name") or f["id"] for f in fields}
         signals = [s for s in CONFIRMATION_SIGNALS if s not in before_text]  # ignore JD boilerplate
         deadline = time.time() + 20
@@ -411,7 +417,10 @@ class MapperApplier(BaseAutoApplier):
                 continue
             gone_since = None
             if state.get("invalid"):
-                bad = [str(labels.get(i, i))[:60] for i in state["invalid"]]
+                full = [str(labels.get(i, i)) for i in state["invalid"]]
+                if result is not None:
+                    result.add_step("required_unfilled", json.dumps(full))
+                bad = [s[:60] for s in full]
                 return "failed_required_fields_unfilled", "Form rejected submit — invalid: " + "; ".join(bad[:8])
         return ("submitted_unverified",
                 f"Submit clicked but no confirmation within 20s at {page.url} — "

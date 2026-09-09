@@ -162,6 +162,59 @@ STATUS_META = {
 }
 
 
+_MISSING_PREFIXES = ("Required fields left empty: ", "Form rejected submit — invalid: ")
+
+
+def _parse_apply_log(app_obj) -> dict:
+    """The auto_apply_log JSON, or {} when absent/unreadable."""
+    raw = getattr(app_obj, "auto_apply_log", None)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (ValueError, TypeError):
+        return {}
+
+
+def _missing_fields(app_obj) -> list[str]:
+    """Required-field labels that blocked this application.
+
+    Prefers the structured `required_unfilled` step the mapper now records.
+    Falls back to re-splitting the human-readable message, so rows written
+    before that step existed still show their fields (truncated as they were
+    stored — 8 labels, 60 chars each).
+    """
+    log = _parse_apply_log(app_obj)
+    if not log:
+        return []
+    for step in log.get("steps") or []:
+        if step.get("action") == "required_unfilled":
+            try:
+                return [str(x) for x in json.loads(step.get("detail") or "[]")]
+            except (ValueError, TypeError):
+                break
+    message = log.get("message") or ""
+    for prefix in _MISSING_PREFIXES:
+        if message.startswith(prefix):
+            return [p.strip() for p in message[len(prefix):].split(";") if p.strip()]
+    return []
+
+
+def _result_dismissed(app_obj) -> bool:
+    return bool(_parse_apply_log(app_obj).get("dismissed_at"))
+
+
+def _is_apply_success(app_obj) -> bool:
+    """Mirror of the Results card's own success test (index.html agResultCard):
+    auto_applied || status applied || auto_apply_status starts with "submitted".
+    Note that makes submitted_unverified a success on both sides — keep them
+    in step or "Clear applied" would clear the wrong cards."""
+    status_key = app_obj.status.value if hasattr(app_obj.status, "value") else str(app_obj.status)
+    return bool(getattr(app_obj, "auto_applied", False)
+                or status_key == "applied"
+                or (getattr(app_obj, "auto_apply_status", None) or "").startswith("submitted"))
+
+
 def _serialize_application(app_obj, job, score):
     """Serialize an application record for the API."""
     # Calculate "days since applied" for follow-up reminders
@@ -242,6 +295,10 @@ def _serialize_application(app_obj, job, score):
         # still waiting — a human has to submit it.
         "needs_manual_apply": getattr(app_obj, "auto_apply_status", None) in AUTO_APPLY_PERMANENT_FAILURES
             and status_key == "materials_ready",
+        # Required fields the bot refused to guess — shown as chips so you know
+        # what to finish, and hidden-once-handled bookkeeping for the Results column.
+        "missing_fields": _missing_fields(app_obj),
+        "result_dismissed": _result_dismissed(app_obj),
     }
 
 
@@ -604,6 +661,41 @@ async def api_email_application(app_id: int, request: Request):
         if not res.get("sent"):
             return JSONResponse(res, status_code=400)
         return res
+    finally:
+        session.close()
+
+
+@app.post("/api/agent/results/dismiss")
+async def api_dismiss_results(request: Request):
+    """Hide handled cards from the Agent screen's Results column.
+
+    Writes `dismissed_at` into auto_apply_log's JSON — the row's status,
+    auto_applied flag, timestamp and log steps are untouched, so the Applied
+    tab and the audit trail are unaffected and nothing is re-queued.
+    """
+    body = await request.json() if await request.body() else {}
+    scope = (body.get("scope") or "all").lower()
+    if scope not in ("applied", "failed", "all"):
+        raise HTTPException(status_code=400, detail="scope must be applied|failed|all")
+
+    now = datetime.now(timezone.utc).isoformat()
+    session = get_session()
+    try:
+        rows = (session.query(Application)
+                .filter(Application.auto_apply_attempted_at.isnot(None))
+                .all())
+        dismissed = 0
+        for app_obj in rows:
+            log = _parse_apply_log(app_obj)
+            if not log or log.get("dismissed_at"):
+                continue
+            if scope != "all" and _is_apply_success(app_obj) != (scope == "applied"):
+                continue
+            log["dismissed_at"] = now
+            app_obj.auto_apply_log = json.dumps(log)
+            dismissed += 1
+        session.commit()
+        return {"success": True, "dismissed": dismissed, "scope": scope}
     finally:
         session.close()
 

@@ -478,7 +478,9 @@
       const meta = metaById.get(f.id) || {};
       const label = (meta.label ||
         (el && (el.getAttribute("aria-label") || el.name || el.id)) || f.id).toString().slice(0, 70);
-      reviewFields.push({ id: f.id, label });
+      // `required` rides along from the scan meta so the panel can put the
+      // fields that actually block submission above the merely-unsure ones.
+      reviewFields.push({ id: f.id, label, required: !!meta.required });
     };
     // One field; true when a value verifiably landed.
     async function fillOne(f, el) {
@@ -593,9 +595,14 @@
       (review ? ` · ${review} need review` : "") +
       " — review & click Apply"
     );
+    // Required-and-still-blank first: on a resumed application those are the
+    // only fields standing between the form and Submit.
+    const orderedReview = reviewFields.slice()
+      .sort((a, b) => (b.required ? 1 : 0) - (a.required ? 1 : 0));
     return { filled, needs_review: review, file_flags: fileFlags, kept,
              resume_attached: resumeAttached, cover_attached: coverAttached,
-             review_fields: reviewFields.slice(0, 15),
+             review_fields: orderedReview.slice(0, 15),
+             required_pending: orderedReview.filter((f) => f.required).length,
              review_required: review > 0 || fileFlags > 0 };
   };
 

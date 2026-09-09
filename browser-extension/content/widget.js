@@ -477,9 +477,12 @@
     if (!items.length) { box.hidden = true; box.innerHTML = ""; return; }
     box.hidden = false;
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    box.innerHTML = `<div class="rttl">Needs your review (${items.length})</div>` +
+    const req = items.filter((r) => r.required).length;
+    box.innerHTML = `<div class="rttl">Needs your review (${items.length})` +
+      (req ? ` — <b>${req} required</b>` : "") + `</div>` +
       items.slice(0, 10).map((r) =>
-        `<div class="rrow"><span class="rlab" title="${esc(r.label)}">${esc(r.label)}</span>` +
+        `<div class="rrow"><span class="rlab" title="${esc(r.label)}">${esc(r.label)}` +
+        (r.required ? ` <b style="color:#c08a00">· required</b>` : "") + `</span>` +
         `<button class="rl" data-rid="${esc(r.id)}">Jump to</button></div>`).join("");
     box.querySelectorAll(".rl").forEach((b) => {
       b.onclick = () => {
