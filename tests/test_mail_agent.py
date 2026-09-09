@@ -954,3 +954,324 @@ def test_recheck_refuses_while_a_prepare_run_is_active(db, tailor):
     assert r.status_code == 409, r.text
     tailor.gate.set()
     wait_idle()
+
+
+# --------------------------------------------------------------------------
+# unblock
+# --------------------------------------------------------------------------
+
+def blocked_row(db, *, reason="no_recipient", recipient=None, recipient_source=None,
+                error=None, status="blocked", attempts=1, materials=(None, None),
+                description=POST_NO_ADDRESS, **seed_kw) -> MailQueueItem:
+    """A row in the state a prepare run would have left it in.
+
+    Built directly instead of by running prepare, so `tailor.calls == 0` in an
+    unblock test means "un-blocking generated nothing" rather than "one more
+    call than the setup already made".
+    """
+    resume, cover = materials
+    aid = seed(db, description=description, resume=resume, cover=cover, **seed_kw)
+    app_obj = db.query(Application).filter(Application.id == aid).one()
+    item = MailQueueItem(application_id=aid, job_id=app_obj.job_id, status=status,
+                         added_from="manual", block_reason=reason, error=error,
+                         attempts=attempts, recipient=recipient,
+                         recipient_source=recipient_source,
+                         resume_path=resume, cover_letter_path=cover)
+    db.add(item)
+    db.commit()
+    return item
+
+
+def unblock(item_id: int, **body):
+    return client.post(f"{BASE}/queue/{item_id}/unblock", json=body or {})
+
+
+def card_for(item_id: int) -> dict:
+    cards = {c["id"]: c for c in client.get(f"{BASE}/queue").json()["items"]}
+    return cards[item_id]
+
+
+def test_unblocking_a_no_recipient_row_keeps_the_materials(db, cfg, tailor):
+    """The whole point: the escape hatch that is not "delete and re-queue".
+
+    The row is produced by a REAL prepare run, so resume_path is the ~3.5-minute
+    artefact this endpoint exists to preserve — deleting the row is what throws
+    it away today.
+    """
+    cfg["materials_first"] = True
+    aid = seed(db, description=POST_NO_ADDRESS)
+    queue([aid])
+    prepare_and_wait()
+    item = only_item(db)
+    assert item.block_reason == "no_recipient"
+    resume_before, cover_before = item.resume_path, item.cover_letter_path
+    assert resume_before and Path(resume_before).is_file()
+
+    body = unblock(item.id).json()
+
+    assert body["ok"] is True and body["status"] == "queued"
+    assert "block_reason" in body["cleared"]
+    db.refresh(item)
+    assert item.status == "queued"
+    assert item.block_reason is None and item.error is None
+    assert item.resume_path == resume_before, "threw away the tailored CV"
+    assert item.cover_letter_path == cover_before
+    assert client.get(f"{BASE}/queue").json()["counts_by_status"]["queued"] == 1
+
+
+def test_a_hand_supplied_address_reaches_ready_without_tailoring(db, tailor,
+                                                                 materials):
+    """The user already knows the address; re-running prepare would spend ~3.5
+    minutes of LLM time to regenerate documents that are on disk."""
+    item = blocked_row(db, reason="no_recipient", materials=materials)
+
+    body = unblock(item.id, recipient="talent@acme.com").json()
+
+    assert tailor.calls == [], "tailored for an address the user supplied"
+    assert body["status"] == "ready"
+    assert body["recipient"] == "talent@acme.com"
+    assert body["recipient_source"] == "manual"
+    db.refresh(item)
+    assert item.status == "ready" and item.block_reason is None
+    assert item.resume_path == materials[0]
+    # Genuinely sendable, not merely labelled ready: the stored hash is the one
+    # /send recomputes from the bytes it is about to transmit.
+    job = db.query(Job).one()
+    assert item.preview_hash == om._preview_hash(
+        om.outreach_dedup_key(job.company, job.title, str(job.source_id)),
+        "talent@acme.com", item.subject or "", item.body or "")
+
+
+def test_a_hand_supplied_address_without_materials_only_returns_to_queued(db, tailor):
+    """No .docx on disk means there is no preview to build — and still no reason
+    to tailor inside a request. The address waits for the next prepare run."""
+    item = blocked_row(db, reason="no_recipient")
+
+    body = unblock(item.id, recipient="talent@acme.com").json()
+
+    assert tailor.calls == []
+    assert body["status"] == "queued"
+    db.refresh(item)
+    assert item.recipient == "talent@acme.com"
+    assert item.recipient_source == "manual"
+    assert item.preview_hash is None
+
+
+def test_a_suppressed_row_cannot_be_unblocked(db, tailor):
+    """A person asked not to be contacted. That is not a user preference."""
+    item = blocked_row(db, reason="suppressed", recipient="careers@acme.com",
+                       recipient_source="post_text", description=POST_WITH_ADDRESS)
+    db.add(OutreachSuppression(value="careers@acme.com", scope="address",
+                               reason="reply: STOP", source="reply_scan"))
+    db.commit()
+
+    r = unblock(item.id)
+
+    assert r.status_code == 409, r.text
+    assert "suppressed" in r.json()["detail"]
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "suppressed"
+
+
+def test_an_unsafe_recipient_row_cannot_be_unblocked(db, tailor):
+    """accommodations@/legal@/compliance@ exist for other purposes and people
+    depend on them; an unsolicited application is not one of those purposes."""
+    item = blocked_row(db, reason="unsafe_recipient",
+                       recipient="accommodations@acme.com",
+                       recipient_source="post_text")
+
+    r = unblock(item.id)
+
+    assert r.status_code == 409, r.text
+    assert "unsafe_recipient" in r.json()["detail"]
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "unsafe_recipient"
+
+
+def test_an_already_emailed_row_cannot_be_unblocked(db, tailor):
+    """One message per company per role, ever. The ledger's UNIQUE dedup_key
+    would refuse the send anyway, so allowing it would only buy a confusing
+    failure several minutes later."""
+    item = blocked_row(db, reason="already_emailed", description=POST_WITH_ADDRESS)
+    job = db.query(Job).one()
+    db.add(OutreachSend(
+        dedup_key=om.outreach_dedup_key(job.company, job.title, str(job.source_id)),
+        company=job.company, company_normalized="acme robotics", job_title=job.title,
+        recipient="careers@acme.com", recipient_source="post_text", status="sent"))
+    db.commit()
+
+    r = unblock(item.id)
+
+    assert r.status_code == 409, r.text
+    assert "already_emailed" in r.json()["detail"]
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "already_emailed"
+
+
+def test_a_sent_row_cannot_be_unblocked(db, tailor):
+    """Its dedup key is spent; returning it to the queue sets up a second email
+    about one role — the same harm `already_emailed` exists to prevent."""
+    item = blocked_row(db, reason="bounced", status="sent",
+                       recipient="careers@acme.com", description=POST_WITH_ADDRESS)
+
+    r = unblock(item.id)
+
+    assert r.status_code == 409, r.text
+    db.refresh(item)
+    assert item.status == "sent"
+
+
+def test_a_hand_supplied_accommodations_address_is_refused(db, tailor, materials):
+    """A manual override is not a licence to mail an accommodations inbox."""
+    item = blocked_row(db, reason="no_recipient", materials=materials)
+
+    r = unblock(item.id, recipient="accommodations@acme.com")
+
+    assert r.status_code == 400, r.text
+    assert "unsafe_recipient" in r.json()["detail"]
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "no_recipient"
+    assert item.recipient is None
+
+
+def test_a_hand_supplied_suppressed_address_is_refused(db, tailor, materials):
+    """Typing the address by hand is not a way around a STOP request."""
+    db.add(OutreachSuppression(value="talent@acme.com", scope="address",
+                               reason="reply: STOP", source="reply_scan"))
+    db.commit()
+    item = blocked_row(db, reason="no_recipient", materials=materials)
+
+    r = unblock(item.id, recipient="talent@acme.com")
+
+    assert r.status_code == 400, r.text
+    assert "suppressed" in r.json()["detail"]
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "no_recipient"
+    assert item.recipient is None
+
+
+def test_a_hand_supplied_dead_address_is_refused(db, tailor, env, materials):
+    """It already bounced once; a second copy would bounce identically."""
+    env.dead.add("talent@acme.com")
+    item = blocked_row(db, reason="no_recipient", materials=materials)
+
+    r = unblock(item.id, recipient="talent@acme.com")
+
+    assert r.status_code == 400, r.text
+    assert "dead_address" in r.json()["detail"]
+    db.refresh(item)
+    assert item.block_reason == "no_recipient"
+
+
+def test_attempts_are_reset_only_when_a_new_address_is_supplied(db, tailor,
+                                                                materials):
+    """Otherwise `retries_exhausted` is escapable in a loop — un-block, recheck,
+    exhaust, un-block — and a company with a permanently broken mail server is
+    retried forever after all. A new address is a genuinely new situation.
+    """
+    spent = blocked_row(db, reason="retries_exhausted", suffix="1", attempts=3,
+                        recipient="careers@acme.com", materials=materials)
+    found = blocked_row(db, reason="retries_exhausted", suffix="2",
+                        company="Beta Labs", attempts=3, materials=materials)
+
+    assert unblock(spent.id).status_code == 200
+    assert unblock(found.id, recipient="talent@beta.test").status_code == 200
+
+    db.refresh(spent)
+    db.refresh(found)
+    assert spent.attempts == 3, "handed a fresh retry budget away for nothing"
+    assert spent.status == "queued"
+    assert found.attempts == 0
+    assert found.recipient == "talent@beta.test"
+
+
+def test_unblocking_a_dead_address_row_clears_the_stale_preview(db, tailor, env):
+    """The row's own address is the problem, so it and the preview naming it go.
+
+    Leaving them would have prepare re-block the row on `dead_address` on its
+    very next pass, and would leave a stored hash /send would refuse.
+    """
+    env.dead.add("careers@acme.com")
+    item = blocked_row(db, reason="dead_address", recipient="careers@acme.com",
+                       recipient_source="post_text", description=POST_WITH_ADDRESS)
+    item.subject, item.body, item.preview_hash = "Subject", "Body", "deadbeef"
+    db.commit()
+
+    body = unblock(item.id).json()
+
+    assert body["status"] == "queued" and body["recipient"] is None
+    assert "preview_hash" in body["cleared"]
+    db.refresh(item)
+    assert item.recipient is None and item.recipient_source is None
+    assert item.subject is None and item.body is None and item.preview_hash is None
+
+
+def test_unblock_on_an_unknown_row_is_404(db):
+    assert unblock(4242).status_code == 404
+
+
+def test_unblock_all_skips_the_protected_rows_and_says_so(db, tailor):
+    rows = {
+        "no_recipient": blocked_row(db, reason="no_recipient", suffix="1"),
+        "cap_reached": blocked_row(db, reason="cap_reached", suffix="2",
+                                   company="Beta Labs"),
+        "suppressed": blocked_row(db, reason="suppressed", suffix="3",
+                                  company="Gamma Ltd",
+                                  recipient="careers@gamma.test"),
+        "already_emailed": blocked_row(db, reason="already_emailed", suffix="4",
+                                       company="Delta AI"),
+        "unsafe_recipient": blocked_row(db, reason="unsafe_recipient", suffix="5",
+                                        company="Epsilon Co",
+                                        recipient="legal@epsilon.test"),
+    }
+    failed = blocked_row(db, reason="prepare_error", status="failed", suffix="6",
+                         company="Zeta Systems")
+
+    body = client.post(f"{BASE}/queue/unblock-all", json={}).json()
+
+    assert body["unblocked"] == 3, "a failed row is a circumstance, not a refusal"
+    assert body["refused"] == 3
+    assert body["refused_reasons"] == {"suppressed": 1, "already_emailed": 1,
+                                       "unsafe_recipient": 1}
+    assert body["counts_by_status"]["queued"] == 3
+    for reason in ("no_recipient", "cap_reached"):
+        db.refresh(rows[reason])
+        assert rows[reason].status == "queued"
+    for reason in ("suppressed", "already_emailed", "unsafe_recipient"):
+        db.refresh(rows[reason])
+        assert rows[reason].status == "blocked"
+        assert rows[reason].block_reason == reason
+    db.refresh(failed)
+    assert failed.status == "queued" and failed.error is None
+
+
+def test_unblock_all_can_be_limited_to_one_reason(db, tailor):
+    capped = blocked_row(db, reason="cap_reached", suffix="1")
+    other = blocked_row(db, reason="no_recipient", suffix="2", company="Beta Labs")
+
+    body = client.post(f"{BASE}/queue/unblock-all",
+                       json={"reason": "cap_reached"}).json()
+
+    assert body["unblocked"] == 1 and body["refused"] == 0
+    db.refresh(capped)
+    db.refresh(other)
+    assert capped.status == "queued"
+    assert other.status == "blocked", "swept a reason the user did not ask for"
+
+
+def test_the_card_says_whether_a_row_may_be_unblocked(db, tailor):
+    """The UI renders the button off these two fields, so they are the ANSWER —
+    a frontend re-deriving it would be a second copy of NEVER_UNBLOCKABLE."""
+    open_row = blocked_row(db, reason="no_recipient", suffix="1")
+    shut_row = blocked_row(db, reason="suppressed", suffix="2", company="Beta Labs",
+                           recipient="careers@beta.test")
+    sent_row = blocked_row(db, reason=None, status="sent", suffix="3",
+                           company="Gamma Ltd", recipient="careers@gamma.test")
+
+    assert card_for(open_row.id)["unblockable"] is True
+    assert card_for(open_row.id)["unblock_refusal"] is None
+    shut = card_for(shut_row.id)
+    assert shut["unblockable"] is False
+    assert "not to be contacted" in shut["unblock_refusal"]
+    assert card_for(sent_row.id)["unblockable"] is False
+    assert card_for(sent_row.id)["unblock_refusal"] == "already sent"

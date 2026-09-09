@@ -77,6 +77,20 @@ invalidates all of them at once and one recheck repairs all of them at once.
 `mail.outreach.max_retries` (default 2) stops a company with a permanently
 broken mail server from being retried forever.
 
+UNBLOCKING IS NARROWER THAN "NOT A HARD BLOCK"
+----------------------------------------------
+A blocked row used to be escapable only by deleting it and queueing it again,
+which threw away the ~3.5 minutes of tailoring that produced its .docx.
+/unblock returns the row to `queued` and KEEPS the materials. It refuses three
+reasons, and only three: HARD_BLOCKS below answers "can this row become
+sendable by trying again today", while NEVER_UNBLOCKABLE answers "may a human
+override this at all", and the difference is who the block protects.
+`suppressed`, `unsafe_recipient` and `already_emailed` each protect someone
+other than the user; everything else — no address yet, the daily cap, a spent
+retry budget — is a circumstance, and circumstances change. A hand-supplied
+address is a shortcut past the RESOLVER, never past is_safe_recipient, the
+suppression list or the dead list.
+
 WHAT THIS MODULE DELIBERATELY DOES NOT OWN
 ------------------------------------------
 No screening, body-building, hashing, capping or delivery logic is reimplemented
@@ -160,8 +174,9 @@ except Exception as _e:
 
 
 #: MailQueueItem.status values, in lifecycle order. `blocked` and `failed` are
-#: terminal for a run but not for the row: the user can fix the cause (lift a
-#: suppression, let the cap roll over) and re-queue.
+#: terminal for a run but not for the row: the user can fix the cause (find the
+#: address by hand, let the cap roll over) and send it back to `queued` through
+#: /unblock — except for the three reasons in NEVER_UNBLOCKABLE below.
 STATUSES = ("queued", "preparing", "ready", "sending", "sent", "blocked", "failed")
 
 #: Block reasons that mean "this row cannot become sendable by trying again
@@ -193,7 +208,10 @@ HARD_BLOCKS = frozenset({"already_emailed", "suppressed", "dead_address",
 #: retry it once the circumstance changes.
 NEVER_UNBLOCKABLE = frozenset({"suppressed", "unsafe_recipient", "already_emailed"})
 
-#: Why each of those is refused, as one line for the card and the 409 body.
+#: The WORDING for each of those, for the card and the 409 body. The decision
+#: itself is NEVER_UNBLOCKABLE above and only NEVER_UNBLOCKABLE — a second set
+#: that could disagree with the first is how a suppressed row ends up with an
+#: Unblock button that the endpoint then refuses.
 _UNBLOCK_REFUSALS = {
     "suppressed": "someone there asked not to be contacted",
     "unsafe_recipient": "the address is an accommodations/legal/no-reply inbox",
@@ -284,6 +302,7 @@ def _counts_by_status(session) -> dict[str, int]:
 def _item_dict(item: MailQueueItem, app_obj: Application | None,
                job: Job | None, score: JobScore | None) -> dict:
     body = item.body or ""
+    refusal = _unblock_refusal(item)
     return {
         "id": item.id,
         "application_id": item.application_id,
@@ -310,6 +329,12 @@ def _item_dict(item: MailQueueItem, app_obj: Application | None,
                                 and _exists(item.cover_letter_path)),
         "block_reason": item.block_reason,
         "error": item.error,
+        # The UI renders the Unblock button off these two, so `unblockable` is
+        # the ANSWER, not the inputs: a frontend re-deriving it from
+        # block_reason would be a second copy of NEVER_UNBLOCKABLE, free to
+        # drift and offer an override for a suppressed row.
+        "unblockable": refusal is None,
+        "unblock_refusal": refusal,
         "attempts": item.attempts or 0,
         "outreach_send_id": item.outreach_send_id,
         "added_at": _iso(_naive_utc(item.added_at)),
@@ -1049,6 +1074,205 @@ def recheck_bounces(payload: RecheckRequest | None = None) -> dict:
                 "last_recheck": _RECHECK["last_recheck"], "results": results,
                 "counts_by_status": _counts_by_status(session),
                 "cap": _cap(session, cfg)}
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------
+# Unblock — the user's escape hatch, and the three refusals that exist to
+# protect someone other than the user
+# --------------------------------------------------------------------------
+
+def _unblock_refusal(item: MailQueueItem) -> str | None:
+    """None when a human may un-block this row, else the short reason why not.
+
+    Two different refusals collapsed into one string, because the card has room
+    for one: the row is not blocked at all (nothing to un-block — and `sent` in
+    particular must never go back to the queue, its dedup key is spent), or its
+    block reason is in NEVER_UNBLOCKABLE.
+    """
+    status = (item.status or "queued").strip()
+    if status not in ("blocked", "failed"):
+        return _UNBLOCK_STATUS_REFUSALS.get(status, "not blocked")
+    reason = (item.block_reason or "").strip()
+    if reason not in NEVER_UNBLOCKABLE:
+        return None
+    return _UNBLOCK_REFUSALS.get(reason, "the block protects someone else")
+
+
+def _clear_block(item: MailQueueItem, *, drop_recipient: bool) -> list[str]:
+    """Return the row to `queued`. Returns the names of the fields it cleared.
+
+    resume_path and cover_letter_path are pointedly NOT touched: ~3.5 minutes of
+    LLM time per job went into them, they were tailored to the JOB and not to
+    the mailbox, and throwing them away is precisely what deleting and
+    re-queueing the row does today — the thing this endpoint exists to stop.
+
+    `attempts` is not touched here either. Resetting it unconditionally would
+    make `retries_exhausted` trivially escapable in a loop — un-block, recheck,
+    exhaust, un-block — so only a NEW address earns a fresh budget, and that is
+    the caller's decision to make.
+    """
+    cleared = ["status", "block_reason", "error"]
+    item.status = "queued"
+    item.block_reason = None
+    item.error = None
+    if drop_recipient:
+        # The stored preview names an address that just failed a screen, and its
+        # hash is what /send recomputes — leaving either behind would refuse the
+        # very send this un-block exists to enable.
+        item.recipient = None
+        item.recipient_source = None
+        item.subject = None
+        item.body = None
+        item.preview_hash = None
+        cleared += ["recipient", "recipient_source", "subject", "body",
+                    "preview_hash"]
+    return cleared
+
+
+def _ready_with_manual_address(session, item: MailQueueItem, app_obj: Application,
+                               job: Job | None, score: JobScore | None, cfg: dict,
+                               dead: set[str], address: str) -> str:
+    """Re-preview a row against a hand-supplied address. Returns the new status.
+
+    Never tailors. The user typed an address they already know, so making them
+    wait for a whole prepare run — ~3.5 minutes of LLM time to regenerate
+    documents that are already on disk — would spend the expensive thing to
+    learn nothing.
+
+    Missing materials are not an error here: the row simply stays `queued` with
+    the address stored on it, and the next prepare run generates them and
+    previews against the address it finds waiting.
+    """
+    resume = item.resume_path or app_obj.resume_path
+    cover = item.cover_letter_path or app_obj.cover_letter_path
+    if job is None or not (_exists(resume) and _exists(cover)):
+        return "queued"
+    cand = om._build_candidate(session, app_obj, job, score, use_llm=False,
+                               dead=dead, resolve_company=False)
+    cand.recipient = address
+    cand.recipient_source = "manual"
+    cand.contact = {**(cand.contact or {}), "address": address, "fallback": "manual"}
+    return _finalize(session, item, cand, job, cfg, dead, resume, cover)
+
+
+class UnblockRequest(BaseModel):
+    """`recipient` is an address the USER found; the resolver never fills it."""
+
+    recipient: str | None = None
+
+
+@router.post("/queue/{item_id}/unblock")
+def unblock_item(item_id: int, payload: UnblockRequest | None = None) -> dict:
+    """Return one blocked row to the queue, unless the block protects someone.
+
+    A refusal is 409 rather than 403 because it is the ROW's state that makes
+    the request impossible, and that state can change — a suppression can be
+    lifted in the outreach screens — so the body names which reason it was.
+
+    A hand-supplied address is a shortcut past the resolver, never past the
+    screens: it goes through `_screen_address`, the same helper the worker and
+    the bounce retry use, so a manual address can never pass a screen a resolved
+    one failed. A failure is 400 naming the screen it tripped.
+    """
+    payload = payload or UnblockRequest()
+    supplied = (payload.recipient or "").strip()
+    cfg = om._outreach_cfg()
+    session = get_session()
+    try:
+        rows = _rows(session, ids=[item_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="queue item not found")
+        item, app_obj, job, score = rows[0]
+
+        refusal = _unblock_refusal(item)
+        if refusal is not None:
+            reason = (item.block_reason or "").strip()
+            detail = (f"{reason}: {refusal}" if reason in NEVER_UNBLOCKABLE
+                      else f"queue row {item_id} is {refusal}")
+            raise HTTPException(status_code=409, detail=detail)
+
+        dead = {a.lower() for a in om.load_dead()}
+        if supplied:
+            screen = _screen_address(session, supplied, dead)
+            if screen:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{supplied} failed the {screen} screen; a manual "
+                           f"address is not a licence to mail it")
+
+        stale = bool(_screen_address(session, item.recipient, dead))
+        cleared = _clear_block(item, drop_recipient=bool(supplied) or stale)
+        if supplied:
+            item.recipient = supplied
+            item.recipient_source = "manual"
+            # A new address is a new budget: the retries already spent were
+            # spent looking for exactly this, and the user just found it.
+            item.attempts = 0
+            cleared.append("attempts")
+        session.commit()
+
+        if supplied:
+            item.status = _ready_with_manual_address(session, item, app_obj, job,
+                                                     score, cfg, dead, supplied)
+            session.commit()
+        logger.info(f"[mail_agent] unblocked queue row {item_id} -> {item.status} "
+                    f"(recipient={item.recipient or 'none'})")
+        return {"ok": True, "id": item.id, "status": item.status,
+                "recipient": item.recipient,
+                "recipient_source": item.recipient_source,
+                "cleared": cleared,
+                "counts_by_status": _counts_by_status(session)}
+    finally:
+        session.close()
+
+
+class UnblockAllRequest(BaseModel):
+    """`reason` limits the sweep to one block reason, e.g. only `cap_reached`."""
+
+    reason: str | None = None
+
+
+@router.post("/queue/unblock-all")
+def unblock_all(payload: UnblockAllRequest | None = None) -> dict:
+    """Un-block every row the user is allowed to, and report what it skipped.
+
+    No address is supplied and none is invented, so `attempts` survives on every
+    row: a bulk sweep must not be the loophole that hands every
+    `retries_exhausted` row a fresh retry budget.
+
+    The skipped rows are REPORTED rather than silently dropped. "12 unblocked,
+    3 refused: suppressed" is the difference between a user who knows three
+    people opted out and a user who thinks the button is broken.
+    """
+    payload = payload or UnblockAllRequest()
+    want = (payload.reason or "").strip() or None
+    session = get_session()
+    try:
+        dead = {a.lower() for a in om.load_dead()}
+        unblocked, refused = 0, 0
+        refused_reasons: dict[str, int] = {}
+        for item, app_obj, job, score in _rows(session):
+            if item.status not in ("blocked", "failed"):
+                continue
+            reason = (item.block_reason or "").strip()
+            if want is not None and reason != want:
+                continue
+            if reason in NEVER_UNBLOCKABLE:
+                refused += 1
+                refused_reasons[reason] = refused_reasons.get(reason, 0) + 1
+                continue
+            _clear_block(item, drop_recipient=bool(
+                _screen_address(session, item.recipient, dead)))
+            unblocked += 1
+        session.commit()
+        logger.info(f"[mail_agent] unblock-all ({want or 'every reason'}): "
+                    f"{unblocked} returned to the queue, {refused} refused "
+                    f"({refused_reasons or 'none'})")
+        return {"unblocked": unblocked, "refused": refused,
+                "refused_reasons": refused_reasons,
+                "counts_by_status": _counts_by_status(session)}
     finally:
         session.close()
 
