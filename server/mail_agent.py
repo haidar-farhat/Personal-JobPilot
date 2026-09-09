@@ -15,21 +15,67 @@ the same kind of missing:
     per job at max_rounds 3, so it can never run inside a request.
 
 This module inverts the screen. The user queues ANY application; a background
-worker does the preparation — resolve a recipient, generate the materials,
-render the preview — and only rows that survive all of it become `ready`.
+worker does the preparation — generate the materials, find a recipient, render
+the preview — and only rows that survive all of it become `ready`.
 Sending is a separate, explicit step that reuses outreach_mail's send path
 unchanged, so every guardrail (dedup INSERT before SMTP, daily cap counted from
 OutreachSend, suppression, dead list, is_safe_recipient) applies here too.
 
-THE ORDER OF THE PREPARE STEPS IS THE COST GUARD
-------------------------------------------------
-The recipient is resolved FIRST and materials are generated LAST. "No address"
-is the common case, and discovering it after 3.5 minutes of LLM work would burn
-roughly 49 hours of compute on the measured 843-row database to learn something
-a regex knows in a millisecond. For the same reason the extractor's optional LLM
-de-obfuscation pass is off by default here (`use_llm=False`): one model call per
-row to learn "this posting has no address" is exactly the spend this worker
-exists to avoid. A user who wants it can pass use_llm=True for a small batch.
+THE ORDER OF THE PREPARE STEPS IS A DELIBERATE COST TRADE
+---------------------------------------------------------
+`mail.outreach.materials_first` decides it, and it defaults to TRUE:
+
+    materials_first=True   score -> tailor CV + cover letter -> gather recipient
+                           -> preview -> ready
+    materials_first=False  score -> gather recipient -> tailor -> preview -> ready
+
+The cost is real and measured: agents.tailor.tailor_for_job takes ~3.5 minutes
+per job at max_rounds 3, and "no address" is the common case (0 of 843 live rows
+had both an address and a CV), so tailoring first spends roughly 3.5 minutes on
+every row that turns out to be unmailable. The user chose to pay it, for two
+reasons that the cheaper order cannot buy back:
+
+  - a tailored CV is useful even with no inbox to send it to — it is what they
+    attach when applying by hand through the employer's own portal, and
+  - it decouples "we have materials" from "we found an address". A row blocked
+    on `no_recipient` keeps its resume_path and cover_letter_path, so the bounce
+    recheck below — or a later re-run after the company site starts publishing a
+    careers address — only has to find an address, never to re-tailor.
+
+materials_first=False restores the pure cost guard for a bulk run over hundreds
+of rows, where 49 hours of compute to learn what a regex knows is the wrong
+trade. For the same reason the extractor's optional LLM de-obfuscation pass is
+off by default here (`use_llm=False`): one model call per row to learn "this
+posting has no address" is spend with no artifact to show for it, unlike the
+tailoring. A user who wants it can pass use_llm=True for a small batch.
+
+Two classes of check still run BEFORE tailoring in either order, because they
+cost nothing and genuinely mean "never mail this": an existing ledger row for
+this company+role (`already_emailed`), and a recipient already stored on the row
+that is suppressed, dead or unsafe. Neither can be fixed by generating a CV.
+
+WHERE THE ADDRESS COMES FROM
+----------------------------
+The posting's own text first (a regex over the description), then the shared
+resolver `utils.recipient.resolve`, which owns crawling the employer's site,
+constructing a role address, MX-checking it and rationing the constructed ones.
+It is imported defensively: this router is imported at dashboard startup, so a
+missing or half-written sibling must degrade to `outreach_mail`'s in-repo
+fallback rather than take the whole dashboard down. Its `reason` is stored on
+the row so a block reads "domain belongs to linkedin.com, not the employer"
+instead of the generic "no_recipient".
+
+BOUNCE RECHECK
+--------------
+A constructed address passes an MX check without proving the mailbox exists, so
+some bounce. /recheck reads those bounces (utils.bounce_watch, read-only IMAP),
+and every queue row whose recipient is now on the dead list is re-resolved to a
+DIFFERENT address and returned to `ready` — reusing the materials, never
+re-tailoring. This pays off across rows rather than within one: careers@acme.com
+is typically the resolved address for EVERY queued job at Acme, so one bounce
+invalidates all of them at once and one recheck repairs all of them at once.
+`mail.outreach.max_retries` (default 2) stops a company with a permanently
+broken mail server from being retried forever.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT OWN
 ------------------------------------------
@@ -55,6 +101,10 @@ from db.database import get_session
 from db.models import Application, Job, JobScore, MailQueueItem
 from server import outreach_mail as om
 from server.outreach_mail import _exists, _int, _iso, _naive_utc, _utc_now
+# Not guarded: server.outreach_mail already imports utils.bounce_watch at module
+# level, so a broken bounce_watch has taken this router down one import earlier.
+# Bound here rather than inside /recheck so tests have one honest patch point.
+from utils.bounce_watch import mark_dead, scan_bounces
 from utils.company_names import normalize_company_name
 
 logger = logging.getLogger(__name__)
@@ -76,6 +126,24 @@ except Exception as _e:
                 f"opt-out scanning is skipped")
 
 _lo_scan_optouts = getattr(_lo, "scan_optouts", None) if _lo else None
+
+# --------------------------------------------------------------------------
+# utils.recipient is the shared address resolver (crawl the employer's site,
+# construct a role address, MX-check it, ration the constructed ones). Same
+# startup guard, same reason. Its absence is not fatal: the resolution falls
+# back to outreach_mail._company_fallback_recipient, which is the same
+# utils/company_email path with the older, stricter rule that refused every
+# constructed address. Bound as module-level names so a test patches one symbol.
+# --------------------------------------------------------------------------
+try:  # pragma: no cover - exercised by whichever half of the branch is live
+    from utils import recipient as _rc
+except Exception as _e:
+    _rc = None
+    logger.info(f"[mail_agent] utils.recipient unavailable ({_e}); falling back "
+                f"to outreach_mail's company resolver")
+
+_resolve_recipient = getattr(_rc, "resolve", None) if _rc else None
+_guessed_sent_today = getattr(_rc, "guessed_sent_today", None) if _rc else None
 
 # --------------------------------------------------------------------------
 # agents.tailor pulls python-docx and the LLM client. Guarded for the same
@@ -101,7 +169,53 @@ STATUSES = ("queued", "preparing", "ready", "sending", "sent", "blocked", "faile
 #: and the send path re-screens them anyway, so a row that only trips those is
 #: still worth previewing.
 HARD_BLOCKS = frozenset({"already_emailed", "suppressed", "dead_address",
-                         "unsafe_recipient", "no_recipient", "no_attachments"})
+                         "unsafe_recipient", "no_recipient", "no_attachments",
+                         "no_alternate_address", "retries_exhausted"})
+
+#: Block reasons a human may NEVER override. Narrower than HARD_BLOCKS on
+#: purpose, because the two sets answer different questions: HARD_BLOCKS asks
+#: "can this row become sendable by trying again today" (about the ROW), this
+#: one asks "may a human override this at all" (about someone ELSE).
+#:
+#:   suppressed       a person asked not to be contacted; overriding it mails
+#:                    someone who explicitly opted out.
+#:   unsafe_recipient the only address found is an accommodation / legal /
+#:                    compliance / no-reply inbox. Those channels exist for other
+#:                    purposes and people depend on them.
+#:   already_emailed  one message per company per role, ever. Overriding it sends
+#:                    a duplicate to a real person, and the ledger's UNIQUE
+#:                    dedup_key would refuse the send anyway — so allowing it
+#:                    would only buy a confusing failure several minutes later.
+#:
+#: Everything else — no_recipient, no_attachments, no_alternate_address,
+#: retries_exhausted, dead_address, cap_reached, cooldown, company_capped, and
+#: status `failed` — is a circumstance, not a person saying no, and the user may
+#: retry it once the circumstance changes.
+NEVER_UNBLOCKABLE = frozenset({"suppressed", "unsafe_recipient", "already_emailed"})
+
+#: Why each of those is refused, as one line for the card and the 409 body.
+_UNBLOCK_REFUSALS = {
+    "suppressed": "someone there asked not to be contacted",
+    "unsafe_recipient": "the address is an accommodations/legal/no-reply inbox",
+    "already_emailed": "this company and role were already emailed once",
+}
+
+#: Statuses with nothing to un-block. `sent` is the one that matters: its dedup
+#: key is spent and returning it to the queue would set up a second email about
+#: one role, which is the same harm `already_emailed` exists to prevent.
+_UNBLOCK_STATUS_REFUSALS = {"sent": "already sent", "sending": "a send is in flight",
+                            "preparing": "being prepared right now",
+                            "ready": "not blocked", "queued": "not blocked"}
+
+#: How the shared resolver names its sources vs. what the outreach ledger and
+#: the UI already call them. Mapped rather than stored raw so `recipient_source`
+#: means one thing across both routers and the OutreachSend column.
+#: "constructed" in particular must survive the round trip verbatim: the
+#: resolver's own daily guess quota counts OutreachSend rows by exactly that
+#: recipient_source, so renaming it here would silently un-cap guessed sends.
+_SOURCE_ALIASES = {"crawl": "company_site", "website": "company_site",
+                   "company": "company_site", "guess": "constructed",
+                   "guessed": "constructed", "posting": "post_text"}
 
 #: Prepare is one row at a time and each row can take minutes; a bulk add of the
 #: whole database would otherwise start a run measured in days.
@@ -121,6 +235,12 @@ _WORKER: dict[str, Any] = {
     "prepared": 0, "blocked": 0, "failed": 0,
 }
 _WORKER_LOCK = threading.Lock()
+
+#: Last /recheck outcome, surfaced on /status so the UI can say "3 bounced, 2
+#: re-addressed" without keeping its own copy. Counters describe the LAST run,
+#: not a running total: a total would be indistinguishable from a stuck run.
+_RECHECK: dict[str, Any] = {"last_recheck": None, "bounced": 0, "retried": 0,
+                            "blocked": 0, "scanned": 0, "new_dead": 0}
 
 
 def _running() -> bool:
@@ -374,13 +494,142 @@ def _ensure_materials(session, item: MailQueueItem, app_obj: Application,
     return resume, cover
 
 
+def _mail_settings() -> dict:
+    """The `mail:` block of settings.yaml, for the shared resolver's mail_cfg.
+
+    Read through outreach_mail rather than re-opening the file so both routers
+    always see the same knobs (lookup_website, guess_addresses, guess_locals).
+    """
+    try:
+        return (om._cfg().get("mail") or {}) if isinstance(om._cfg(), dict) else {}
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[mail_agent] could not read mail settings: {e}")
+        return {}
+
+
+def _guessed_today() -> int:
+    """Constructed addresses already sent to today — the resolver's quota input."""
+    if _guessed_sent_today is None:
+        return 0
+    try:
+        return int(_guessed_sent_today() or 0)
+    except Exception as e:
+        logger.warning(f"[mail_agent] guessed_sent_today failed: {e}; assuming 0")
+        return 0
+
+
+def _resolver_reason(rec: dict) -> str:
+    """The resolver's refusal, as one line for the card.
+
+    `reason` alone is a token ("domain_unconfirmed"); `rejected` carries the
+    address each token was about, and that is what makes the block readable —
+    "domain_unconfirmed" says nothing, "acme.io: domain_unconfirmed" says which
+    guess was thrown away and lets the user judge it.
+    """
+    reason = str(rec.get("reason") or "").strip()
+    rejected = rec.get("rejected")
+    if isinstance(rejected, (list, tuple)) and rejected:
+        detail = "; ".join(
+            f"{(r or {}).get('address', '?')}: {(r or {}).get('reason', '?')}"
+            for r in rejected[:5] if isinstance(r, dict))
+        if detail:
+            return f"{reason or 'no_address_found'} ({detail})"[:2000]
+    return reason or "no_address_found"
+
+
+def _resolve_address(job: Job, dead: set[str]) -> dict:
+    """An address for the COMPANY, when the posting itself publishes none.
+
+    Returns {"address", "source", "reason"}. `reason` is the resolver's own
+    explanation and is what the UI shows instead of the generic "no_recipient":
+    "domain_origin=name, not the posting URL" is actionable, "no_recipient" is
+    not. It is populated on both outcomes — a resolver that DID find an address
+    still reports how, e.g. which quota the guess came out of.
+
+    A constructed (careers@domain) address is no longer refused here. The old
+    rule in outreach_mail refused every one of them because a bare company name
+    could match a stranger's domain; rationing that risk — MX check, domain
+    provenance, a daily quota — is now the resolver's job, and this router
+    treats it exactly as the regular agent does. The screens below still apply.
+    """
+    if _resolve_recipient is not None:
+        try:
+            rec = _resolve_recipient(job, mail_cfg=_mail_settings(), dead=dead,
+                                     sent_today_guessed=_guessed_today()) or {}
+            addr = str(rec.get("address") or "").strip()
+            src = str(rec.get("source") or "").strip().lower()
+            return {"address": addr or None,
+                    "source": (_SOURCE_ALIASES.get(src, src) or "company_site")[:30],
+                    "reason": _resolver_reason(rec) if not addr else None}
+        except Exception as e:
+            # A sibling module raising must not fail the row: fall through to
+            # the in-repo path, which is the same crawler with an older rule.
+            logger.warning(f"[mail_agent] utils.recipient.resolve failed for "
+                           f"{job.company!r}: {e}; using the in-repo fallback")
+    addr, src = om._company_fallback_recipient(job, dead)
+    return {"address": addr or None, "source": (src or "company_site")[:30],
+            "reason": None if addr else "no_address_found"}
+
+
+def _screen_address(session, address: str | None, dead: set[str]) -> str | None:
+    """The three screens that mean "never mail this address". None means usable.
+
+    One helper for all three callers — the cheap pre-tailor gate, prepare's
+    post-resolution check and the bounce retry — so a retry can never pass a
+    screen the first attempt failed.
+    """
+    addr = (address or "").strip()
+    if not addr:
+        return None
+    if om._is_suppressed(session, addr):
+        return "suppressed"
+    if addr.lower() in dead:
+        return "dead_address"
+    if not om.is_safe_recipient(addr):
+        return "unsafe_recipient"
+    return None
+
+
+def _gather_recipient(session, app_obj: Application, job: Job,
+                      score: JobScore | None, *, dead: set[str], use_llm: bool,
+                      exclude: str | None = None) -> tuple[om._Candidate, str | None]:
+    """The candidate, with whatever address can be found. Returns (cand, reason).
+
+    `reason` is None when an address was found, and otherwise the resolver's
+    explanation for why there is none.
+
+    `exclude` is the address a bounce just retired. The dead set already filters
+    it out of both the post-text extractor and the resolver; comparing again is
+    belt-and-braces against a resolver that ignores its `dead` argument, because
+    handing back the address that just bounced would loop forever.
+    """
+    cand = om._build_candidate(session, app_obj, job, score, use_llm=use_llm,
+                               dead=dead, resolve_company=False)
+    ex = (exclude or "").strip().lower()
+    if cand.recipient and cand.recipient.strip().lower() == ex:
+        cand.recipient = None
+    if cand.recipient:
+        return cand, None
+
+    res = _resolve_address(job, dead)
+    addr = (res.get("address") or "").strip()
+    if not addr or addr.lower() == ex:
+        return cand, (res.get("reason") or "no_address_found")
+    cand.recipient = addr
+    cand.recipient_source = res.get("source") or "company_site"
+    cand.contact = {**(cand.contact or {}), "address": addr,
+                    "fallback": cand.recipient_source}
+    return cand, None
+
+
 def _prepare_one(session, item_id: int, cfg: dict, dead: set[str],
                  use_llm: bool) -> str:
     """Take one queued row as far as it can go. Returns the resulting status.
 
     Each step short-circuits: the moment a row cannot become sendable it is
-    written as `blocked` with the reason, and the expensive steps below it never
-    run.
+    written as `blocked` with the reason, and the steps below it never run. The
+    ORDER of the two middle steps is `mail.outreach.materials_first` — see the
+    module docstring for the ~3.5 min/job trade it decides.
     """
     row = _rows(session, ids=[item_id])
     if not row:
@@ -394,49 +643,69 @@ def _prepare_one(session, item_id: int, cfg: dict, dead: set[str],
     item.error = None
     item.attempts = (item.attempts or 0) + 1
     session.commit()
+
+    # 1. THE FREE HARD BLOCKS, before either expensive step. Both mean "this row
+    #    can never be mailed", and neither is fixed by generating a CV.
+    dedup_key = om.outreach_dedup_key(job.company or "", job.title or "",
+                                      str(job.source_id or ""))
+    if om._existing_send(session, dedup_key) is not None:
+        _mark(session, item, "blocked", reason="already_emailed")
+        return "blocked"
+    known = _screen_address(session, item.recipient, dead)
+    if known:
+        _mark(session, item, "blocked", reason=known)
+        return "blocked"
+
+    materials_first = bool(cfg.get("materials_first", True))
+    resume = cover = None
+
+    # 2. MATERIALS, if the user chose to pay for them up front. A row that ends
+    #    up with no address still keeps them: the .docx is what they attach when
+    #    applying by hand, and the recheck below never has to re-tailor.
+    if materials_first:
+        resume, cover = _ensure_materials(session, item, app_obj, job, score)
+
+    # 3. RECIPIENT. The posting's own text first, then the shared resolver.
     _WORKER["current"] = {"queue_id": item.id, "title": job.title,
                           "company": job.company, "step": "recipient"}
-
-    # 1. RECIPIENT FIRST. resolve_company=True consults utils/company_email,
-    #    which crawls the employer's site — seconds of network I/O, but orders
-    #    of magnitude cheaper than the tailoring below, and it is the only thing
-    #    that finds an address for the ~100% of postings that publish none.
-    cand = om._build_candidate(session, app_obj, job, score, use_llm=use_llm,
-                               dead=dead, resolve_company=True)
-    if not cand.recipient:
-        _mark(session, item, "blocked", reason="no_recipient")
+    cand, reason = _gather_recipient(session, app_obj, job, score, dead=dead,
+                                     use_llm=use_llm)
+    if reason:
+        # block_reason stays the machine-readable class the UI filters on;
+        # `error` carries the resolver's precise sentence for the card.
+        _mark(session, item, "blocked", reason="no_recipient", error=reason)
         return "blocked"
     item.recipient = cand.recipient
     item.recipient_source = cand.recipient_source
     session.commit()
 
-    # 2. Already emailed for this company+role — the ledger's UNIQUE key would
-    #    refuse the send anyway, so stop before spending anything on it.
-    if om._existing_send(session, cand.dedup_key) is not None:
-        _mark(session, item, "blocked", reason="already_emailed")
+    blocked = _screen_address(session, cand.recipient, dead)
+    if blocked:
+        _mark(session, item, "blocked", reason=blocked)
         return "blocked"
 
-    # 3. The address screens. Cheap, and each one means "this address can never
-    #    be mailed", so running them before tailoring saves ~3.5 minutes each.
-    if om._is_suppressed(session, cand.recipient):
-        _mark(session, item, "blocked", reason="suppressed")
-        return "blocked"
-    if cand.recipient in dead:
-        _mark(session, item, "blocked", reason="dead_address")
-        return "blocked"
-    if not om.is_safe_recipient(cand.recipient):
-        _mark(session, item, "blocked", reason="unsafe_recipient")
-        return "blocked"
+    # 4. Materials last, when the cost guard is on: nothing is generated until
+    #    the row has an address that survived every screen above.
+    if not materials_first:
+        resume, cover = _ensure_materials(session, item, app_obj, job, score)
+    return _finalize(session, item, cand, job, cfg, dead, resume, cover)
 
-    # 4. Materials — the only expensive step, and the last one that can fail.
-    resume, cover = _ensure_materials(session, item, app_obj, job, score)
+
+def _finalize(session, item: MailQueueItem, cand: om._Candidate, job: Job,
+              cfg: dict, dead: set[str], resume: str | None,
+              cover: str | None) -> str:
+    """Attachment check, preview, `ready`. Shared by prepare and by the retry.
+
+    The stored subject/body/hash ARE what /send transmits — the row the user
+    approves is the row that goes out — so a re-addressed row MUST come back
+    through here: its old preview named the address that bounced, and its old
+    hash would refuse the send it is being repaired for.
+    """
     cand.resume_path, cand.cover_letter_path = resume, cover
     if cfg.get("require_attachments", True) and not cand.materials_ready:
         _mark(session, item, "blocked", reason="no_attachments")
         return "blocked"
 
-    # 5. Preview. The stored subject/body/hash ARE what /send transmits — the
-    #    row the user approves is the row that goes out.
     _WORKER["current"] = {"queue_id": item.id, "title": job.title,
                           "company": job.company, "step": "preview"}
     payload = om._preview_payload(session, cand, cfg, dead)
@@ -578,7 +847,208 @@ def status() -> dict:
             "cap": _cap(session, cfg),
             "started_at": _WORKER["started_at"],
             "sending_enabled": bool(cfg.get("enabled")),
+            # Last bounce recheck, so the UI can show "2 bounced, 1 re-addressed"
+            # next to the queue instead of tracking it itself.
+            "last_recheck": _RECHECK["last_recheck"],
+            "bounced": _RECHECK["bounced"],
+            "retried": _RECHECK["retried"],
         }
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------
+# Bounce recheck — the second address for a row whose first one bounced
+# --------------------------------------------------------------------------
+
+def _scan_bounces(hours: int, limit: int) -> dict:
+    """utils.bounce_watch.scan_bounces, which must never fail the request.
+
+    It already swallows its own IMAP errors, but it is read from a sibling
+    module and this endpoint's real work — re-resolving rows against the dead
+    list on disk — is still worth doing when the scan itself found nothing.
+    """
+    try:
+        return dict(scan_bounces(hours=hours, limit=limit) or {})
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[mail_agent] bounce scan failed: {e}")
+        return {"scanned": 0, "new_dead": 0, "error": str(e)}
+
+
+def _retry_row(session, item: MailQueueItem, app_obj: Application, job: Job | None,
+               score: JobScore | None, cfg: dict, dead: set[str]) -> str:
+    """Re-address one row whose recipient bounced. Returns the new status.
+
+    Materials are REUSED, never regenerated: the CV was tailored to the JOB, not
+    to the mailbox, so re-tailoring after a bounce would spend ~3.5 minutes to
+    produce the same document. This is the whole reason prepare now generates
+    materials before it looks for an address.
+
+    Two refusals come before anything is cleared, because both are permanent:
+    a suppressed address is never retried at all (the human asked us to stop
+    mailing them — finding a second inbox at the same company is the opposite of
+    honouring that), and a row that has already spent its
+    `mail.outreach.max_retries` stops for good, so a company with a broken mail
+    server is not re-resolved on every recheck forever. `attempts` counts
+    ATTEMPTS, so the first prepare is attempt 1 and the retries spent so far are
+    attempts - 1.
+    """
+    old = (item.recipient or "").strip()
+    if om._is_suppressed(session, old):
+        _mark(session, item, "blocked", reason="suppressed",
+              error=f"{old} is suppressed; not retried")
+        return "blocked"
+    retries_done = max(0, (item.attempts or 0) - 1)
+    max_retries = _int(cfg, "max_retries")
+    if retries_done >= max_retries:
+        _mark(session, item, "blocked", reason="retries_exhausted",
+              error=f"{retries_done} retry/retries already spent "
+                    f"(mail.outreach.max_retries={max_retries})")
+        return "blocked"
+    if job is None:
+        _mark(session, item, "blocked", reason="no_job")
+        return "blocked"
+
+    # Clear the dead address AND the preview that named it. Leaving the old
+    # subject/body/hash in place would leave a row whose stored bytes address a
+    # mailbox that does not exist — and whose hash would then refuse the send.
+    item.status = "preparing"
+    item.recipient = None
+    item.recipient_source = None
+    item.subject = None
+    item.body = None
+    item.preview_hash = None
+    item.block_reason = None
+    item.error = None
+    item.attempts = (item.attempts or 0) + 1
+    session.commit()
+
+    cand, reason = _gather_recipient(session, app_obj, job, score, dead=dead,
+                                     use_llm=False, exclude=old)
+    if reason or not cand.recipient:
+        _mark(session, item, "blocked", reason="no_alternate_address",
+              error=reason or f"no address other than {old}")
+        return "blocked"
+
+    item.recipient = cand.recipient
+    item.recipient_source = cand.recipient_source
+    session.commit()
+    blocked = _screen_address(session, cand.recipient, dead)
+    if blocked:
+        # Stored before screening on purpose: the card should show WHICH second
+        # address was found and why it was refused.
+        _mark(session, item, "blocked", reason=blocked)
+        return "blocked"
+
+    resume = item.resume_path or app_obj.resume_path
+    cover = item.cover_letter_path or app_obj.cover_letter_path
+    status = _finalize(session, item, cand, job, cfg, dead, resume, cover)
+    if status == "ready":
+        logger.info(f"[mail_agent] re-addressed {job.company!r}: {old} bounced -> "
+                    f"{cand.recipient} (attempt {item.attempts})")
+    return status
+
+
+class RecheckRequest(BaseModel):
+    """Defaults match utils.bounce_watch.scan_bounces' own."""
+
+    hours: int = Field(48, ge=1, le=2160)
+    limit: int = Field(40, ge=1, le=500)
+
+
+@router.post("/recheck")
+def recheck_bounces(payload: RecheckRequest | None = None) -> dict:
+    """Scan for bounces, then re-address every queue row that just went dead.
+
+    This pays off ACROSS rows rather than within one. A resolved company address
+    (careers@acme.com) is typically the recipient of every queued job at that
+    company, so one bounce invalidates all of them and one recheck repairs all
+    of them — which is why the row set is "recipient is on the dead list" rather
+    than "this row bounced".
+
+    Nothing is sent here. A repaired row goes back to `ready` and waits for the
+    user, and the send it eventually gets is a NEW send through /send: every
+    guard re-runs and the OutreachSend ledger records the attempt, because a
+    retry to a different mailbox is not a replay of the first message.
+
+    One boundary is deliberate and worth naming: a row that ALREADY sent is not
+    retried. Its company+role dedup key is spent, the ledger's UNIQUE constraint
+    would refuse a second claim, and quietly re-addressing it would be a second
+    email about one role. Such a row keeps its `sent` status and gets
+    block_reason "bounced" so the card stops claiming a clean delivery. Freeing
+    that key is the ledger's business (outreach_mail), not this endpoint's.
+    """
+    payload = payload or RecheckRequest()
+    if _running():
+        # A prepare run is writing the same rows. Two writers would race on
+        # status and one would overwrite the other's recipient.
+        raise HTTPException(status_code=409,
+                            detail="a prepare run is active; stop it first")
+    cfg = om._outreach_cfg()
+    scan = _scan_bounces(payload.hours, payload.limit)
+    dead = {a.lower() for a in om.load_dead()}
+
+    results: list[dict] = []
+    bounced = retried = blocked = failed = 0
+    session = get_session()
+    try:
+        for item, app_obj, job, score in _rows(session):
+            addr = (item.recipient or "").strip()
+            if not addr or addr.lower() not in dead:
+                continue
+            if item.status in ("preparing", "sending"):
+                continue  # mid-flight elsewhere; never rewrite it underneath
+            bounced += 1
+            # Idempotent, and it makes the row's own address permanent on the
+            # dead list even when the scan learned it from another mailbox.
+            try:
+                mark_dead(addr)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(f"[mail_agent] could not record {addr} as dead: {e}")
+            dead.add(addr.lower())
+
+            if item.status == "sent":
+                # History, not work: the ledger holds this send and its dedup
+                # key is spent, so there is no retry to make. Recording the
+                # bounce on the card is still the honest thing — rewriting the
+                # row's status would destroy the record that it went out.
+                if item.block_reason != "bounced":
+                    item.block_reason = "bounced"
+                    item.error = f"delivery to {addr} bounced"
+                    session.commit()
+                results.append({"id": item.id, "application_id": item.application_id,
+                                "bounced_from": addr, "status": "sent",
+                                "recipient": item.recipient,
+                                "block_reason": "bounced"})
+                continue
+            try:
+                status = _retry_row(session, item, app_obj, job, score, cfg, dead)
+            except Exception as e:
+                logger.exception(f"[mail_agent] recheck of queue row {item.id} failed")
+                session.rollback()
+                _mark(session, item, "failed", reason="recheck_error",
+                      error=str(e)[:2000])
+                status = "failed"
+            retried += int(status == "ready")
+            blocked += int(status == "blocked")
+            failed += int(status == "failed")
+            results.append({"id": item.id, "application_id": item.application_id,
+                            "bounced_from": addr, "status": status,
+                            "recipient": item.recipient,
+                            "block_reason": item.block_reason})
+
+        _RECHECK.update(last_recheck=_iso(_naive_utc(_utc_now())), bounced=bounced,
+                        retried=retried, blocked=blocked,
+                        scanned=int(scan.get("scanned") or 0),
+                        new_dead=int(scan.get("new_dead") or 0))
+        logger.info(f"[mail_agent] recheck: {bounced} row(s) on a dead address, "
+                    f"{retried} re-addressed, {blocked} blocked, {failed} failed")
+        return {"scanned": _RECHECK["scanned"], "new_dead": _RECHECK["new_dead"],
+                "scan_error": scan.get("error"), "bounced": bounced,
+                "retried": retried, "blocked": blocked, "failed": failed,
+                "last_recheck": _RECHECK["last_recheck"], "results": results,
+                "counts_by_status": _counts_by_status(session),
+                "cap": _cap(session, cfg)}
     finally:
         session.close()
 

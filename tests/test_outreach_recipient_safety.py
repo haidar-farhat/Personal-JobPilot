@@ -77,10 +77,12 @@ def test_ats_subdomain_still_reaches_the_corporate_domain():
 
 def test_fallback_returns_none_rather_than_a_board_address():
     """End-to-end: the outreach fallback yields nothing for a LinkedIn row."""
-    from server.outreach_mail import _company_fallback_recipient
-    addr, src = _company_fallback_recipient(
-        _Job("Aventis Solutions", "https://www.linkedin.com/jobs/view/ai-engineer-123"), set())
-    assert addr is None, f"resolved {addr!r} ({src}) from a LinkedIn posting"
+    from utils.company_email import company_domain_with_origin
+    got = company_domain_with_origin(
+        _Job("Aventis Solutions", "https://www.linkedin.com/jobs/view/ai-engineer-123"))
+    domain = got[0] if got else None
+    assert domain is None or "linkedin.com" not in domain, (
+        f"derived {domain!r} from a LinkedIn posting URL")
 
 
 # --- constructed addresses need corroborated domain evidence ----------------
@@ -90,25 +92,75 @@ def test_fallback_returns_none_rather_than_a_board_address():
 # domains. A constructed address is therefore allowed ONLY when the employer's
 # domain came from their own posting URL.
 
-def test_constructed_address_refused_without_url_evidence(monkeypatch):
+def test_constructed_address_refused_when_the_domain_is_a_stranger(monkeypatch):
+    """A guessed domain that does not prove it belongs to the employer is refused.
+
+    The refusal now comes from utils.recipient's ownership check rather than the
+    blanket "never send to a constructed address" rule this file used to assert.
+    Constructed addresses ARE allowed again — deliberate, and matching what
+    agents/auto_applier already did — but only when the domain proves out.
+    """
     import server.outreach_mail as om
-    monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": False,
+    import utils.recipient as R
+    monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": True,
                                                       "guess_addresses": True}})
-    monkeypatch.setattr("utils.company_email.find_company_email",
-                        lambda *a, **k: {"address": "careers@moab.com", "source": "guess",
-                                         "domain": "moab.com", "domain_origin": "derived"})
+    monkeypatch.setattr(R, "guessed_sent_today", lambda session=None: 0)
+    monkeypatch.setattr(R, "resolve", lambda job, **k: {
+        "address": None, "source": None, "domain": "moab.com",
+        "source_url": None, "domain_origin": "derived", "confidence": 0.0,
+        "rejected": [{"address": "careers@moab.com", "reason": "domain_unconfirmed"}],
+        "reason": "domain_unconfirmed"})
     addr, src = om._company_fallback_recipient(
         _Job("Moab", "https://www.linkedin.com/jobs/view/engineer-at-moab-1"), set())
-    assert addr is None, "a name-derived domain must not be mailed"
+    assert addr is None, "a domain that did not prove ownership must not be mailed"
+
+
+def test_the_live_stranger_domains_still_fail_the_ownership_check():
+    """End-to-end on the rule itself, with the real page shapes.
+
+    moab.com's <title> really is "MOAB" and it really does carry footer
+    furniture, so it satisfies every weak signal. Only the absence of a hiring
+    or careers signal separates it from a real employer — which is why
+    company_furniture alone is not accepted as corroboration.
+    """
+    import utils.recipient as R
+    filler = " ".join(["We welcome visitors from around the world every season."] * 6)
+    moab = ("<html><head><title>MOAB</title></head><body><h1>Visit Moab</h1>"
+            "<p>Hotels, trails and tours in Moab, Utah.</p>" + filler +
+            "<footer>Contact us | Privacy policy</footer></body></html>")
+    assert R.domain_confidently_belongs_to("moab.com", "Moab", page_text=moab) is False
+
+    real = ("<html><head><title>Vanta</title></head><body><h1>Automate compliance</h1>"
+            "<p>Vanta automates security compliance.</p>" + filler +
+            "<footer>About us | Careers | Privacy policy</footer></body></html>")
+    assert R.domain_confidently_belongs_to("vanta.com", "Vanta", page_text=real) is True
+
+
+def test_constructed_address_accepted_when_ownership_is_proven(monkeypatch):
+    """The behaviour change the user asked for: a proven guess is now usable."""
+    import server.outreach_mail as om
+    import utils.recipient as R
+    monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": True,
+                                                      "guess_addresses": True}})
+    monkeypatch.setattr(R, "guessed_sent_today", lambda session=None: 0)
+    monkeypatch.setattr(R, "resolve", lambda job, **k: {
+        "address": "careers@acmerobotics.com", "source": "constructed",
+        "domain": "acmerobotics.com", "source_url": None, "domain_origin": "derived",
+        "confidence": 0.4, "rejected": [], "reason": ""})
+    addr, src = om._company_fallback_recipient(
+        _Job("Acme Robotics", "https://www.linkedin.com/jobs/view/eng-at-acme-1"), set())
+    assert addr == "careers@acmerobotics.com"
+    assert src == "constructed"
 
 
 def test_constructed_address_allowed_when_domain_came_from_the_posting_url(monkeypatch):
     import server.outreach_mail as om
     monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": False,
                                                       "guess_addresses": True}})
-    monkeypatch.setattr("utils.company_email.find_company_email",
-                        lambda *a, **k: {"address": "careers@acmerobotics.com", "source": "guess",
-                                         "domain": "acmerobotics.com", "domain_origin": "url"})
+    monkeypatch.setattr("utils.recipient.resolve", lambda job, **k: {
+        "address": "careers@acmerobotics.com", "source": "constructed",
+        "domain": "acmerobotics.com", "source_url": None, "domain_origin": "url",
+        "confidence": 0.4, "rejected": [], "reason": ""})
     addr, src = om._company_fallback_recipient(
         _Job("Acme Robotics", "https://acmerobotics.com/careers/ai-engineer"), set())
     assert addr == "careers@acmerobotics.com"
@@ -120,9 +172,10 @@ def test_published_company_address_is_still_accepted(monkeypatch):
     import server.outreach_mail as om
     monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": True,
                                                       "guess_addresses": False}})
-    monkeypatch.setattr("utils.company_email.find_company_email",
-                        lambda *a, **k: {"address": "jobs@acme.com", "source": "crawl",
-                                         "domain": "acme.com", "domain_origin": "derived"})
+    monkeypatch.setattr("utils.recipient.resolve", lambda job, **k: {
+        "address": "jobs@acme.com", "source": "company_site",
+        "domain": "acme.com", "source_url": "https://acme.com/careers",
+        "domain_origin": "derived", "confidence": 0.75, "rejected": [], "reason": ""})
     addr, src = om._company_fallback_recipient(
         _Job("Acme", "https://www.linkedin.com/jobs/view/eng-at-acme-1"), set())
     assert addr == "jobs@acme.com"
@@ -133,8 +186,10 @@ def test_unsafe_local_part_is_refused_even_when_published(monkeypatch):
     import server.outreach_mail as om
     monkeypatch.setattr(om, "_cfg", lambda: {"mail": {"lookup_website": True,
                                                       "guess_addresses": False}})
-    monkeypatch.setattr("utils.company_email.find_company_email",
-                        lambda *a, **k: {"address": "accommodation@acme.com", "source": "crawl",
-                                         "domain": "acme.com", "domain_origin": "url"})
+    monkeypatch.setattr("utils.recipient.resolve", lambda job, **k: {
+        "address": None, "source": None, "domain": "acme.com", "source_url": None,
+        "domain_origin": "url", "confidence": 0.0,
+        "rejected": [{"address": "accommodation@acme.com", "reason": "unsafe"}],
+        "reason": "unsafe"})
     addr, _ = om._company_fallback_recipient(_Job("Acme", "https://acme.com/jobs/1"), set())
     assert addr is None, "an accommodation inbox must never receive an application"

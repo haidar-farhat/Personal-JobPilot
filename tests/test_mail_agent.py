@@ -1,27 +1,36 @@
-"""Mail Agent — the queue, the prepare worker's cost guard, and the send refusals.
+"""Mail Agent — the queue, the prepare order, the bounce recheck, the send refusals.
 
-Two properties are asserted by CALL COUNT rather than by response body, because
-the body would look identical if either one were broken:
+Three properties are asserted by CALL COUNT rather than by response body,
+because the body would look identical if any of them were broken:
 
-  - `tailor.calls` proves the cost guard. Preparation resolves the recipient
-    BEFORE generating anything, and "no address" is the measured common case
-    (0 of 843 live rows had both an address and a CV). A worker that tailors
-    first and discovers the missing address afterwards still returns
-    blocked/no_recipient — while having spent ~3.5 minutes of LLM time per row.
-  - `fake_send.calls` proves the send guards. A cap, suppression or
-    not-ready check that runs after send_application_email has opened SMTP is
-    not a guard at all.
+  - `tailor.calls` proves which ORDER prepare ran in. Both orders end at the
+    same blocked/no_recipient row for a job with no address; the ~3.5 minutes
+    per job of LLM time is the entire difference, and only the call count sees
+    it. materials_first=True must tailor anyway (the .docx is what the user
+    applies with by hand); materials_first=False must not (the old cost guard,
+    for a bulk run over hundreds of rows).
+  - `tailor.calls` ALSO proves the recheck reuses materials. A CV is tailored to
+    the JOB, not to the mailbox, so re-addressing a bounced row must not spend
+    3.5 minutes producing the same document.
+  - `fake_send.calls` proves the send guards. A cap, suppression or not-ready
+    check that runs after send_application_email has opened SMTP is not a guard
+    at all.
 
-Nothing here may reach the network, the LLM or the real jobpilot.db:
+Nothing here may reach the network, the LLM, IMAP or the real jobpilot.db:
 agents.tailor is replaced by a stub that writes two small files, the mailer is
-replaced wholesale, the dead-address file is stubbed and every session comes
-from the tmp SQLite fixtures in tests/conftest.py.
+replaced wholesale, utils.recipient and utils.bounce_watch are replaced by
+in-memory doubles (the real ones crawl employer sites and open IMAP), and every
+session comes from the tmp SQLite fixtures in tests/conftest.py. utils.recipient
+is a sibling deliverable that may not exist yet: the resolver hook is forced to
+None by default so these assertions never depend on whether it has landed.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -95,26 +104,91 @@ class FakeTailor:
                 "resume_pdf": None, "pages": 1}
 
 
+class FakeResolver:
+    """Stands in for utils.recipient.resolve — the shared address resolver.
+
+    The real one crawls the employer's site and does MX lookups. This one hands
+    back whatever `result` the test set, minus anything on the dead list, which
+    is the one behaviour the retry depends on: a resolver that returned the
+    address that just bounced would loop forever.
+    """
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.result: dict = {"address": None, "source": None, "domain": None,
+                             "source_url": None, "domain_origin": None,
+                             "confidence": 0.0, "rejected": None,
+                             "reason": "no domain for this company"}
+
+    def __call__(self, job, *, mail_cfg, dead=None, allow_guess=None,
+                 sent_today_guessed=0):
+        dead = {a.lower() for a in (dead or set())}
+        self.calls.append({"company": job.company, "dead": dead,
+                           "sent_today_guessed": sent_today_guessed})
+        res = dict(self.result)
+        if (res.get("address") or "").lower() in dead:
+            return {**res, "address": None, "source": None,
+                    "reason": "every known address for this company is dead"}
+        return res
+
+
+class FakeBounceWatch:
+    """Stands in for utils.bounce_watch — read-only IMAP, replaced by a set.
+
+    `learns` is what the next scan will discover; `dead` is the shared list both
+    routers read through om.load_dead.
+    """
+
+    def __init__(self, dead: set[str]):
+        self.dead = dead
+        self.learns: set[str] = set()
+        self.scans: list[dict] = []
+        self.marked: list[str] = []
+
+    def scan(self, hours: int = 48, limit: int = 40) -> dict:
+        self.scans.append({"hours": hours, "limit": limit})
+        new = {a.lower() for a in self.learns} - self.dead
+        self.dead |= new
+        return {"scanned": len(self.learns), "new_dead": len(new),
+                "total_dead": len(self.dead)}
+
+    def mark_dead(self, address: str) -> None:
+        self.marked.append(address)
+        self.dead.add((address or "").lower())
+
+
 @pytest.fixture()
 def cfg():
     """Permissive-but-complete config; each test tightens the one knob it tests."""
     return {**om.OUTREACH_DEFAULTS, "enabled": True, "daily_cap": 50,
             "max_batch": 10, "max_per_company_per_day": 99,
             "per_recipient_cooldown_days": 0, "min_seconds_between_sends": 0,
-            "require_attachments": True}
+            "require_attachments": True, "materials_first": True, "max_retries": 2}
 
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch, session_factory, cfg, tmp_path):
-    """Isolate both modules. Returns the two doubles the assertions read."""
+    """Isolate both modules. Returns the doubles the assertions read."""
     sender = FakeSender()
     tailor = FakeTailor(tmp_path)
+    dead: set[str] = set()
+    bounces = FakeBounceWatch(dead)
+    resolver = FakeResolver()
 
     monkeypatch.setattr(ma, "get_session", session_factory)
     monkeypatch.setattr(om, "get_session", session_factory)
     monkeypatch.setattr(om, "send_application_email", sender)
     monkeypatch.setattr(om, "mailer_ready", lambda: (True, ""))
-    monkeypatch.setattr(om, "load_dead", lambda: set())
+    # One mutable dead list, read live by both routers — a lambda over the set,
+    # not a snapshot, because /recheck's whole job is to act on what the scan
+    # just added to it.
+    monkeypatch.setattr(om, "load_dead", lambda: set(dead))
+    monkeypatch.setattr(ma, "scan_bounces", bounces.scan)
+    monkeypatch.setattr(ma, "mark_dead", bounces.mark_dead)
+    # utils.recipient may or may not exist in the tree yet, and the real one
+    # crawls. Off unless a test patches it back in.
+    monkeypatch.setattr(ma, "_resolve_recipient", None)
+    monkeypatch.setattr(ma, "_guessed_sent_today", None)
     monkeypatch.setattr(om, "_outreach_cfg", lambda: dict(cfg))
     monkeypatch.setattr(om, "_profile", lambda: {"identity": {"full_name": "Test User"},
                                                  "links": {}})
@@ -134,7 +208,10 @@ def env(monkeypatch, session_factory, cfg, tmp_path):
     ma._WORKER.update(thread=None, active=False, cancel=False, phase="idle",
                       done=0, total=0, started_at=None, current=None, error=None,
                       prepared=0, blocked=0, failed=0)
-    yield sender, tailor
+    ma._RECHECK.update(last_recheck=None, bounced=0, retried=0, blocked=0,
+                       scanned=0, new_dead=0)
+    yield SimpleNamespace(sender=sender, tailor=tailor, resolver=resolver,
+                          dead=dead, bounces=bounces)
     ma._WORKER["cancel"] = True
     t = ma._WORKER["thread"]
     if t is not None:
@@ -143,12 +220,24 @@ def env(monkeypatch, session_factory, cfg, tmp_path):
 
 @pytest.fixture()
 def fake_send(env):
-    return env[0]
+    return env.sender
 
 
 @pytest.fixture()
 def tailor(env):
-    return env[1]
+    return env.tailor
+
+
+@pytest.fixture()
+def resolver(env, monkeypatch):
+    """The shared resolver, patched in. Tests that ask for it opt into it."""
+    monkeypatch.setattr(ma, "_resolve_recipient", env.resolver)
+    return env.resolver
+
+
+@pytest.fixture()
+def bounces(env):
+    return env.bounces
 
 
 @pytest.fixture()
@@ -286,8 +375,10 @@ def test_queue_clear_by_status_leaves_other_statuses(db):
 # prepare
 # --------------------------------------------------------------------------
 
-def test_prepare_blocks_no_recipient_without_tailoring(db, tailor):
-    """THE cost guard: no address is discovered before a single LLM call."""
+def test_materials_first_off_blocks_no_recipient_without_tailoring(db, cfg, tailor):
+    """THE cost guard: with materials_first off, no address is discovered before
+    a single LLM call — the old order, unchanged."""
+    cfg["materials_first"] = False
     aid = seed(db, description=POST_NO_ADDRESS)
     queue([aid])
 
@@ -302,8 +393,33 @@ def test_prepare_blocks_no_recipient_without_tailoring(db, tailor):
     assert st["counts_by_status"]["blocked"] == 1
 
 
-def test_prepare_blocks_when_only_an_unsafe_address_is_published(db, tailor):
+def test_materials_first_tailors_a_job_that_has_no_address(db, cfg, tailor):
+    """The user's chosen default: pay the ~3.5 min anyway and KEEP the output.
+
+    The row is unmailable either way; what differs is that the .docx exists, so
+    the user can apply by hand and a later recheck only has to find an address.
+    """
+    cfg["materials_first"] = True
+    aid = seed(db, description=POST_NO_ADDRESS)
+    queue([aid])
+
+    prepare_and_wait()
+
+    item = only_item(db)
+    assert item.status == "blocked"
+    assert item.block_reason == "no_recipient"
+    assert len(tailor.calls) == 1, "materials_first did not tailor"
+    assert item.resume_path and Path(item.resume_path).is_file()
+    assert item.cover_letter_path and Path(item.cover_letter_path).is_file()
+    # And on the Application too, which is what the rest of the pipeline reads.
+    app_obj = db.query(Application).filter(Application.id == aid).one()
+    db.refresh(app_obj)
+    assert app_obj.resume_path == item.resume_path
+
+
+def test_prepare_blocks_when_only_an_unsafe_address_is_published(db, cfg, tailor):
     """compliance@ is screened out at extraction, so the row has no recipient."""
+    cfg["materials_first"] = False
     aid = seed(db, description=POST_BLOCKED_ONLY)
     queue([aid])
 
@@ -311,6 +427,66 @@ def test_prepare_blocks_when_only_an_unsafe_address_is_published(db, tailor):
 
     assert only_item(db).block_reason == "no_recipient"
     assert tailor.calls == []
+
+
+def test_a_constructed_address_is_accepted(db, tailor, resolver):
+    """Constructed addresses are no longer refused — the resolver rations them.
+
+    The old rule refused every careers@<guessed domain>, which left the measured
+    ~100% of postings that publish no address with nothing at all.
+    """
+    resolver.result = {"address": "careers@acmerobotics.com", "source": "guess",
+                       "domain": "acmerobotics.com", "domain_origin": "name",
+                       "source_url": None, "confidence": 0.4, "rejected": None,
+                       "reason": "constructed on an MX-checked domain"}
+    aid = seed(db, description=POST_NO_ADDRESS)
+    queue([aid])
+
+    prepare_and_wait()
+
+    item = only_item(db)
+    assert item.status == "ready", item.block_reason
+    assert item.recipient == "careers@acmerobotics.com"
+    assert item.recipient_source == "constructed"
+    assert resolver.calls and resolver.calls[0]["company"] == "Acme Robotics"
+
+
+def test_the_resolvers_reason_is_stored_on_the_row(db, tailor, resolver):
+    """"no_recipient" is the class; the resolver's reason is the explanation.
+
+    Shaped exactly as utils.recipient.resolve returns it — a token in `reason`
+    and the address it was about in `rejected` — because a token on its own
+    ("domain_unconfirmed") tells the user nothing about WHICH guess was thrown
+    away.
+    """
+    resolver.result = {**resolver.result, "address": None, "source": None,
+                       "reason": "domain_unconfirmed",
+                       "rejected": [{"address": "careers@acme.io",
+                                     "reason": "domain_unconfirmed"}]}
+    aid = seed(db, description=POST_NO_ADDRESS)
+    queue([aid])
+
+    prepare_and_wait()
+
+    item = only_item(db)
+    assert item.block_reason == "no_recipient"
+    assert "domain_unconfirmed" in (item.error or "")
+    assert "careers@acme.io" in (item.error or "")
+
+
+def test_a_missing_resolver_falls_back_to_the_in_repo_path(db, tailor, monkeypatch):
+    """utils.recipient is a sibling deliverable; its absence must not be fatal."""
+    monkeypatch.setattr(ma, "_resolve_recipient", None)
+    monkeypatch.setattr(om, "_company_fallback_recipient",
+                        lambda job, dead: ("jobs@acme.test", "company_site"))
+    aid = seed(db, description=POST_NO_ADDRESS)
+    queue([aid])
+
+    prepare_and_wait()
+
+    item = only_item(db)
+    assert item.status == "ready", item.block_reason
+    assert item.recipient == "jobs@acme.test"
 
 
 def test_prepare_blocks_when_already_emailed(db, tailor):
@@ -589,3 +765,192 @@ def test_status_reports_the_cap_and_the_counts(db):
     assert st["counts_by_status"]["queued"] == 1
     assert st["cap"] == {"daily_cap": 50, "sent_today": 0, "remaining": 50}
     assert st["started_at"] is None
+    assert st["last_recheck"] is None
+    assert st["bounced"] == 0 and st["retried"] == 0
+
+
+# --------------------------------------------------------------------------
+# bounce recheck
+# --------------------------------------------------------------------------
+
+def _bounce(bounces, address="careers@acme.com") -> None:
+    """The next scan learns this address bounced."""
+    bounces.learns.add(address)
+
+
+def recheck(**body) -> dict:
+    r = client.post(f"{BASE}/recheck", json=body or {})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_recheck_re_addresses_a_bounced_row_without_re_tailoring(
+        db, tailor, bounces, resolver):
+    """The point of the whole reorder: a bounce costs an address, not a CV."""
+    item = _prepare_one_ready(db)
+    assert item.recipient == "careers@acme.com"
+    tailored_before = len(tailor.calls)
+    resume_before = item.resume_path
+    resolver.result = {"address": "talent@acme.com", "source": "crawl",
+                       "domain": "acme.com", "domain_origin": "url",
+                       "source_url": "https://acme.com/careers", "confidence": 0.9,
+                       "rejected": None, "reason": "published on the careers page"}
+    _bounce(bounces)
+
+    body = recheck()
+
+    assert body["bounced"] == 1 and body["retried"] == 1 and body["blocked"] == 0
+    assert bounces.scans == [{"hours": 48, "limit": 40}]
+    assert "careers@acme.com" in bounces.marked
+    db.refresh(item)
+    assert item.status == "ready"
+    assert item.recipient == "talent@acme.com"
+    assert item.recipient_source == "company_site"
+    assert item.resume_path == resume_before, "materials were replaced"
+    assert len(tailor.calls) == tailored_before, "re-tailored after a bounce"
+    # The preview was rebuilt for the NEW address: the stored hash is the one
+    # /send recomputes, so a stale preview would refuse the very send this
+    # recheck exists to enable.
+    job = db.query(Job).one()
+    assert item.preview_hash == om._preview_hash(
+        om.outreach_dedup_key(job.company, job.title, str(job.source_id)),
+        "talent@acme.com", item.subject or "", item.body or "")
+    # The dead address is excluded by the dead set, not by luck.
+    assert "careers@acme.com" in resolver.calls[-1]["dead"]
+
+    st = client.get(f"{BASE}/status").json()
+    assert st["last_recheck"] is not None
+    assert st["bounced"] == 1 and st["retried"] == 1
+
+
+def test_a_re_addressed_row_sends_through_the_same_path(db, fake_send, bounces,
+                                                        resolver):
+    """A retry is a NEW send: every guard re-runs and the ledger records it."""
+    item = _prepare_one_ready(db)
+    resolver.result = {**resolver.result, "address": "talent@acme.com",
+                       "source": "crawl", "reason": "careers page"}
+    _bounce(bounces)
+    recheck()
+
+    body = client.post(f"{BASE}/send", json={"ids": [item.id], "confirm": "SEND"}).json()
+
+    assert body["sent"] == 1
+    assert fake_send.calls[0]["to_addr"] == "talent@acme.com"
+    db.refresh(item)
+    assert item.status == "sent"
+    ledger = db.query(OutreachSend).filter(OutreachSend.status == "sent").one()
+    assert ledger.recipient == "talent@acme.com"
+    assert item.outreach_send_id == ledger.id
+
+
+def test_recheck_blocks_a_row_with_no_alternate_address(db, tailor, bounces,
+                                                        resolver):
+    item = _prepare_one_ready(db)
+    resolver.result = {**resolver.result, "address": None,
+                       "reason": "no domain for this company"}
+    _bounce(bounces)
+
+    body = recheck()
+
+    assert body["bounced"] == 1 and body["retried"] == 0 and body["blocked"] == 1
+    db.refresh(item)
+    assert item.status == "blocked"
+    assert item.block_reason == "no_alternate_address"
+    assert "no domain" in (item.error or "")
+    assert item.recipient is None and item.preview_hash is None
+    assert resolver.calls, "did not even look for a second address"
+
+
+def test_recheck_stops_at_max_retries(db, cfg, bounces, resolver):
+    """A company with a permanently broken mail server is not retried forever.
+
+    attempts counts ATTEMPTS: the first prepare is 1, so max_retries=2 is spent
+    at 3 and the row must stop there — untouched, with the address that bounced
+    still on it for the card to show.
+    """
+    cfg["max_retries"] = 2
+    item = _prepare_one_ready(db)
+    item.attempts = 3
+    db.commit()
+    resolver.result = {**resolver.result, "address": "talent@acme.com",
+                       "source": "crawl", "reason": "careers page"}
+    _bounce(bounces)
+
+    body = recheck()
+
+    assert body["retried"] == 0 and body["blocked"] == 1
+    db.refresh(item)
+    assert item.status == "blocked"
+    assert item.block_reason == "retries_exhausted"
+    assert item.recipient == "careers@acme.com", "cleared a row it refused to retry"
+    assert resolver.calls == [], "re-resolved a row that had exhausted its retries"
+    assert item.attempts == 3, "spent an attempt on a refusal"
+
+
+def test_a_suppressed_address_is_never_retried(db, bounces, resolver):
+    """The human asked us to stop. Finding a second inbox at the same company
+    is the opposite of honouring that."""
+    item = _prepare_one_ready(db)
+    db.add(OutreachSuppression(value="careers@acme.com", scope="address",
+                               reason="reply: STOP", source="reply_scan"))
+    db.commit()
+    resolver.result = {**resolver.result, "address": "talent@acme.com",
+                       "source": "crawl", "reason": "careers page"}
+    _bounce(bounces)
+
+    body = recheck()
+
+    assert body["retried"] == 0
+    db.refresh(item)
+    assert item.status == "blocked" and item.block_reason == "suppressed"
+    assert resolver.calls == [], "looked for another address for a suppressed company"
+
+
+def test_a_bounce_on_an_already_sent_row_is_recorded_not_retried(db, fake_send,
+                                                                 bounces, resolver):
+    """The dedup key is spent, so there is no retry — but the card must stop
+    claiming a clean delivery, and the send record must survive."""
+    item = _prepare_one_ready(db)
+    client.post(f"{BASE}/send", json={"ids": [item.id], "confirm": "SEND"})
+    db.refresh(item)
+    assert item.status == "sent"
+    resolver.result = {**resolver.result, "address": "talent@acme.com",
+                       "source": "crawl", "reason": "careers page"}
+    _bounce(bounces)
+
+    body = recheck()
+
+    assert body["bounced"] == 1 and body["retried"] == 0
+    db.refresh(item)
+    assert item.status == "sent", "rewrote the status of a row that was sent"
+    assert item.block_reason == "bounced"
+    assert item.recipient == "careers@acme.com" and item.sent_at is not None
+    assert item.outreach_send_id is not None
+    assert resolver.calls == []
+
+
+def test_recheck_leaves_rows_whose_address_is_still_alive(db, tailor, bounces,
+                                                          resolver):
+    item = _prepare_one_ready(db)
+    _bounce(bounces, "someone-else@other.test")
+
+    body = recheck()
+
+    assert body["bounced"] == 0 and body["retried"] == 0
+    db.refresh(item)
+    assert item.status == "ready" and item.recipient == "careers@acme.com"
+    assert resolver.calls == []
+
+
+def test_recheck_refuses_while_a_prepare_run_is_active(db, tailor):
+    aid = seed(db)
+    queue([aid])
+    tailor.gate = threading.Event()
+    client.post(f"{BASE}/prepare", json={})
+    assert tailor.entered.wait(timeout=20)
+
+    r = client.post(f"{BASE}/recheck", json={})
+
+    assert r.status_code == 409, r.text
+    tailor.gate.set()
+    wait_idle()

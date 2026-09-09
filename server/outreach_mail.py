@@ -729,56 +729,46 @@ def _company_fallback_recipient(job: Job, dead: set[str] | None) -> tuple[str | 
     """A recipient from the COMPANY, when the posting itself publishes none.
 
     Measured on 12 live LinkedIn "AI Engineer" postings: every one had a full
-    description and NOT ONE printed an email address. Companies that recruit
-    through LinkedIn's apply flow have no reason to publish an inbox, so a
-    screen that only reads post text finds essentially nothing and the feature
-    is inert.
+    description and NOT ONE printed an email address. Companies recruiting
+    through an apply flow have no reason to publish an inbox, so a screen that
+    reads only post text finds essentially nothing and the feature is inert.
 
-    utils/company_email already solves this and is the more conservative path
-    of the two: it prefers an address the company PUBLISHED on its own site,
-    and only constructs careers@domain when `mail.guess_addresses` is on — a
-    constructed address is MX-checked, requires the domain to provably belong
-    to that company, is capped per day, and is never reused after a bounce.
+    Delegates to utils.recipient.resolve, which is the SAME path
+    agents/auto_applier uses, so the Outreach screen and the auto-applier can no
+    longer disagree about who is contactable. This used to refuse every
+    constructed (careers@domain) address outright, because the ownership check
+    of the day accepted strangers for short company names — measured,
+    domain_belongs_to("moab.com", "Moab") was True. That is now handled properly
+    by domain_confidently_belongs_to instead of by a blanket refusal, so
+    constructed addresses are available again exactly as they are to the
+    auto-applier, gated by the daily guessed-address quota.
 
-    Returns (address, source) where source is "company_site" or "constructed",
-    or (None, None). Never raises: this is a best-effort enrichment.
+    Returns (address, source) with source "company_site" or "constructed", or
+    (None, None). Never raises: this is best-effort enrichment.
     """
     try:
-        cfg = _cfg().get("mail", {}) or {}
-        from utils.company_email import find_company_email
-        rec = find_company_email(
-            job,
-            allow_crawl=bool(cfg.get("lookup_website", True)),
-            allow_guess=bool(cfg.get("guess_addresses", False)),
-            guess_locals=cfg.get("guess_locals"),
-            dead=dead or set(),
-        ) or {}
-        addr = (rec.get("address") or "").strip()
+        from utils import recipient as _rc
+    except Exception as e:                      # pragma: no cover - defensive
+        logger.debug(f"[outreach] shared resolver unavailable: {e}")
+        return None, None
+    try:
+        mail_cfg = _cfg().get("mail", {}) or {}
+        session = get_session()
+        try:
+            quota_used = _rc.guessed_sent_today(session)
+        finally:
+            session.close()
+        rec = _rc.resolve(job, mail_cfg=mail_cfg, dead=dead or set(),
+                          sent_today_guessed=quota_used) or {}
+        addr, src = rec.get("address"), rec.get("source")
         if not addr:
+            # The reason is useful even when nothing was found — it separates
+            # "publishes nothing" from "the only address was accommodations@".
+            logger.debug(f"[outreach] no recipient for {job.company!r}: {rec.get('reason')}")
             return None, None
-
-        # A CONSTRUCTED address (careers@<guessed domain>) is only acceptable
-        # when the employer's domain is known from their OWN posting URL. A
-        # job-board posting gives us nothing but a bare company name, and
-        # domain_belongs_to cannot carry that weight for a short generic one:
-        # measured on real rows, "Moab" accepted moab.com and "Garage" accepted
-        # garage.com, because those homepages naturally contain the word. Both
-        # are strangers' domains, and a CV sent there is worse than none sent.
-        # A crawled address is different — the company published it itself.
-        if rec.get("source") == "guess" and rec.get("domain_origin") != "url":
-            logger.info(
-                f"[outreach] refusing constructed address {addr!r} for "
-                f"{job.company!r}: domain was {rec.get('domain_origin')}, not the "
-                f"employer's own posting URL")
-            return None, None
-        # The company path has its own screening, but the send-time screen is
-        # the authority — re-apply it here so an unusable address never even
-        # reaches the preview.
-        from utils.mailer import is_safe_recipient
-        if not is_safe_recipient(addr) or addr.lower() in (dead or set()):
-            return None, None
-        src = "company_site" if rec.get("source") in ("crawl", "website") else "constructed"
-        return addr, src
+        # "posting" is handled by the caller's own extraction step; anything
+        # this path returns is company-derived.
+        return addr, ("company_site" if src == "company_site" else "constructed")
     except Exception as e:                      # pragma: no cover - defensive
         logger.debug(f"[outreach] company fallback failed for {job.company!r}: {e}")
         return None, None

@@ -1707,6 +1707,7 @@
     <button class="btn" id="maSend">Send ready&hellip;</button>
     <button class="btn" id="maRecheck" title="Look for bounces, then find a different address for anything that bounced">Recheck bounces</button>
     <button class="btn" id="maRefresh">Refresh</button>
+    <button class="btn" id="maUnblockAll" title="Return every retryable blocked job to the queue, keeping its CV">Unblock all</button>
     <button class="btn" id="maClearDone" title="Remove sent and blocked rows from the list">Clear finished</button>
     <span class="ob-cap" id="maCap">
       <span class="ob-meter"><i id="maMeter" style="width:0%"></i></span>
@@ -4758,11 +4759,21 @@ function maCard(it){
     + '<div style="margin-top:6px">' + chips.join("") + '</div>'
     + '</div>'
     + (it.body ? '<button class="btn" data-ma-view="' + it.id + '">View email</button>' : "")
+    + (it.status === "blocked" && it.unblockable
+        ? '<button class="btn" data-ma-unblock="' + it.id + '" '
+          + 'title="Return this job to the queue, keeping its CV">Unblock</button>'
+          + '<button class="btn" data-ma-addr="' + it.id + '" '
+          + 'title="Supply the application address yourself">Set address</button>'
+        : "")
     + '<button class="oxbtn" data-ma-del="' + it.id + '" title="Remove from the queue" '
     + 'aria-label="Remove from the queue">&times;</button>'
     + '</div>'
-    + (why ? '<div class="mawhy">' + esc(why[0]) + '</div>'
-           : (it.block_reason ? '<div class="mawhy">Blocked: ' + esc(it.block_reason) + '</div>' : ""))
+    + (why || it.block_reason
+        ? '<div class="mawhy">' + esc(why ? why[0] : "Blocked: " + it.block_reason)
+          + (it.status === "blocked" && it.unblockable === false && it.unblock_refusal
+              ? ' <b>' + esc(it.unblock_refusal) + '</b>' : "")
+          + '</div>'
+        : "")
     + (it._open && it.body
         ? '<div class="opreview"><div class="ometa"><b>To</b> ' + esc(it.recipient || "")
           + ' &middot; <b>Subject</b> ' + esc(it.subject || "") + '</div><pre>' + esc(it.body) + '</pre></div>'
@@ -4806,6 +4817,12 @@ function maPaint(){
         await maLoad();
       }catch(e){ toast("Remove failed: " + e.message, true); }
     };
+  });
+  body.querySelectorAll("[data-ma-unblock]").forEach(function(b){
+    b.onclick = function(){ maUnblock(Number(b.dataset.maUnblock), false); };
+  });
+  body.querySelectorAll("[data-ma-addr]").forEach(function(b){
+    b.onclick = function(){ maUnblock(Number(b.dataset.maAddr), true); };
   });
   body.querySelectorAll("[data-ma-view]").forEach(function(b){
     b.onclick = function(){
@@ -4959,6 +4976,58 @@ async function maRecheck(){
   finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
 }
 
+
+// --- Unblock -----------------------------------------------------------------
+// A blocked row is usually blocked by CIRCUMSTANCE (nobody published an address,
+// the cap was reached) and the user may well know something the agent does not —
+// most often the address itself. Unblocking returns the row to the queue while
+// KEEPING the generated CV and cover letter, which are the expensive part.
+//
+// Three reasons are never overridable, and the server enforces that, not this
+// file: `suppressed` (a person asked not to be contacted), `unsafe_recipient`
+// (an accommodation/legal/no-reply inbox) and `already_emailed` (a duplicate to
+// a real person). The button is hidden for those AND the API refuses them.
+async function maUnblock(id, withAddress){
+  const item = maState.items.find(function(x){ return x.id === id; });
+  let body = {};
+  if(withAddress){
+    const guess = (item && item.recipient) || "";
+    const addr = prompt("Application address for "
+      + ((item && item.company) || "this job") + ":\n\n"
+      + "It is screened the same way as any other: an accommodation, legal or no-reply "
+      + "inbox is refused even when you type it in yourself.", guess);
+    if(addr === null) return;
+    if(!addr.trim()){ toast("No address entered", true); return; }
+    body.recipient = addr.trim();
+  }
+  try{
+    const d = await maPost("/api/mail-agent/queue/" + id + "/unblock", body);
+    toast(d.status === "ready"
+      ? "Ready to send — address accepted"
+      : "Back in the queue — run Prepare to try again");
+    await maLoad();
+  }catch(e){
+    toast(e.message, true);
+    await maLoad();
+  }
+}
+
+async function maUnblockAll(){
+  const blocked = maState.items.filter(function(i){ return i.status === "blocked"; });
+  const can = blocked.filter(function(i){ return i.unblockable; }).length;
+  if(!can){ toast("Nothing here can be unblocked", true); return; }
+  if(!confirm("Return " + can + " blocked job" + (can === 1 ? "" : "s") + " to the queue?\n\n"
+    + "Their résumés and cover letters are kept. Run Prepare afterwards to look for an "
+    + "address again.\n\nRows blocked because someone opted out, because the only address is "
+    + "an accommodation inbox, or because you already emailed that role are left alone.")) return;
+  try{
+    const d = await maPost("/api/mail-agent/queue/unblock-all", {});
+    toast((d.unblocked || 0) + " returned to the queue"
+      + (d.refused ? " · " + d.refused + " left blocked (protected)" : ""));
+    await maLoad();
+  }catch(e){ toast("Unblock failed: " + e.message, true); }
+}
+
 async function maClearFinished(){
   if(!confirm("Remove sent and blocked rows from the queue?\n\nThe send history is kept.")) return;
   try{
@@ -4992,6 +5061,7 @@ document.addEventListener("DOMContentLoaded", function(){
   wire("#maSend", maSendReady);
   wire("#maRefresh", maLoad);
   wire("#maRecheck", maRecheck);
+  wire("#maUnblockAll", maUnblockAll);
   wire("#maClearDone", maClearFinished);
 
   // Jobs screen entry points — mirror the existing agent-queue buttons.
