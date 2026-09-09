@@ -509,6 +509,12 @@ def arm(req: ArmRequest):
     return rec
 
 
+def arm_for_app(app_id: int) -> dict:
+    """Arm autofill for one application — the in-process form of POST /arm,
+    so a server-side caller need not round-trip through HTTP."""
+    return arm(ArmRequest(app_id=app_id))
+
+
 @router.get("/armed")
 def armed(host: str = "", url: str = ""):
     """The un-expired arm for this host (or whose url is a prefix of the page url), else {}."""

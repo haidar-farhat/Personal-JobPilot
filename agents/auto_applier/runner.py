@@ -13,7 +13,9 @@ skipped_files, skipped_captcha, failed, total_attempted, daily_cap_hit}
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -25,7 +27,7 @@ from agents.auto_applier.mapper_engine import MapperApplier
 from agents.auto_applier.workday import WorkdayAutoApplier
 from db.database import get_session, record_status_change
 from db.models import (Application, ApplicationStatus, Job, JobScore,
-                       AUTO_APPLY_PERMANENT_FAILURES)
+                       AUTO_APPLY_PERMANENT_FAILURES, SYSTEM_FAULTS)
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +38,68 @@ _PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
                    "started_at": None, "finished_at": None}
 
 
-def _resolve_recipient(job, page_text: str, mail_cfg: dict) -> tuple[str | None, str]:
+_LOCK_PATH = Path(__file__).resolve().parents[2] / "output" / "apply.lock"
+_LOCK_STALE_SECONDS = 30 * 60
+
+
+def apply_lock_holder() -> dict | None:
+    """Who is currently running an apply cycle, or None.
+
+    The dashboard and the scheduler are separate processes, so an in-memory
+    flag cannot coordinate them — this is a lockfile. A stale lock (crashed
+    run) expires rather than wedging the scheduler forever.
+    """
+    try:
+        rec = json.loads(_LOCK_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    started = rec.get("started_at") or 0
+    if time.time() - float(started) > _LOCK_STALE_SECONDS:
+        return None                      # stale — treat as free
+    return rec
+
+
+def _acquire_apply_lock(owner: str) -> bool:
+    if apply_lock_holder():
+        return False
+    try:
+        _LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _LOCK_PATH.write_text(json.dumps(
+            {"owner": owner, "pid": os.getpid(), "started_at": time.time()}),
+            encoding="utf-8")
+        return True
+    except OSError:
+        return True                      # never block applying over a lock problem
+
+
+def _release_apply_lock() -> None:
+    try:
+        _LOCK_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _resolve_recipient(job, page_text: str, mail_cfg: dict,
+                       own: str = "") -> tuple[str | None, str]:
     """(address, where_it_came_from). Each stage runs at most once — the old
     code re-ran the lookup just to label its own log line, which would mean a
     second network fetch now that later stages hit the web."""
     from utils.mailer import find_employer_recipient
 
+    own = (own or "").strip().lower()
+
+    def usable(addr):
+        """Our OWN address is not an employer. The page is read after the bot
+        has filled the form, so the applicant's email is sitting right there in
+        it — without this guard the agent mails itself and calls it an
+        application."""
+        return addr and addr.strip().lower() != own
+
     hit = find_employer_recipient(getattr(job, "description", ""))
-    if hit:
+    if usable(hit):
         return hit, "description"
     hit = find_employer_recipient(page_text)
-    if hit:
+    if usable(hit):
         return hit, "live page"
 
     if not (mail_cfg.get("lookup_website") or mail_cfg.get("guess_addresses")):
@@ -65,7 +118,7 @@ def _resolve_recipient(job, page_text: str, mail_cfg: dict) -> tuple[str | None,
         logger.warning(f"[auto_apply] company-email lookup failed: {e}")
         return None, ""
 
-    if not rec.get("address"):
+    if not usable(rec.get("address")):
         return None, ""
     if rec.get("source") == "guess" and not _guess_quota_left(mail_cfg):
         logger.info("[auto_apply] daily guessed-address cap reached — not emailing")
@@ -112,6 +165,12 @@ def _email_application(profile: dict, config: dict | None, job, app,
     """
     mail_cfg = ((config or {}).get("mail") or {})
     if not mail_cfg.get("enabled"):
+        # Say WHY. This used to return in silence, so a caller that forgot to
+        # pass config looked identical to "mail is switched off" — and every
+        # dashboard-started run applied without emailing for hours unnoticed.
+        logger.info("[auto_apply] no email: %s",
+                    "config not passed to run_auto_apply" if not config
+                    else "mail.enabled is false")
         return
 
     from utils.mailer import find_employer_recipient, send_application_email
@@ -123,7 +182,8 @@ def _email_application(profile: dict, config: dict | None, job, app,
     # Email the employer when THEIR OWN posting publishes an application
     # address (screened: accommodation/compliance inboxes are never used).
     if not to_addr and mail_cfg.get("to_employer"):
-        found, src = _resolve_recipient(job, page_text, mail_cfg)
+        found, src = _resolve_recipient(job, page_text, mail_cfg,
+                                        own=identity.get("email", ""))
         if found:
             to_addr, self_copy = found, False
             logger.info(f"[auto_apply] application address found in {src} -> {found}")
@@ -365,7 +425,8 @@ def _record_result(session, app: Application, result: ApplyResult) -> None:
 # Main runner
 # ============================================================
 
-def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -> dict:
+def run_auto_apply(config: dict | None = None, only_app_id: int | None = None,
+                   owner: str = "scheduler", respect_lock: bool = False) -> dict:
     """Run one auto-apply cycle.
 
     Args:
@@ -385,6 +446,16 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
         logger.info("[auto_apply] disabled in profile.guardrails — skipping")
         return {"enabled": False}
 
+    # Stand down while an Agent-screen run is working: two cycles applying at
+    # once produce interleaved, unpredictable ordering and two unrelated
+    # progress counters on the same screen.
+    if respect_lock:
+        held = apply_lock_holder()
+        if held:
+            logger.info(f"[auto_apply] skipped — {held.get('owner')} run in progress")
+            return {"skipped_locked": True, "holder": held.get("owner")}
+    took_lock = _acquire_apply_lock(owner)
+
     daily_cap = guardrails.get("daily_cap", 10)
     max_failures = guardrails.get("max_consecutive_failures", 3)
     per_app_timeout = guardrails.get("per_app_timeout_seconds", 90)
@@ -396,6 +467,8 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
         remaining_quota = max(0, daily_cap - applied_today)
         if remaining_quota == 0:
             logger.info(f"[auto_apply] daily cap of {daily_cap} already reached — skipping")
+            if took_lock:
+                _release_apply_lock()
             return {"daily_cap_hit": True, "applied_today": applied_today}
 
         candidates = _candidates(session, profile, config=config, max_candidates=remaining_quota * 2)
@@ -403,6 +476,8 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
             candidates = [c for c in candidates if c[0].id == only_app_id][:1]
         if not candidates:
             logger.info("[auto_apply] no eligible candidates this cycle")
+            if took_lock:
+                _release_apply_lock()
             return {"total_attempted": 0, "submitted": 0}
 
         logger.info(
@@ -548,12 +623,22 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
                     consecutive_failures += 1
                 else:
                     summary["failed_other"] += 1
-                    consecutive_failures += 1
+                    # Only a SYSTEM fault counts toward the halt. A form the bot
+                    # refused to fake (required fields, essay cap) is the bot
+                    # working correctly and is the common case — counting those
+                    # stopped every cycle after ~6 jobs.
+                    if result.status in SYSTEM_FAULTS:
+                        consecutive_failures += 1
+                    else:
+                        consecutive_failures = 0
+                        summary["skipped_expected"] = summary.get("skipped_expected", 0) + 1
 
                 # Polite gap between submissions so we don't look like a flood
                 time.sleep(3)
 
         finally:
+            if took_lock:
+                _release_apply_lock()
             _progress_end()
             try:
                 context.close()

@@ -176,7 +176,9 @@ def task_auto_apply():
     """
     try:
         from agents.auto_applier.runner import run_auto_apply
-        result = run_auto_apply(load_config())
+        result = run_auto_apply(load_config(), owner="scheduler", respect_lock=True)
+        if result.get("skipped_locked"):
+            return   # an Agent-screen run is working; it will finish on its own
         if result.get("submitted", 0) > 0:
             logger.info(
                 f"[auto_apply] submitted {result['submitted']} application(s) "

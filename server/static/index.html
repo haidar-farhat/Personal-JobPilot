@@ -3804,7 +3804,16 @@ async function renderProfile(){
 // ============================================================
 // Agent page — Orion-style queue → materials → run → results
 // ============================================================
-let _agentPoll=null;
+let _agentPoll=null, _wasRunning=false;
+function summarizeToday(t){
+  // Real outcomes from the database — covers scheduler cycles too, which the
+  // in-memory summary never saw.
+  if(!t||!t.attempted) return "";
+  const bits=[`${t.attempted} attempted today`];
+  if(t.submitted) bits.push(`<b>${t.submitted} submitted</b>`);
+  if(t.needs_you) bits.push(`${t.needs_you} need you`);
+  return bits.join(" · ");
+}
 function summarizeRun(s){
   if(!s||typeof s!=="object") return "No agent run yet.";
   if(s.error) return `Last run failed: ${s.error}`;
@@ -3833,7 +3842,7 @@ function agResultCard(a){
       ${a.next_action?`<div class="s">${esc(a.next_action)}</div>`:""}
       ${!ok&&(a.missing_fields||[]).length?`<div class="miss-wrap"><div class="miss-h">You need to answer:</div>
         <div class="chips">${a.missing_fields.map(f=>`<span class="chip miss">${esc(f)}</span>`).join("")}</div></div>`:""}</div>
-    <div class="acts">${ok&&a.has_tailored_cv?`<a class="btn-link" href="/api/file/${a.has_resume_pdf?"resume_pdf":"resume"}/${a.id}">Download Resume</a>`:""}${!ok?`<button class="btn-mint" data-continue="${a.id}" title="Open the posting with autofill armed — it refills everything it can and leaves only what needs you">Continue application</button>`:""}<button class="btn-link" data-open="${a.id}">Open</button></div></div>`;
+    <div class="acts">${ok&&a.has_tailored_cv?`<a class="btn-link" href="/api/file/${a.has_resume_pdf?"resume_pdf":"resume"}/${a.id}">Download Resume</a>`:""}${!ok?`<button class="btn-mint" data-continue="${a.id}" title="Opens the JobPilot Chromium with autofill loaded — it fills everything it can and leaves only what needs you">Continue application</button>`:""}<button class="btn-link" data-open="${a.id}">Open</button></div></div>`;
 }
 async function renderAgent(){
   const box=$("#agentBody"); if(!box) return;
@@ -3856,18 +3865,23 @@ async function renderAgent(){
   const pctRun=ptot?Math.round(pdone/ptot*100):0;
   const STEP={generating:"generating résumé",applying:"applying"};
   const PHASE={running:"Working through your queue",queueing:"Adding jobs to the queue",generating:"Generating résumés + cover letters",applying:"Applying",starting:"Starting…",done:"Finished",cancelled:"Stopped",error:"Failed"};
+  // Two different populations share this bar: the auto-run walks every job it
+  // will generate a résumé for, while a plain apply cycle only walks the ones
+  // already eligible to submit. Saying which avoids "6 of 186" next to "3 of 30".
+  const unitLabel = ar.active ? "jobs to prepare" : "ready to apply";
   let phaseLbl=ar.active||ar.phase?(PHASE[ar.phase]||ar.phase):"";
   if(ar.active&&ar.step&&STEP[ar.step]) phaseLbl=`Job ${ar.phase_done||0} — ${STEP[ar.step]}`;
   box.innerHTML=`<div class="ag-status"><span class="ag-bulb ${running?"on":"off"}" title="${running?"Agent is running":"Agent is idle"}" aria-label="${running?"Agent running":"Agent stopped"}"></span>
       <span class="ag-pill ${running?"run":""}">${running?"Running — applying to your queue…":`Standby — ${queue.length} job${queue.length===1?"":"s"} added. Awaiting application start.`}</span>
-      <span class="sum">${!st?"Agent status unavailable — restart the dashboard to load the new API.":(running&&ar.active?esc(`${phaseLbl}…`):esc(summarizeRun(st.last_summary)))}</span>
+      <span class="sum">${!st?"Agent status unavailable — restart the dashboard to load the new API.":
+        (running&&ar.active?esc(`${phaseLbl}…`):(summarizeToday(st.today)||esc(summarizeRun(st.last_summary))))}</span>
       <button class="btn-link" id="agentAddAll" ${running?"disabled":""} title="Queue every scored job, then start the agent">＋ Add all to start</button>
       <button class="btn-link" id="agentClear" ${running||!queue.length?"disabled":""} title="Empty the agent queue — jobs go back to the feed, nothing is deleted">🗑 Clear queue${queue.length?` (${queue.length})`:""}</button>
       <button class="btn-mint" id="agentAutoRun" ${running?"disabled":""} title="Queue everything, generate every résumé, then apply — hands-off">⚡ Auto-run everything</button>
       ${running?`<button class="btn-link" id="agentStop" style="color:#e5484d">■ Stop</button>`:""}
       <button class="btn-mint" id="agentStart" ${running?"disabled":""}>${running?"Running…":"Start"}</button>
       ${ptot?`<div class="ag-prog"><div class="bar"><i style="width:${running?pctRun:100}%"></i></div>
-        <div class="lbl"><span>${running?`${phaseLbl?esc(phaseLbl)+" — ":""}<b>${pdone}</b> of <b>${ptot}</b>${pr.current?" — "+esc(pr.current):""}`:`Last run finished — <b>${pdone}</b> of <b>${ptot}</b> processed`}</span><span>${running?pctRun+"%":""}</span></div></div>`:
+        <div class="lbl"><span>${running?`${phaseLbl?esc(phaseLbl)+" — ":""}<b>${pdone}</b> of <b>${ptot}</b> ${unitLabel}${pr.current?" — "+esc(pr.current):""}`:`Last run finished — <b>${pdone}</b> of <b>${ptot}</b> processed`}</span><span>${running?pctRun+"%":""}</span></div></div>`:
       (ar.active?`<div class="ag-prog"><div class="bar"><i style="width:100%;opacity:.4"></i></div><div class="lbl"><span>${esc(phaseLbl)}…</span></div></div>`:"")}</div>
     <div class="ag-cols">
       <div class="ag-col"><h4>Queue (${queue.length})</h4>${queue.map(agQueueCard).join("")||`<div class="empty">Press <b>+ Add to Agent</b> (or ♥) on a job card to queue it.</div>`}</div>
@@ -3884,11 +3898,17 @@ async function renderAgent(){
     const id=+b.dataset.continue, a=state.apps.find(x=>x.id===id)||{}, miss=(a.missing_fields||[]).length;
     b.disabled=true; b.textContent="Opening…";
     try{
-      await fetch("/api/autofill/arm",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({app_id:id})});
-      fetch(`/api/application/${id}/open-link`,{method:"POST"});
-      toast(miss?`Opening — autofill will refill the form; ${miss} field${miss===1?"":"s"} need${miss===1?"s":""} your answer.`
-                :"Opening the posting — autofill is armed. Review, then submit it yourself.");
-    }catch(e){ toast("Couldn't arm autofill — is the extension installed?", true); }
+      // Dedicated Chromium with the extension loaded — NOT the OS default
+      // browser, which may not have (or even be able to run) the extension.
+      const r=await fetch(`/api/application/${id}/open-assisted`,{method:"POST"});
+      const d=await r.json().catch(()=>({}));
+      if(r.ok&&d.ok){
+        toast(miss?`Opening the JobPilot browser — autofill fills the form; ${miss} field${miss===1?"":"s"} need${miss===1?"s":""} your answer.`
+                  :"Opening the JobPilot browser — autofill is armed. Review, then submit it yourself.");
+      }else{
+        toast(d.error||"Couldn't open the JobPilot browser", true);
+      }
+    }catch(e){ toast("Couldn't reach the dashboard to open the browser", true); }
     b.disabled=false; b.textContent="Continue application"; });
   const dismiss=async(btn,scope,label)=>{
     const n=scope==="applied"?nOk:nBad;
@@ -3955,6 +3975,11 @@ async function renderAgent(){
   clearTimeout(_agentPoll);
   // Poll fast while a cycle runs; keep a slow beat when idle so a scheduler-
   // started cycle lights the bulb without needing a manual refresh.
+  // A run moves rows between statuses server-side. Without re-fetching, the
+  // Queue count keeps showing the pre-run snapshot (it read 189 while the DB
+  // had 0 queued). Re-fetch once on the running -> idle edge.
+  if(_wasRunning && !running) loadAll();
+  _wasRunning = running;
   _agentPoll=setTimeout(()=>{ if(!$("#agentView").hidden) renderAgent(); }, running?4000:15000);
 }
 

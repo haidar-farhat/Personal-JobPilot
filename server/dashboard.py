@@ -91,6 +91,17 @@ class _QuietLogs(logging.Filter):
 for _name in ("asyncio", "uvicorn.access"):
     logging.getLogger(_name).addFilter(_QuietLogs())
 
+# Uvicorn configures only its own loggers, so anything logged by agents/* and
+# utils/* inside a dashboard-started run went nowhere — the auto-apply and
+# mailer lines were invisible in dashboard.log, which is why a run that never
+# emailed looked identical to one that did. Give the root logger a handler.
+if not logging.getLogger().handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s",
+                                      datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(_h)
+logging.getLogger().setLevel(logging.INFO)
+
 # CORS — the server binds to 127.0.0.1 only; permissive origins let the
 # browser-extension service worker call the autofill API.
 from fastapi.middleware.cors import CORSMiddleware
@@ -160,6 +171,20 @@ STATUS_META = {
     "no_longer_available": {"label": "NO LONGER AVAILABLE", "tone": "muted",  "stage": 9},
     "skipped":            {"label": "SKIPPED",           "tone": "muted",    "stage": 0},
 }
+
+
+def _load_settings() -> dict:
+    """settings.yaml as a dict, or {} if unreadable.
+
+    Callers that hand this to run_auto_apply MUST pass it — the runner treats a
+    missing config as "no mail configured" and skips emailing without a word.
+    """
+    try:
+        with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.error(f"[dashboard] could not read settings.yaml: {e}")
+        return {}
 
 
 _MISSING_PREFIXES = ("Required fields left empty: ", "Form rejected submit — invalid: ")
@@ -891,6 +916,42 @@ def api_file_download(file_type: str, app_id: int):
         session.close()
 
 
+@app.post("/api/application/{app_id}/open-assisted")
+def api_open_assisted(app_id: int):
+    """Arm autofill and open the posting in the JobPilot Chromium.
+
+    Not webbrowser.open(): that hands the URL to the OS default browser, which
+    is often not where the extension lives (Firefox cannot run it at all), so
+    the user landed on a blank form with no autofill.
+    """
+    from server.autofill import arm_for_app
+    from utils.assist_browser import open_assisted
+
+    session = get_session()
+    try:
+        app_obj = session.query(Application).get(app_id)
+        if not app_obj:
+            raise HTTPException(status_code=404, detail="Application not found")
+        job = session.query(Job).get(app_obj.job_id)
+        if not job or not job.url:
+            raise HTTPException(status_code=404, detail="No URL available")
+        url = job.url
+    finally:
+        session.close()
+
+    # Arm BEFORE the window exists, so the extension finds the record on its
+    # first poll rather than racing the page load.
+    try:
+        arm_for_app(app_id)
+    except Exception as e:
+        logger.warning(f"[assist] could not arm autofill for {app_id}: {e}")
+
+    res = open_assisted(url)
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=503)
+    return res
+
+
 @app.post("/api/application/{app_id}/open-link")
 def api_open_link(app_id: int):
     """Open the application URL in the default browser."""
@@ -1369,7 +1430,11 @@ _AGENT = {"thread": None, "last_summary": None, "started_at": None,
 def _agent_worker():
     try:
         from agents.auto_applier.runner import run_auto_apply
-        _AGENT["last_summary"] = run_auto_apply()
+        # The config MUST be passed. Without it _email_application sees no
+        # `mail:` block and returns before its first log line, so every run
+        # started from this button applied without ever attempting an email —
+        # silently, which is why the logs showed nothing at all.
+        _AGENT["last_summary"] = run_auto_apply(_load_settings(), owner="agent screen")
     except Exception as e:  # runner is being rewritten by another agent — surface, never crash
         _AGENT["last_summary"] = {"error": str(e)}
 
@@ -1457,7 +1522,7 @@ def _autorun_worker():
                 # only_app_id: apply to THIS job alone. Without it the pass
                 # would sweep every eligible application, which is exactly the
                 # batching this loop exists to avoid.
-                res = run_auto_apply(config, only_app_id=app_id) or {}
+                res = run_auto_apply(config, only_app_id=app_id, owner="auto-run") or {}
                 for k in totals:
                     totals[k] += res.get(k, 0) or 0
                 _AGENT["last_summary"] = dict(totals)
@@ -1507,7 +1572,30 @@ def api_agent_status():
         progress = get_progress()
     except Exception:
         progress = {"active": False}
-    return {"running": bool(t and t.is_alive()) or bool(progress.get("active")),
+    # The in-memory summary only ever covers dashboard-started runs, and a
+    # cancelled auto-run overwrites it with zeros — so "0 submitted of 0
+    # attempted" was shown while the scheduler had really submitted 16. Report
+    # what the DB actually recorded today instead.
+    today_stats = {}
+    try:
+        session = get_session()
+        try:
+            start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            rows = (session.query(Application.auto_apply_status)
+                    .filter(Application.auto_apply_attempted_at >= start).all())
+            statuses = [r[0] or "" for r in rows]
+            today_stats = {
+                "attempted": len(statuses),
+                "submitted": sum(1 for x in statuses if x.startswith("submitted")),
+                "needs_you": sum(1 for x in statuses if x.startswith("failed")),
+            }
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"[agent] today stats failed: {e}")
+
+    return {"today": today_stats,
+            "running": bool(t and t.is_alive()) or bool(progress.get("active")),
             "progress": progress, "autorun": _AGENT["autorun"],
             "last_summary": _AGENT["last_summary"], "started_at": _AGENT["started_at"]}
 

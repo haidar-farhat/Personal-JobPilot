@@ -42,6 +42,22 @@ class ApplicationStatus(enum.Enum):
 # Auto-apply outcomes that will not change on a retry: the bot never signs in,
 # never creates accounts, never solves CAPTCHAs. Shared by the runner (skip on
 # re-selection) and the dashboard ("Needs manual apply" surfacing).
+# Outcomes that mean the SYSTEM is misbehaving — a wall the bot cannot pass, a
+# navigation error, an unhandled crash. Only these count toward the
+# consecutive-failure halt.
+#
+# Deliberately NOT in here: failed_required_fields_unfilled and
+# failed_too_many_essays. Those are the bot working correctly — refusing to
+# invent an answer — and they are the majority outcome on real forms. Counting
+# them halted every cycle after ~6 jobs and left the queue undrained.
+SYSTEM_FAULTS = frozenset({
+    "failed_captcha", "failed_login_required", "failed_workday_login_required",
+    "failed_honeypot", "failed_navigation", "failed_unknown",
+    "failed_form_not_found", "failed_not_workday",
+    "failed_no_submit_button", "failed_submit_button",
+    "failed_workday_unknown_step", "failed_workday_too_many_steps",
+})
+
 AUTO_APPLY_PERMANENT_FAILURES = frozenset({
     "failed_login_required", "failed_workday_login_required", "failed_captcha",
     "failed_honeypot", "failed_too_complex", "failed_too_many_essays",
