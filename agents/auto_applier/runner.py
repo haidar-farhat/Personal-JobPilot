@@ -298,11 +298,15 @@ def _record_result(session, app: Application, result: ApplyResult) -> None:
 # Main runner
 # ============================================================
 
-def run_auto_apply(config: dict | None = None) -> dict:
+def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -> dict:
     """Run one auto-apply cycle.
 
     Args:
         config: Optional pipeline-level config (reserved for future use).
+        only_app_id: apply to just this one Application and stop. The auto-run
+            pipeline uses it so each job is generated -> applied -> emailed
+            before the next one starts, instead of applying to the whole
+            eligible set in one pass.
 
     Returns:
         Summary dict with counts.
@@ -328,6 +332,8 @@ def run_auto_apply(config: dict | None = None) -> dict:
             return {"daily_cap_hit": True, "applied_today": applied_today}
 
         candidates = _candidates(session, profile, config=config, max_candidates=remaining_quota * 2)
+        if only_app_id is not None:
+            candidates = [c for c in candidates if c[0].id == only_app_id][:1]
         if not candidates:
             logger.info("[auto_apply] no eligible candidates this cycle")
             return {"total_attempted": 0, "submitted": 0}

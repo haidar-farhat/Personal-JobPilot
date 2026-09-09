@@ -1312,7 +1312,10 @@ def _autorun_worker():
                 return
             st.update(step="applying")
             try:
-                res = run_auto_apply(config) or {}
+                # only_app_id: apply to THIS job alone. Without it the pass
+                # would sweep every eligible application, which is exactly the
+                # batching this loop exists to avoid.
+                res = run_auto_apply(config, only_app_id=app_id) or {}
                 for k in totals:
                     totals[k] += res.get(k, 0) or 0
                 _AGENT["last_summary"] = dict(totals)
