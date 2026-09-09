@@ -73,7 +73,7 @@ if %tries% GEQ 40 (
     echo           Check the watchdog window and logs\dashboard.log
     goto done
 )
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul
 goto waitloop
 
 :ready
