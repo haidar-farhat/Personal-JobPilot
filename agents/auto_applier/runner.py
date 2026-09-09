@@ -36,6 +36,60 @@ _PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
                    "started_at": None, "finished_at": None}
 
 
+def _email_application(profile: dict, config: dict | None, job, app) -> None:
+    """Email the resume + cover letter for an application just submitted.
+
+    Controlled by settings.yaml `mail:`. Default is a self-copy — a record in
+    your own inbox — because ATS postings do not publish an address to apply
+    to, and mailing guessed employer addresses would be spam.
+    """
+    mail_cfg = ((config or {}).get("mail") or {})
+    if not mail_cfg.get("enabled"):
+        return
+
+    from utils.mailer import find_employer_recipient, send_application_email
+
+    identity = profile.get("identity", {}) or {}
+    self_copy = True
+    to_addr = (mail_cfg.get("to") or "").strip()
+
+    # Email the employer when THEIR OWN posting publishes an application
+    # address (screened: accommodation/compliance inboxes are never used).
+    if not to_addr and mail_cfg.get("to_employer"):
+        found = find_employer_recipient(getattr(job, "description", ""))
+        if found:
+            to_addr, self_copy = found, False
+            logger.info(f"[auto_apply] posting publishes an address -> {found}")
+
+    if to_addr and to_addr != identity.get("email", ""):
+        self_copy = False
+
+    if not to_addr:
+        # No address published by this employer. Mailing yourself is not an
+        # application, so by default send nothing — the ATS form already
+        # carried the résumé. Opt in with mail.self_copy for an archive.
+        if not mail_cfg.get("self_copy"):
+            return
+        to_addr, self_copy = identity.get("email", ""), True
+    if not to_addr:
+        return
+
+    res = send_application_email(
+        to_addr=to_addr,
+        job_title=job.title or "",
+        company=job.company or "",
+        resume_path=app.resume_path,
+        cover_letter_path=app.cover_letter_path,
+        sender_name=identity.get("full_name") or "",
+        links=profile.get("links", {}),
+        self_copy=self_copy,
+    )
+    if res.get("sent"):
+        logger.info(f"[auto_apply] emailed package for '{job.title}' -> {res['to']}")
+    else:
+        logger.warning(f"[auto_apply] package email not sent: {res.get('error')}")
+
+
 def get_progress() -> dict:
     """Snapshot of the current (or last) auto-apply cycle."""
     return dict(_PROGRESS)
@@ -367,6 +421,14 @@ def run_auto_apply(config: dict | None = None) -> dict:
                         _record_result(fresh_session, fresh_app, result)
                 finally:
                     fresh_session.close()
+
+                # Email the application package (self-copy record by default).
+                # Never blocks or fails the apply cycle.
+                if result.status in ("submitted", "submitted_unverified"):
+                    try:
+                        _email_application(profile, config, job, app)
+                    except Exception as e:
+                        logger.warning(f"[auto_apply] application email failed: {e}")
 
                 if result.success and result.status == "submitted":
                     summary["submitted"] += 1

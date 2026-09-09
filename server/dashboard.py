@@ -570,6 +570,58 @@ async def api_update_status(app_id: int, request: Request):
         session.close()
 
 
+@app.post("/api/application/{app_id}/email")
+async def api_email_application(app_id: int, request: Request):
+    """Email one application's resume + cover letter to ONE recipient you name.
+
+    Human-in-the-loop on purpose: you supply the address (a recruiter who asked,
+    or a careers inbox a posting actually names). Omit `to` for a self-copy.
+    """
+    body = await request.json() if await request.body() else {}
+    to_addr = (body.get("to") or "").strip()
+    note = (body.get("body") or "").strip() or None
+
+    from server.autofill import load_profile
+    from utils.mailer import send_application_email
+
+    session = get_session()
+    try:
+        row = (session.query(Application, Job)
+               .join(Job, Application.job_id == Job.id)
+               .filter(Application.id == app_id).first())
+        if not row:
+            raise HTTPException(status_code=404, detail="Application not found")
+        app_obj, job = row
+        profile = load_profile()
+        identity = profile.get("identity", {}) or {}
+        res = send_application_email(
+            to_addr=to_addr or identity.get("email", ""),
+            job_title=job.title or "", company=job.company or "",
+            resume_path=app_obj.resume_path, cover_letter_path=app_obj.cover_letter_path,
+            sender_name=identity.get("full_name") or "", body=note,
+            links=profile.get("links", {}), self_copy=not to_addr,
+        )
+        if not res.get("sent"):
+            return JSONResponse(res, status_code=400)
+        return res
+    finally:
+        session.close()
+
+
+@app.get("/api/mail/health")
+def api_mail_health():
+    """Whether outbound email is configured (SMTP over the Gmail app password)."""
+    try:
+        from utils.mailer import mailer_ready
+        with open(PROJECT_ROOT / "config" / "settings.yaml", encoding="utf-8") as f:
+            cfg = (yaml.safe_load(f) or {}).get("mail", {}) or {}
+        ready, why = mailer_ready()
+        return {"ready": ready, "reason": why, "enabled": bool(cfg.get("enabled")),
+                "to": cfg.get("to") or "", "mode": "direct" if cfg.get("to") else "self-copy"}
+    except Exception as e:
+        return {"ready": False, "reason": str(e)}
+
+
 @app.get("/api/job-sources")
 def api_job_sources():
     """Per-provider status for the Jobs screen source panel."""

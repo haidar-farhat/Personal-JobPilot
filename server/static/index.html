@@ -1924,7 +1924,7 @@ function sortApps(list){
 // "Austin, TX; Chicago, IL", otherwise the facet hides real matches.
 // `terms:null` marks a bucket that regionsOf() assigns specially.
 const REGION_DEFS = [
-  {val:"remote",    label:"Remote (US)",       terms:null},
+  {val:"remote",    label:"Remote",            terms:null},
   {val:"portland",  label:"Portland, OR",      terms:["portland, or","portland, oregon","portland,or","beaverton","hillsboro","vancouver, wa","oregon"]},
   {val:"nevada",    label:"Nevada",            terms:["las vegas","reno","henderson","nevada"]},
   {val:"arizona",   label:"Arizona",           terms:["phoenix","tempe","scottsdale","tucson","chandler","mesa, az","arizona"]},
@@ -1943,7 +1943,25 @@ const REGION_DEFS = [
   {val:"chicago",   label:"Chicago",           terms:["chicago","evanston"]},
   {val:"boston",    label:"Boston",            terms:["boston","cambridge, ma","somerville"]},
   {val:"dc",        label:"Washington DC",     terms:["washington, d","washington d.c","washington dc","arlington, va","mclean","reston","tysons","sterling, va"]},
-  {val:"other",     label:"Other US",          terms:null},
+  // --- International. The feed now carries non-US postings (Jobicy /
+  //     Arbeitnow / the aggregators), which the US-metro list above could
+  //     only ever bucket as "Other". ---
+  {val:"worldwide", label:"Worldwide / Anywhere", terms:["worldwide","anywhere","global"]},
+  {val:"emea",      label:"EMEA",              terms:["emea"]},
+  {val:"europe",    label:"Europe",            terms:["europe","eu remote","european"]},
+  {val:"uk",        label:"UK / Ireland",      terms:["united kingdom"," uk","uk,","london","manchester","edinburgh","dublin","ireland"]},
+  {val:"dach",      label:"Germany / DACH",    terms:["germany","deutschland","berlin","munich","münchen","hamburg","frankfurt","cologne","köln","stuttgart","düsseldorf","dusseldorf","austria","vienna","switzerland","zurich","zürich"]},
+  {val:"france",    label:"France",            terms:["france","paris","toulouse","lyon","marseille","bordeaux","occitanie"]},
+  {val:"iberia",    label:"Spain / Portugal",  terms:["spain","madrid","barcelona","valencia","portugal","lisbon","porto"]},
+  {val:"benelux",   label:"Netherlands / Benelux", terms:["netherlands","amsterdam","rotterdam","utrecht","belgium","brussels","luxembourg"]},
+  {val:"nordics",   label:"Nordics",           terms:["sweden","stockholm","norway","oslo","denmark","copenhagen","finland","helsinki","iceland"]},
+  {val:"cee",       label:"Central / Eastern Europe", terms:["poland","warsaw","krakow","kraków","romania","bucharest","ukraine","kyiv","czech","prague","hungary","budapest","bulgaria","sofia","serbia","belgrade","estonia","lithuania","latvia","slovakia","croatia"]},
+  {val:"mena",      label:"Middle East / Africa", terms:["lebanon","beirut","uae","dubai","abu dhabi","saudi","riyadh","qatar","doha","kuwait","bahrain","jordan","amman","egypt","cairo","israel","tel aviv","turkey","istanbul","morocco","nigeria","kenya","south africa","cape town","africa"]},
+  {val:"apac",      label:"APAC",              terms:["apac","singapore","japan","tokyo","australia","sydney","melbourne","new zealand","hong kong","korea","seoul","taiwan","malaysia","kuala lumpur","indonesia","jakarta","philippines","manila","thailand","vietnam","china","shanghai"]},
+  {val:"india",     label:"India",             terms:["india","bangalore","bengaluru","hyderabad","pune","mumbai","delhi","gurgaon","noida","chennai"]},
+  {val:"canada",    label:"Canada",            terms:["canada","toronto","vancouver, bc","montreal","ottawa","calgary","waterloo, on"]},
+  {val:"latam",     label:"LATAM",             terms:["latam","latin america","brazil","são paulo","sao paulo","mexico","argentina","buenos aires","chile","santiago","colombia","bogota","peru","costa rica","uruguay"]},
+  {val:"other",     label:"Other",             terms:null},
   {val:"unknown",   label:"Not specified",     terms:null},
 ];
 const REGION_WITH_TERMS = REGION_DEFS.filter(r=>r.terms);
@@ -3827,6 +3845,7 @@ async function renderAgent(){
       <span class="ag-pill ${running?"run":""}">${running?"Running — applying to your queue…":`Standby — ${queue.length} job${queue.length===1?"":"s"} added. Awaiting application start.`}</span>
       <span class="sum">${!st?"Agent status unavailable — restart the dashboard to load the new API.":(running&&ar.active?esc(`${phaseLbl}…`):esc(summarizeRun(st.last_summary)))}</span>
       <button class="btn-link" id="agentAddAll" ${running?"disabled":""} title="Queue every scored job, then start the agent">＋ Add all to start</button>
+      <button class="btn-link" id="agentClear" ${running||!queue.length?"disabled":""} title="Empty the agent queue — jobs go back to the feed, nothing is deleted">🗑 Clear queue${queue.length?` (${queue.length})`:""}</button>
       <button class="btn-mint" id="agentAutoRun" ${running?"disabled":""} title="Queue everything, generate every résumé, then apply — hands-off">⚡ Auto-run everything</button>
       ${running?`<button class="btn-link" id="agentStop" style="color:#e5484d">■ Stop</button>`:""}
       <button class="btn-mint" id="agentStart" ${running?"disabled":""}>${running?"Running…":"Start"}</button>
@@ -3853,6 +3872,19 @@ async function renderAgent(){
       toast(d&&d.started?`${targets.length} added — agent started`:`Agent: ${(d&&(d.error||d.reason))||"not started"}`, !(d&&d.started)); }
     catch(e){ toast("Couldn't start the agent", true); }
     setTimeout(renderAgent, 800); };
+  const clr=$("#agentClear"); if(clr) clr.onclick=async()=>{
+    // Only rows still waiting: jobs that already have materials, or that were
+    // applied to, keep their state — clearing is about the waiting list.
+    const waiting=queue.filter(a=>a.status==="queued"||a.status==="approved");
+    const ready=queue.length-waiting.length;
+    if(!waiting.length){ toast("Nothing waiting to clear — the rest already have résumés ✓"); return; }
+    if(!confirm(`Clear ${waiting.length} job${waiting.length===1?"":"s"} from the agent queue?\n\n`
+      +`They go back to the feed and can be re-added any time — nothing is deleted.`
+      +(ready?`\n\n${ready} job${ready===1?"":"s"} with résumés already generated will be kept.`:""))) return;
+    clr.disabled=true; clr.textContent="Clearing…";
+    const n=await bulkStatus(waiting.map(a=>a.id),"scored");
+    toast(n?`Cleared ${n} job${n===1?"":"s"} from the queue ✓`:"Couldn't clear the queue", !n);
+    renderAgent(); };
   const ar2=$("#agentAutoRun"); if(ar2) ar2.onclick=async()=>{
     const pend=homeApps().filter(a=>a.status==="scored").length;
     const q=state.apps.filter(a=>a.status==="queued").length;
