@@ -13,6 +13,16 @@ from agents.scanner.base import BaseScanner, RawJob
 
 logger = logging.getLogger(__name__)
 
+def _description_cap(config: dict | None = None) -> int:
+    """How much job description to keep. settings.yaml `scanner.description_max_chars`.
+
+    Was hard-coded per-file (5000 here, 8000 in company_sites). The description
+    is the only material the tailor and ranker have to work with, so a tight cap
+    silently degrades every downstream stage.
+    """
+    return int(((config or {}).get("scanner") or {}).get("description_max_chars", 20000))
+
+
 
 class AshbyScanner(BaseScanner):
     """Scan Ashby-based career pages via their public posting API."""
@@ -105,7 +115,7 @@ class AshbyScanner(BaseScanner):
                 url=url,
                 source=f"ashby:{slug}",
                 source_id=str(job_data.get("id", "")),
-                description=description[:5000],
+                description=description[:_description_cap(self.config)],
                 salary_text=comp_text,
                 is_remote=is_remote_field or "remote" in location_lower or "remote" in title_lower,
             ))

@@ -73,25 +73,41 @@ def _resolve_model(client, target: str) -> str:
     return resolved
 
 
-def _speed_options(ollama_config: dict, temperature: float, num_ctx: int) -> dict:
+def _speed_options(ollama_config: dict, temperature: float, num_ctx: int,
+                   profile: str | None = None, seed: int | None = None) -> dict:
     """Sampling options, with speed knobs from settings.yaml `ollama:`.
 
     num_predict caps how many tokens are generated — the single biggest lever
     on wall-clock time, since generation dominates. top_k/top_p narrow the
     sampler (less deliberation per token). Lower values = faster, less careful.
+
+    PRECEDENCE: named profile > global config > the caller's argument. The
+    global config used to beat the caller unconditionally, which made per-call
+    sampling impossible: the tailor asked for a warmer temperature and silently
+    got the global 0.2, so a near-greedy sampler decoded a prompt that is ~84%
+    identical between any two jobs and produced near-identical résumés by
+    construction. Raising the global instead would degrade the ranker's JSON
+    scoring and the autofill essays, so the knob has to be per-call.
     """
+    prof = (ollama_config.get("profiles") or {}).get(profile or "", {}) or {}
     opts = {
-        "temperature": ollama_config.get("temperature", temperature),
-        "num_predict": ollama_config.get("num_predict", 4096),
-        "num_ctx": num_ctx,
+        "temperature": prof.get("temperature",
+                                ollama_config.get("temperature", temperature)),
+        "num_predict": prof.get("num_predict", ollama_config.get("num_predict", 4096)),
+        "num_ctx": prof.get("num_ctx", num_ctx),
     }
-    for k in ("top_k", "top_p", "num_gpu", "num_thread", "num_batch"):
-        if k in ollama_config:
+    for k in ("top_k", "top_p", "num_gpu", "num_thread", "num_batch", "seed"):
+        if k in prof:
+            opts[k] = prof[k]
+        elif k in ollama_config:
             opts[k] = ollama_config[k]
+    if seed is not None:          # explicit seed wins over profile/config
+        opts["seed"] = seed
     return opts
 
 
-def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
+def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3,
+                          *, profile: str | None = None, seed: int | None = None) -> dict:
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
@@ -112,7 +128,7 @@ def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int
             response = client.chat(
                 model=model,
                 messages=messages,
-                options=_speed_options(ollama_config, 0.3, num_ctx),
+                options=_speed_options(ollama_config, 0.3, num_ctx, profile, seed),
                 format="json",
             )
             last_content = response.message.content.strip()
@@ -152,7 +168,8 @@ def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int
     )
 
 
-def _ollama_generate_text(prompt: str, system_prompt: str = "") -> str:
+def _ollama_generate_text(prompt: str, system_prompt: str = "",
+                          *, profile: str | None = None, seed: int | None = None) -> str:
     config = _load_config()
     ollama_config = config.get("ollama", {})
     model = ollama_config.get("model", "gemma3:27b")
@@ -169,7 +186,7 @@ def _ollama_generate_text(prompt: str, system_prompt: str = "") -> str:
     response = client.chat(
         model=model,
         messages=messages,
-        options=_speed_options(ollama_config, 0.4, num_ctx),
+        options=_speed_options(ollama_config, 0.4, num_ctx, profile, seed),
     )
     return response.message.content.strip()
 
@@ -297,7 +314,8 @@ def _extract_json(content: str) -> dict:
         raise
 
 
-def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) -> dict:
+def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3,
+                  *, profile: str | None = None, seed: int | None = None) -> dict:
     """JSON completion via the configured provider chain (settings.yaml `llm`).
 
     provider "openai"/"anthropic" + key set: that cloud first, Ollama catches
@@ -311,9 +329,11 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
             return _cloud_json(primary, prompt, system_prompt)
         except Exception as e:
             logger.warning(f"[llm] {primary} primary failed ({e}) — falling back to Ollama")
-            return _ollama_generate_json(prompt, system_prompt, max_retries)
+            return _ollama_generate_json(prompt, system_prompt, max_retries,
+                                        profile=profile, seed=seed)
     try:
-        return _ollama_generate_json(prompt, system_prompt, max_retries)
+        return _ollama_generate_json(prompt, system_prompt, max_retries,
+                                    profile=profile, seed=seed)
     except (ConnectionError, ValueError) as ollama_err:
         fallback = _cloud_fallback()
         if not fallback:
@@ -326,7 +346,8 @@ def generate_json(prompt: str, system_prompt: str = "", max_retries: int = 3) ->
             raise ollama_err
 
 
-def generate_text(prompt: str, system_prompt: str = "") -> str:
+def generate_text(prompt: str, system_prompt: str = "",
+                  *, profile: str | None = None, seed: int | None = None) -> str:
     """Text completion via the configured provider chain (settings.yaml `llm`)."""
     primary = _cloud_primary()
     if primary:
@@ -334,9 +355,9 @@ def generate_text(prompt: str, system_prompt: str = "") -> str:
             return _cloud_chat(primary, prompt, system_prompt, json_mode=False, temperature=0.4)
         except Exception as e:
             logger.warning(f"[llm] {primary} primary failed ({e}) — falling back to Ollama")
-            return _ollama_generate_text(prompt, system_prompt)
+            return _ollama_generate_text(prompt, system_prompt, profile=profile, seed=seed)
     try:
-        return _ollama_generate_text(prompt, system_prompt)
+        return _ollama_generate_text(prompt, system_prompt, profile=profile, seed=seed)
     except Exception as ollama_err:
         fallback = _cloud_fallback()
         if not fallback:

@@ -42,6 +42,16 @@ from agents.scanner.base import BaseScanner, RawJob
 
 logger = logging.getLogger(__name__)
 
+def _description_cap(config: dict | None = None) -> int:
+    """How much job description to keep. settings.yaml `scanner.description_max_chars`.
+
+    Was hard-coded per-file (5000 here, 8000 in company_sites). The description
+    is the only material the tailor and ranker have to work with, so a tight cap
+    silently degrades every downstream stage.
+    """
+    return int(((config or {}).get("scanner") or {}).get("description_max_chars", 20000))
+
+
 
 def _load_companies(platform: str, required_key: str | None = None) -> list[dict]:
     """Load target companies for one ats_platform from target_companies.yaml."""
@@ -246,9 +256,12 @@ class SmartRecruitersScanner(BaseScanner):
             for key in ("companyDescription", "jobDescription", "qualifications", "additionalInformation"):
                 sec = sections.get(key) or {}
                 if sec.get("text"):
-                    parts.append(_html_to_text(sec["text"], limit=4000))
+                    parts.append(_html_to_text(sec["text"], limit=_description_cap() // 2))
             return {
-                "description": "\n\n".join(parts)[:8000],
+                # Module-level helper, so no self.config — the default cap applies.
+                # Four sections were each cut at 4000 and the join re-cut at 8000,
+                # discarding half of a long SmartRecruiters posting twice over.
+                "description": "\n\n".join(parts)[:_description_cap()],
                 "apply_url": data.get("applyUrl", ""),
             }
         except Exception as e:
@@ -497,7 +510,7 @@ class GenericCareersScanner(BaseScanner):
                 page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(1500)
                 body = _extract_page_text(page)
-                description = body[:8000]
+                description = body[:_description_cap(getattr(self, "config", None))]
                 m = re.search(r"(?:location|based in)[:\s]+([^\n]{3,60})", body, re.I)
                 # Only take the match if it actually looks like a place. The word
                 # "location" shows up mid-sentence on plenty of postings, and the

@@ -112,7 +112,12 @@ def _load_resume_summary(archetype: str | None = None) -> str:
             year = cert.get("year") or cert.get("status", "")
             sections.append(f"  - {cert.get('name', '')} ({year})")
 
-    skills = resume.get("technical_skills", {})
+    # config/base_resume.yaml names this block `skills`; `technical_skills` was
+    # an older shape. Reading only the old name meant the section silently
+    # vanished from every ranking prompt — 503 jobs were scored with no skill
+    # list at all, which is why ats_keywords came back as title echoes rather
+    # than genuine overlap. Accept both, current name first.
+    skills = resume.get("skills") or resume.get("technical_skills") or {}
     if skills:
         sections.append("\nTECHNICAL SKILLS:")
         # New canonical shape: dict of {category: comma-string}

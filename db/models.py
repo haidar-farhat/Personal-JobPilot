@@ -332,3 +332,106 @@ class LearnedAnswerAlias(Base):
 
     def __repr__(self):
         return f"<LearnedAnswerAlias(key='{self.key}' -> answer {self.answer_id})>"
+
+
+class OutreachSend(Base):
+    """One outbound application email to a company about one job — the ledger.
+
+    THIS TABLE IS THE GUARDRAIL, not a log of one. `dedup_key` is UNIQUE, and the
+    send path INSERTS the row BEFORE opening an SMTP connection. A second attempt
+    at the same (company, job) therefore fails on the database constraint and can
+    never reach the network — the "one email per company per job, ever" rule is
+    enforced by SQLite, not by an if-statement someone can refactor away.
+
+    The daily cap is counted from these rows (status='sent', sent_at >= UTC
+    midnight), so it survives process restarts and is shared across the scheduler
+    and dashboard processes — unlike the auto-applier's in-memory guess counter,
+    which is per-process and caps nothing globally.
+
+    No migration file: db.database.init_db() calls Base.metadata.create_all, which
+    creates brand-new tables AND their indexes. (Adding a column here LATER, once
+    the table exists in a live jobpilot.db, WILL need an ALTER migration — see
+    db/migrations/005_add_hourly_and_emptype.py for the minimal idempotent
+    template and 006 for the index-on-existing-table wrinkle.)
+    """
+
+    __tablename__ = "outreach_sends"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # --- identity of "this company, this job" ---------------------------
+    dedup_key = Column(String(64), nullable=False)        # utils.linkedin_outreach.outreach_dedup_key
+    company = Column(String(300), nullable=False)
+    company_normalized = Column(String(300), nullable=False)
+    job_title = Column(String(500), nullable=False)
+    external_id = Column(String(200), nullable=True)      # LinkedIn job/post id
+    post_url = Column(String(2000), nullable=True)
+
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=True)
+
+    # --- what was sent --------------------------------------------------
+    recipient = Column(String(320), nullable=False)
+    recipient_source = Column(String(30), nullable=False)  # post_text|comment|job_description|manual
+    channel = Column(String(30), nullable=True)
+    subject = Column(String(500), nullable=True)
+    body = Column(Text, nullable=True)                     # the EXACT body sent
+    body_hash = Column(String(64), nullable=True)          # sha256 of subject+body+recipient
+    resume_path = Column(String(1000), nullable=True)
+    cover_letter_path = Column(String(1000), nullable=True)
+    attachments = Column(JSON, nullable=True)              # filenames returned by the mailer
+    provider = Column(String(40), nullable=True)           # linkedin_public | linkedin_jobspy | ...
+
+    # --- lifecycle ------------------------------------------------------
+    # claimed -> sent | failed | blocked.  'sent' is TERMINAL and never reused.
+    status = Column(String(20), nullable=False, default="claimed")
+    block_reason = Column(String(120), nullable=True)      # unsafe_recipient|dead_address|suppressed|
+                                                           # cap_reached|no_attachments|preview_stale|cooldown
+    error = Column(Text, nullable=True)
+    dry_run = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("dedup_key", name="uq_outreach_dedup"),
+        Index("idx_outreach_recipient", "recipient"),
+        Index("idx_outreach_sent_at", "sent_at"),
+        Index("idx_outreach_status", "status"),
+        Index("idx_outreach_company_norm", "company_normalized"),
+    )
+
+    def __repr__(self):
+        return (f"<OutreachSend(company='{self.company}', job='{(self.job_title or '')[:30]}', "
+                f"to='{self.recipient}', status='{self.status}')>")
+
+
+class OutreachSuppression(Base):
+    """Someone asked not to be contacted — permanent, and checked before every send.
+
+    Populated by utils/linkedin_outreach.scan_optouts() (a STOP/unsubscribe reply
+    read over the SAME read-only IMAP path utils/bounce_watch already uses) and by
+    POST /api/outreach/suppress. Suppressing an address also suppresses its DOMAIN
+    when scope='domain', so "don't contact anyone at Acme" is one row, not fifty.
+
+    Deliberately DB-backed rather than a JSON file: utils/bounce_watch.load_dead()
+    returns an empty set on a corrupt/unreadable file, i.e. it fails OPEN. A stop
+    request must fail CLOSED.
+    """
+
+    __tablename__ = "outreach_suppressions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    value = Column(String(320), nullable=False)            # lowercased address or bare domain
+    scope = Column(String(20), nullable=False, default="address")   # address | domain
+    reason = Column(String(200), nullable=True)            # "reply: STOP" | "manual" | "bounce"
+    source = Column(String(30), nullable=False, default="manual")   # reply_scan | manual | bounce_watch
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("value", "scope", name="uq_suppression_value_scope"),
+        Index("idx_suppression_value", "value"),
+    )
+
+    def __repr__(self):
+        return f"<OutreachSuppression({self.scope}='{self.value}')>"

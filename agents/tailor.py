@@ -760,7 +760,47 @@ def _fit_one_page(resume_data: dict, config: dict, resume_path: Path):
     return data, pdf_path, pages
 
 
-def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None = None) -> dict:
+def _jd_cap(config: dict) -> int:
+    """How much job description reaches the prompt (settings.yaml tailor.jd_max_chars).
+
+    Was hard-coded [:3000]. Across the stored corpus that discarded roughly
+    467k characters of description — the very material the resume is meant to
+    be tailored against — while num_ctx sat half unused.
+    """
+    return int((config.get("tailor") or {}).get("jd_max_chars", 12000))
+
+
+def _jd_terms(job: Job, job_score: JobScore) -> set[str]:
+    """Content terms describing THIS job, for the clone guard's JD-similarity exemption.
+
+    Two near-identical postings should be allowed near-identical résumés;
+    penalising that would push the model toward inventing differences. Built
+    from the scored keywords plus the title so it works even when the
+    description is missing — which is the case for 51% of stored jobs.
+    """
+    import re as _re
+    blob = " ".join([
+        job.title or "",
+        " ".join(job_score.ats_keywords or []) if job_score is not None else "",
+        " ".join(job_score.key_matches or []) if job_score is not None else "",
+    ]).lower()
+    return {t for t in _re.findall(r"[a-z0-9][a-z0-9+#.\-]{2,}", blob)
+            if t not in ("and", "the", "for", "with", "senior", "junior")}
+
+
+def _draft_rank(report: dict, clone) -> float:
+    """Ordering key for "is this draft better than the one we have?".
+
+    Coverage dominates, with a fixed penalty for a draft that merely restates
+    another job's résumé. The penalty is small enough that a clearly better-
+    covering draft still wins: differentiation is a tie-breaker, not a veto.
+    """
+    score = float(report.get("overall") or 0.0)
+    return score - (4.0 if getattr(clone, "flagged", False) else 0.0)
+
+
+def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None = None,
+                   max_rounds: int | None = None) -> dict:
     """Generate a tailored, page-count-verified one-page résumé (+ optional
     cover letter) for a specific job.
 
@@ -785,14 +825,15 @@ def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None =
         job_title=job.title,
         company=job.company,
         location=job.location or "Not specified",
-        job_description=(job.description or "No description")[:3000],
+        job_description=(job.description or "No description")[:_jd_cap(config)],
         ats_keywords=", ".join(job_score.ats_keywords or []),
         key_matches=", ".join(job_score.key_matches or []),
         key_gaps=", ".join(job_score.key_gaps or []),
         archetype_guidance=guidance,
     )
 
-    resume_data = generate_json(resume_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
+    resume_data = generate_json(resume_prompt, system_prompt=RESUME_SYSTEM_PROMPT,
+                                profile="tailor_resume")
 
     # Provenance gate — strips any claim not evidenced by the base résumé.
     # Runs BEFORE the optimizer so the audit scores the résumé that will
@@ -813,45 +854,102 @@ def tailor_for_job(job: Job, job_score: JobScore, *, cover_letter: bool | None =
             job_title=job.title,
             company=job.company,
             location=job.location or "Not specified",
-            job_description=(job.description or "No description")[:3000],
+            job_description=(job.description or "No description")[:_jd_cap(config)],
             key_matches="\n".join(f"- {m}" for m in (job_score.key_matches or [])),
             archetype_guidance=guidance,
         )
-        cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT)
+        cover_text = generate_text(cover_prompt, system_prompt=COVER_LETTER_SYSTEM_PROMPT,
+                                   profile="tailor_cover")
 
     # Clean filename
     safe_company = "".join(c if c.isalnum() or c in "- " else "" for c in job.company).strip().replace(" ", "_")
     safe_title = "".join(c if c.isalnum() or c in "- " else "" for c in job.title).strip().replace(" ", "_")
     filename_base = f"{safe_company}_{safe_title}"[:80]
 
-    # --- Optimizer pass (hiring-agent style, JD-relative) -------------------
-    # Score the tailored materials; if below threshold, regenerate ONCE with
-    # the optimizer's concrete feedback and keep whichever scored higher.
+    # --- Iterate to target: score, improve, keep the best -------------------
+    # Was a single conditional retry behind `enabled: false`, i.e. off entirely.
+    # Now: up to max_rounds attempts, stopping early once target_score is met.
+    # Two independent feedback signals steer each retry —
+    #   * the optimizer's coverage audit (what the JD asks for and we missed)
+    #   * the clone guard (what we said identically on a DIFFERENT job)
+    # Both only ever ask for RE-EMPHASIS of attested material; neither can
+    # introduce a claim, and every draft still passes the provenance gate.
     opt_cfg = (config.get("tailor", {}) or {}).get("optimizer", {}) or {}
     optimizer_report = None
+    clone_verdict = None
+    rounds_used = 1
     if opt_cfg.get("enabled", True):
         try:
             from agents.resume_optimizer import (
                 score_materials, render_resume_text, feedback_block, save_report,
             )
-            optimizer_report = score_materials(
+            from agents.clone_guard import clone_check, load_clone_corpus
+
+            cg_cfg = (config.get("tailor", {}) or {}).get("clone_guard", {}) or {}
+            corpus = []
+            if cg_cfg.get("enabled", True):
+                try:
+                    corpus = load_clone_corpus(
+                        config, exclude_base=filename_base,
+                        limit=int(cg_cfg.get("corpus_size", 40)),
+                        shingle_n=int(cg_cfg.get("shingle_n", 4)))
+                except Exception as e:      # advisory signal — never fatal
+                    logger.debug(f"[tailor] clone corpus unavailable: {e}")
+
+            jd_terms = _jd_terms(job, job_score)
+            target = float(opt_cfg.get("target_score", 85))
+            floor = float(opt_cfg.get("min_score", 70))
+            if max_rounds is None:
+                max_rounds = int(opt_cfg.get("max_rounds", 3))
+            max_rounds = max(1, max_rounds)
+
+            best_data = resume_data
+            best_report = score_materials(
                 job, job_score, render_resume_text(resume_data), cover_text)
-            logger.info(f"[tailor] optimizer score: {optimizer_report['overall']}/100 "
-                        f"(missing keywords: {len(optimizer_report['keywords_missing'])})")
+            best_clone = clone_check(resume_data, corpus, config,
+                                     jd_terms=jd_terms, name=filename_base)
+            logger.info(f"[tailor] round 1/{max_rounds}: coverage "
+                        f"{best_report['overall']}/100"
+                        + (f", clone {best_clone.similarity:.2f} vs {best_clone.nearest}"
+                           if best_clone.flagged else ""))
 
-            min_score = opt_cfg.get("min_score", 75)
-            if optimizer_report["overall"] < min_score and opt_cfg.get("max_retries", 1) > 0:
-                logger.info(f"[tailor] below optimizer threshold {min_score} — regenerating with feedback")
-                retry_prompt = resume_prompt + "\n\n" + feedback_block(optimizer_report)
-                retry_data = generate_json(retry_prompt, system_prompt=RESUME_SYSTEM_PROMPT)
-                retry_data = enforce_and_log(retry_data, base_resume_data,
-                                             label=f"retry {job.title} @ {job.company}")
-                retry_report = score_materials(
-                    job, job_score, render_resume_text(retry_data), cover_text)
-                logger.info(f"[tailor] retry optimizer score: {retry_report['overall']}/100")
-                if retry_report["overall"] > optimizer_report["overall"]:
-                    resume_data, optimizer_report = retry_data, retry_report
+            for rnd in range(2, max_rounds + 1):
+                if best_report["overall"] >= target and not best_clone.flagged:
+                    break                      # good enough and differentiated
+                rounds_used = rnd
+                feedback = feedback_block(best_report)
+                if best_clone.flagged:
+                    feedback += "\n\n" + best_clone.feedback
+                try:
+                    cand = generate_json(resume_prompt + "\n\n" + feedback,
+                                         system_prompt=RESUME_SYSTEM_PROMPT,
+                                         profile="tailor_resume")
+                except Exception as e:
+                    logger.warning(f"[tailor] round {rnd} generation failed: {e}")
+                    break
+                cand = enforce_and_log(cand, base_resume_data,
+                                       label=f"round {rnd} {job.title} @ {job.company}")
+                cand_report = score_materials(
+                    job, job_score, render_resume_text(cand), cover_text)
+                cand_clone = clone_check(cand, corpus, config,
+                                         jd_terms=jd_terms, name=filename_base)
+                logger.info(f"[tailor] round {rnd}/{max_rounds}: coverage "
+                            f"{cand_report['overall']}/100"
+                            + (f", clone {cand_clone.similarity:.2f}"
+                               if cand_clone.flagged else ", differentiated"))
+                # A clone-flagged draft is penalised but not disqualified: an
+                # under-differentiated résumé is still honest, and refusing to
+                # ship one would be a worse trade than shipping it flagged.
+                if _draft_rank(cand_report, cand_clone) > _draft_rank(best_report, best_clone):
+                    best_data, best_report, best_clone = cand, cand_report, cand_clone
 
+            resume_data, optimizer_report, clone_verdict = best_data, best_report, best_clone
+            optimizer_report["rounds"] = rounds_used
+            optimizer_report["clone"] = clone_verdict.as_dict()
+            if optimizer_report["overall"] < floor:
+                logger.warning(f"[tailor] shipping below the {floor} floor at "
+                               f"{optimizer_report['overall']}/100 after {rounds_used} "
+                               f"round(s) — the honest ceiling for this JD may be lower")
             optimizer_report["_saved_to"] = save_report(optimizer_report, filename_base, config)
         except Exception as e:
             logger.warning(f"[tailor] optimizer pass failed (materials still generated): {e}")
@@ -933,7 +1031,7 @@ def tailor_queued_jobs(config: dict, on_each=None) -> dict:
             .filter(Application.status == ApplicationStatus.QUEUED)
             .filter(Application.resume_path.is_(None))
             .order_by(JobScore.fit_score.desc())
-            .limit(10)
+            .limit(int((config.get("tailor") or {}).get("batch_size", 10)))
             .all()
         )
 
