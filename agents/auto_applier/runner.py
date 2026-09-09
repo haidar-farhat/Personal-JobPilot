@@ -36,7 +36,8 @@ _PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
                    "started_at": None, "finished_at": None}
 
 
-def _email_application(profile: dict, config: dict | None, job, app) -> None:
+def _email_application(profile: dict, config: dict | None, job, app,
+                       page_text: str = "") -> None:
     """Email the resume + cover letter for an application just submitted.
 
     Controlled by settings.yaml `mail:`. Default is a self-copy — a record in
@@ -56,10 +57,15 @@ def _email_application(profile: dict, config: dict | None, job, app) -> None:
     # Email the employer when THEIR OWN posting publishes an application
     # address (screened: accommodation/compliance inboxes are never used).
     if not to_addr and mail_cfg.get("to_employer"):
-        found = find_employer_recipient(getattr(job, "description", ""))
+        # Look in the stored description AND the page as actually rendered —
+        # scraped descriptions are often truncated or empty, so an address
+        # printed in the JD would otherwise be missed.
+        found = (find_employer_recipient(getattr(job, "description", ""))
+                 or find_employer_recipient(page_text))
         if found:
             to_addr, self_copy = found, False
-            logger.info(f"[auto_apply] posting publishes an address -> {found}")
+            src = "description" if find_employer_recipient(getattr(job, "description", "")) else "live page"
+            logger.info(f"[auto_apply] application address found in {src} -> {found}")
 
     if to_addr and to_addr != identity.get("email", ""):
         self_copy = False
@@ -393,6 +399,7 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
                 result = ApplyResult(success=False, status="pending")
                 t0 = time.time()
                 page = None
+                page_text = ""      # live JD/confirmation text, harvested before close
 
                 try:
                     logger.info(
@@ -402,6 +409,13 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
                     page = context.new_page()
                     page.set_default_timeout(per_app_timeout * 1000)
                     page.goto(job.url, wait_until="domcontentloaded", timeout=20000)
+                    # Grab the JD as rendered, before apply() navigates on to the
+                    # form — "email your CV to ..." usually lives on this page.
+                    try:
+                        page_text = page.evaluate(
+                            "(document.body ? document.body.innerText : '').slice(0, 200000)") or ""
+                    except Exception:
+                        page_text = ""
                     applier.apply(page, job, app.resume_path, app.cover_letter_path, result)
                 except Exception as e:
                     result.success = False
@@ -412,6 +426,15 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
                     logger.exception(f"[auto_apply] error on job {job.id}")
                 finally:
                     if page is not None:
+                        # Read the rendered page before it goes: an application
+                        # address is often printed in the JD itself and never
+                        # makes it into the scraped `description` (ATS APIs
+                        # truncate, and some boards omit the body entirely).
+                        try:
+                            page_text += "\n" + (page.evaluate(
+                                "(document.body ? document.body.innerText : '').slice(0, 200000)") or "")
+                        except Exception:
+                            pass
                         try:
                             page.close()
                         except Exception:
@@ -432,7 +455,7 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None) -
                 # Never blocks or fails the apply cycle.
                 if result.status in ("submitted", "submitted_unverified"):
                     try:
-                        _email_application(profile, config, job, app)
+                        _email_application(profile, config, job, app, page_text=page_text)
                     except Exception as e:
                         logger.warning(f"[auto_apply] application email failed: {e}")
 
