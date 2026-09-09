@@ -45,8 +45,20 @@ _UA = "JobPilot/1.0 (personal job-search agent)"
 _TIMEOUT = 10
 _MAX_PAGES = 5
 
+# Job boards and aggregators. Like an ATS host these are NOT the employer's
+# domain, but they are worse if missed: an ATS subdomain is usually
+# company-specific (acme.greenhouse.io), whereas every LinkedIn posting shares
+# linkedin.com. Missing these made the outreach fallback resolve EVERY company
+# to careers@linkedin.com — one unrelated inbox receiving an application per
+# job. Added 2026-09-09 when the free LinkedIn scraper began supplying jobs.
+_BOARD_HOSTS = ("linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com",
+                "monster.com", "dice.com", "simplyhired.com", "careerbuilder.com",
+                "jobicy.com", "arbeitnow.com", "remotive.com", "jooble.org",
+                "adzuna.com", "usajobs.gov", "wellfound.com", "angel.co",
+                "builtin.com", "otta.com", "levels.fyi", "hired.com")
+
 # Hosts that are an applicant-tracking system, not the employer's own domain.
-_ATS_HOSTS = ("greenhouse.io", "ashbyhq.com", "lever.co", "myworkdayjobs.com",
+_ATS_HOSTS = _BOARD_HOSTS + ("greenhouse.io", "ashbyhq.com", "lever.co", "myworkdayjobs.com",
               "smartrecruiters.com", "workable.com", "workday.com", "icims.com",
               "jobvite.com", "bamboohr.com", "breezy.hr", "recruitee.com",
               "teamtailor.com", "rippling.com", "paylocity.com", "adp.com",
@@ -190,7 +202,13 @@ def company_domain_with_origin(job) -> tuple[str, str] | None:
         return host, "url"   # authoritative: the employer's own posting URL
 
     candidates = []
-    slug = _ats_slug(getattr(job, "url", "") or "")
+    # An ATS URL carries the EMPLOYER as a path slug (boards.greenhouse.io/acme
+    # -> "acme"), so the slug is a good domain candidate. A job-board URL does
+    # not: linkedin.com/jobs/view/<title>-at-<company>-<id> yielded the slug
+    # "view", and every LinkedIn posting therefore resolved to view.com — a
+    # real domain owned by someone else. Only mine a slug from ATS hosts.
+    on_board = any(b in host for b in _BOARD_HOSTS)
+    slug = "" if on_board else _ats_slug(getattr(job, "url", "") or "")
     if slug:
         candidates.append(re.sub(r"[^a-z0-9\-]", "", slug.lower()))
     name = (getattr(job, "company", "") or "").lower()

@@ -110,8 +110,12 @@ def _ollama_generate_json(prompt: str, system_prompt: str = "", max_retries: int
                           *, profile: str | None = None, seed: int | None = None) -> dict:
     config = _load_config()
     ollama_config = config.get("ollama", {})
-    model = ollama_config.get("model", "gemma3:27b")
-    num_ctx = ollama_config.get("num_ctx", 16384)
+    prof_cfg = (ollama_config.get("profiles") or {}).get(profile or "", {}) or {}
+    # A profile may name its own model: the tailor benefits from a larger model's
+    # instruction-following (bullet-length compliance), while the ranker's cheap
+    # JSON scoring does not and would just get slower.
+    model = prof_cfg.get("model") or ollama_config.get("model", "gemma3:27b")
+    num_ctx = prof_cfg.get("num_ctx", ollama_config.get("num_ctx", 16384))
 
     client = get_ollama_client()
     model = _resolve_model(client, model)

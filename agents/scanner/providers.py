@@ -403,8 +403,34 @@ PROVIDERS: dict[str, type[JobProvider]] = {
 }
 
 
+# Free, no-key LinkedIn sources live in their own module (they scrape public
+# pages rather than calling a paid API, and carry their own rate limiting and
+# block detection). Merged so enabled_providers/provider_health treat them
+# exactly like every other provider.
+#
+# Registered LAZILY, not at import time: linkedin_sources imports JobProvider
+# from THIS module, so an import-time merge here is a cycle. It happens to work
+# when providers is imported first and fails with "partially initialized
+# module" when linkedin_sources is — i.e. silent, order-dependent breakage.
+_LINKEDIN_MERGED = False
+
+
+def _ensure_linkedin_providers() -> None:
+    """Merge the LinkedIn providers into PROVIDERS exactly once."""
+    global _LINKEDIN_MERGED
+    if _LINKEDIN_MERGED:
+        return
+    _LINKEDIN_MERGED = True
+    try:
+        from agents.scanner.linkedin_sources import LINKEDIN_PROVIDERS
+        PROVIDERS.update(LINKEDIN_PROVIDERS)
+    except Exception as e:          # pragma: no cover - defensive
+        logger.warning(f"[providers] LinkedIn sources unavailable: {e}")
+
+
 def enabled_providers(config: dict) -> list[JobProvider]:
     """Instantiate the providers switched on in settings.yaml `job_sources`."""
+    _ensure_linkedin_providers()
     cfg = (config or {}).get("job_sources", {}) or {}
     out = []
     for name, cls in PROVIDERS.items():
@@ -416,6 +442,7 @@ def enabled_providers(config: dict) -> list[JobProvider]:
 
 def provider_health(config: dict) -> list[dict]:
     """Status of every known provider, for the dashboard's source panel."""
+    _ensure_linkedin_providers()
     cfg = (config or {}).get("job_sources", {}) or {}
     rows = []
     for name, cls in PROVIDERS.items():

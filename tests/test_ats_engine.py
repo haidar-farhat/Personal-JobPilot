@@ -299,7 +299,8 @@ def test_low_signal_unigrams_rejected(base_path):
     terms = {k.term for k in ats.extract_keywords(jd, top_n=40, base_resume_path=base_path)}
     for junk in ("team", "work", "experience", "passionate", "role", "business"):
         assert junk not in terms, f"{junk!r} is generic HR vocabulary, not a JD term"
-    assert "kubernetes" in terms and "rest apis" in terms or "rest api" in terms
+    assert "kubernetes" in terms
+    assert terms & {"rest api", "rest apis"}, "real technical terms must survive"
 
 
 def test_boilerplate_is_never_a_keyword(base_path):
@@ -676,6 +677,42 @@ def test_analyze_jd_degrades_on_a_20_char_description(base_path, monkeypatch):
     assert all(r.section == "unknown" for r in analysis.requirements)
 
 
+def test_analyze_jd_tolerates_a_null_description(base_path):
+    job = FakeJob("Backend Engineer", "Acme", None)
+    analysis = ats.analyze_jd(job, base_resume_path=base_path)
+    assert analysis.sections == {"unknown": ""}
+    assert analysis.requirements and analysis.keywords == []
+
+
+def test_llm_seed_is_only_reached_for_a_title_only_posting(base_path, monkeypatch):
+    """The optional assist may fire on a title-only JD, never on a real one."""
+    calls: list[str] = []
+    monkeypatch.setattr(ats, "_llm_requirement_seed",
+                        lambda job: calls.append(job.title) or ["Playwright"])
+
+    ats.analyze_jd(FakeJob("QA Engineer", "Acme", JD_SECTIONED), use_llm=True,
+                   base_resume_path=base_path)
+    assert calls == [], "a full posting must be analysed without the model"
+
+    analysis = ats.analyze_jd(FakeJob("QA Engineer", "Acme", ""), use_llm=True,
+                              base_resume_path=base_path)
+    assert calls == ["QA Engineer"]
+    # ...and the seed is re-verified by the deterministic path, not trusted.
+    assert "playwright" in {t for r in analysis.requirements for t in r.terms}
+
+
+def test_llm_seed_failure_leaves_the_title_only_path_intact(base_path, monkeypatch):
+    import utils.ollama_client as oc
+
+    def boom(*a, **k):
+        raise ConnectionError("ollama down")
+
+    monkeypatch.setattr(oc, "generate_json", boom)
+    analysis = ats.analyze_jd(FakeJob("QA Engineer", "Acme", ""), use_llm=True,
+                              base_resume_path=base_path)
+    assert analysis.requirements, "a dead model must not empty the analysis"
+
+
 def test_analyze_jd_merges_ranker_seeds_into_the_title_fallback(base_path):
     score = types.SimpleNamespace(ats_keywords=["Playwright", "Docker"])
     analysis = ats.analyze_jd(FakeJob("QA Engineer", "Acme", ""), score,
@@ -884,9 +921,8 @@ def test_the_number_is_never_called_an_ats_score():
         if dataclasses.is_dataclass(obj):
             names = {f.name for f in dataclasses.fields(obj)}
             assert not (names & banned), f"{obj.__name__} exposes {names & banned}"
-    assert "jd coverage" in (ats.coverage.__doc__ or "").lower() or \
-           "coverage" in (ats.coverage.__doc__ or "").lower()
-    assert "no ats computes one" in (ats.coverage.__doc__ or "").lower()
+    assert "not an ats score" in (ats.coverage.__doc__ or "").lower()
+    assert "jd coverage" in (ats.__doc__ or "").lower()
 
 
 def test_hidden_text_is_declared_permanently_out_of_scope():

@@ -129,8 +129,15 @@ OUTREACH_DEFAULTS: dict = {
     "scan_optouts_hours": 168,
 }
 
-LINKEDIN_SOURCES = ("linkedin_unipile", "linkedin_post_unipile",
-                    "linkedin_brightdata", "linkedin_post_brightdata")
+# Job.source values the Outreach screen considers. The first two are what the
+# FREE scrapers actually emit (agents/scanner/linkedin_sources.py); the paid
+# Unipile/Bright Data names are kept so a later switch to either needs no
+# code change. A mismatch here is silent: the screen simply finds nothing.
+LINKEDIN_SOURCES = (
+    "linkedin_public", "jobspy_linkedin", "jobspy_indeed", "jobspy_glassdoor",
+    "linkedin_unipile", "linkedin_post_unipile",
+    "linkedin_brightdata", "linkedin_post_brightdata",
+)
 
 #: Order matters — `blocked` is the FIRST failing reason, and the UI renders it
 #: as the single thing standing between this row and a send.
@@ -585,11 +592,88 @@ def _recipient_source_for(job_source: str, edited: bool) -> str:
     return "post_text" if "post" in (job_source or "") else "job_description"
 
 
+def _company_fallback_recipient(job: Job, dead: set[str] | None) -> tuple[str | None, str | None]:
+    """A recipient from the COMPANY, when the posting itself publishes none.
+
+    Measured on 12 live LinkedIn "AI Engineer" postings: every one had a full
+    description and NOT ONE printed an email address. Companies that recruit
+    through LinkedIn's apply flow have no reason to publish an inbox, so a
+    screen that only reads post text finds essentially nothing and the feature
+    is inert.
+
+    utils/company_email already solves this and is the more conservative path
+    of the two: it prefers an address the company PUBLISHED on its own site,
+    and only constructs careers@domain when `mail.guess_addresses` is on — a
+    constructed address is MX-checked, requires the domain to provably belong
+    to that company, is capped per day, and is never reused after a bounce.
+
+    Returns (address, source) where source is "company_site" or "constructed",
+    or (None, None). Never raises: this is a best-effort enrichment.
+    """
+    try:
+        cfg = _cfg().get("mail", {}) or {}
+        from utils.company_email import find_company_email
+        rec = find_company_email(
+            job,
+            allow_crawl=bool(cfg.get("lookup_website", True)),
+            allow_guess=bool(cfg.get("guess_addresses", False)),
+            guess_locals=cfg.get("guess_locals"),
+            dead=dead or set(),
+        ) or {}
+        addr = (rec.get("address") or "").strip()
+        if not addr:
+            return None, None
+
+        # A CONSTRUCTED address (careers@<guessed domain>) is only acceptable
+        # when the employer's domain is known from their OWN posting URL. A
+        # job-board posting gives us nothing but a bare company name, and
+        # domain_belongs_to cannot carry that weight for a short generic one:
+        # measured on real rows, "Moab" accepted moab.com and "Garage" accepted
+        # garage.com, because those homepages naturally contain the word. Both
+        # are strangers' domains, and a CV sent there is worse than none sent.
+        # A crawled address is different — the company published it itself.
+        if rec.get("source") == "guess" and rec.get("domain_origin") != "url":
+            logger.info(
+                f"[outreach] refusing constructed address {addr!r} for "
+                f"{job.company!r}: domain was {rec.get('domain_origin')}, not the "
+                f"employer's own posting URL")
+            return None, None
+        # The company path has its own screening, but the send-time screen is
+        # the authority — re-apply it here so an unusable address never even
+        # reaches the preview.
+        from utils.mailer import is_safe_recipient
+        if not is_safe_recipient(addr) or addr.lower() in (dead or set()):
+            return None, None
+        src = "company_site" if rec.get("source") in ("crawl", "website") else "constructed"
+        return addr, src
+    except Exception as e:                      # pragma: no cover - defensive
+        logger.debug(f"[outreach] company fallback failed for {job.company!r}: {e}")
+        return None, None
+
+
 def _build_candidate(session, app_obj: Application, job: Job, score: JobScore | None,
-                     *, use_llm: bool, dead: set[str] | None = None) -> _Candidate:
+                     *, use_llm: bool, dead: set[str] | None = None,
+                     resolve_company: bool = False) -> _Candidate:
+    """One candidate row.
+
+    resolve_company: consult utils/company_email when the posting itself
+    publishes no address. That path crawls the company site and does MX
+    lookups, i.e. seconds of network I/O PER JOB, so the list view leaves it
+    off and shows "no address in the posting"; preview and send turn it on for
+    the handful of rows the user actually selected.
+    """
     contact = extract_application_contact(
         job.description, company=job.company or "", job_title=job.title or "",
         dead=dead, use_llm=use_llm)
+    recipient = contact.get("address")
+    rsource = _recipient_source_for(job.source or "", edited=False)
+    if not recipient and resolve_company:
+        recipient, fsource = _company_fallback_recipient(job, dead)
+        if recipient:
+            rsource = fsource
+            contact = dict(contact)
+            contact["address"] = recipient
+            contact["fallback"] = fsource
     return _Candidate(
         application_id=app_obj.id, job_id=job.id,
         title=job.title or "", company=job.company or "",
@@ -600,8 +684,8 @@ def _build_candidate(session, app_obj: Application, job: Job, score: JobScore | 
         fit_score=score.fit_score if score else None,
         dedup_key=outreach_dedup_key(job.company or "", job.title or "",
                                      str(job.source_id or "")),
-        recipient=contact.get("address"),
-        recipient_source=_recipient_source_for(job.source or "", edited=False),
+        recipient=recipient,
+        recipient_source=rsource,
         channel=contact.get("channel") or "unknown",
         contact=contact,
         resume_path=app_obj.resume_path, cover_letter_path=app_obj.cover_letter_path,
@@ -758,7 +842,8 @@ def _load_candidate(session, application_id: int, *, use_llm: bool,
     if not row:
         raise HTTPException(status_code=404, detail="Application not found")
     app_obj, job, score = row
-    return _build_candidate(session, app_obj, job, score, use_llm=use_llm, dead=dead)
+    return _build_candidate(session, app_obj, job, score, use_llm=use_llm, dead=dead,
+                            resolve_company=True)
 
 
 def _preview_payload(session, cand: _Candidate, cfg: dict, dead: set[str]) -> dict:

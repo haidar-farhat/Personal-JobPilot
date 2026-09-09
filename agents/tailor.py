@@ -45,11 +45,17 @@ MAX_BULLETS_PER_ENTRY = 3 # bullets per project / experience entry
 MIN_BULLETS_PER_ENTRY = 1 # allow short entries (e.g., portfolio site = 1 bullet)
 
 
+# The system prompt used to say "~22 words" while the template said "18-32".
+# The system prompt is the stronger signal, so the model targeted the lower
+# number and undershot even that: measured output was a median of 11 words,
+# with 0.8% of bullets landing in the stated range. State ONE number.
 RESUME_SYSTEM_PROMPT = (
     "You are an expert resume writer creating ATS-optimized one-page resumes "
-    "in Jake Gutierrez's classic LaTeX-resume style. Strict density: every "
-    "bullet is a single line that fits within ~22 words. You MUST respond with "
-    "valid JSON only — no prose, no markdown."
+    "in Jake Gutierrez's classic LaTeX-resume style. Every bullet is 18-30 "
+    "words — a short bullet wastes the line it occupies. Rewrite the source "
+    "material in the target job's vocabulary; never shorten it to a stub and "
+    "never copy it verbatim. You MUST respond with valid JSON only — no prose, "
+    "no markdown."
 )
 
 RESUME_PROMPT_TEMPLATE = """Create a tailored ONE-PAGE resume for this specific job application.
@@ -81,7 +87,13 @@ Location: {location}
 - Pick the TOP 3 most-relevant projects (no more, fewer is fine)
 - Pick the TOP 3 most-relevant experience entries (no more, fewer is fine)
 - MAX 3 bullets per project or experience entry (1-2 is fine for less-relevant entries)
-- Each bullet: 18-32 words, may wrap to two lines for the most important entries
+- Each bullet is 18-30 words. THIS IS THE HARDEST RULE TO FOLLOW AND THE ONE THAT
+  MATTERS MOST. Do not copy a source bullet as-is: source bullets average 12 words
+  and are written generically. EXPAND each one with the concrete detail the job
+  description asks about — which technology, for what outcome, at what scale —
+  drawing every detail from the resume above. A bullet under 18 words is a defect.
+- If the source bullet contains a NUMBER, that number must survive into your rewrite
+  and appear in the first 12 words. Never invent a number that is not in the source.
 - NO professional summary section (Jake's style omits it)
 - Education: list every school in the résumé above, exactly as written there. Include a
   thesis line ONLY where the résumé above supplies one. For each school add ONE coursework
@@ -95,9 +107,12 @@ Location: {location}
 ## INSTRUCTIONS:
 1. Default section order is Education / Technical Skills / Technical Projects / Experience / Certifications.
    Only deviate if the role strongly favors a different order (e.g., heavy ML role → Skills above Projects is fine).
-2. Rewrite bullets to emphasize the JD's keywords/requirements naturally
-3. Be honest — only rephrase what's in the base resume, never invent
-4. Keep it to 1 page (~450-550 words total content)
+2. Every bullet you write must be a REWRITE of exactly one bullet from the resume above,
+   restated in the vocabulary this job description actually uses. Same facts, this job's words.
+3. Be honest — never introduce a tool, employer, title, date, degree, certification or
+   number that is absent from the resume above. Output containing one is rejected outright.
+4. Copy institutions, organizations, titles and dates VERBATIM from the resume above.
+5. Keep it to 1 page (~450-550 words total content)
 
 Respond with this exact JSON structure:
 {{

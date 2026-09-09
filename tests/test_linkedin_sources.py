@@ -518,9 +518,39 @@ def test_registry_exports_both_providers_with_the_provider_health_contract():
 
 
 def test_registry_does_not_collide_with_the_existing_providers():
-    from agents.scanner.providers import PROVIDERS
+    """A LinkedIn provider must never SHADOW a built-in one.
 
-    assert not (set(PROVIDERS) & set(LINKEDIN_PROVIDERS))
+    This used to assert the two name sets never intersect, which held only
+    while the merge had not happened yet. providers._ensure_linkedin_providers
+    now merges them on first use (lazily, to avoid an import cycle), so the
+    intersection is expected and the real invariant is that the merge ADDS
+    names rather than replacing anyone else's class.
+    """
+    from agents.scanner import providers as P
+
+    builtin = {"jsearch", "adzuna", "jooble", "jobicy",
+               "arbeitnow", "remotive", "usajobs"}
+    assert not (builtin & set(LINKEDIN_PROVIDERS)), "a LinkedIn name shadows a built-in"
+
+    P._ensure_linkedin_providers()
+    for name, cls in LINKEDIN_PROVIDERS.items():
+        assert P.PROVIDERS[name] is cls
+    assert builtin <= set(P.PROVIDERS), "the merge dropped a built-in provider"
+
+
+def test_lazy_registration_is_idempotent_and_order_independent():
+    """Registering twice must not duplicate or drop anything.
+
+    The merge is lazy because linkedin_sources imports JobProvider from
+    providers; an import-time merge is a cycle that silently half-works
+    depending on which module is imported first.
+    """
+    from agents.scanner import providers as P
+
+    P._ensure_linkedin_providers()
+    once = dict(P.PROVIDERS)
+    P._ensure_linkedin_providers()
+    assert dict(P.PROVIDERS) == once
 
 
 def test_neither_provider_requires_an_api_key():

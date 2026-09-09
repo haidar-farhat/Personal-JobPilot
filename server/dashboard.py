@@ -141,6 +141,15 @@ app.include_router(extension_router)
 from server.gmail import router as gmail_router
 app.include_router(gmail_router)
 
+# LinkedIn controlled batch outreach (candidates / preview / capped send / ledger)
+# Guarded: this router pulls in the outreach stack, and a problem there must not
+# take the whole dashboard down with it.
+try:
+    from server.outreach_mail import router as outreach_router
+    app.include_router(outreach_router)
+except Exception as _e:            # pragma: no cover - defensive
+    logging.getLogger(__name__).warning(f"[dashboard] outreach router unavailable: {_e}")
+
 # Initialize DB
 init_db()
 

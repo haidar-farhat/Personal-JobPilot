@@ -577,7 +577,7 @@
   @media print{
     body{background:#fff;color:#000}
     header,.hero,.topnav,.topicons,main,.resultsbar,#boardView,#companiesView,#insights,
-    #upskillView,.modal-backdrop,.toast,.no-print{display:none!important}
+    #upskillView,#outreachView,.modal-backdrop,.toast,.no-print{display:none!important}
     #advisorView{display:block!important}
     #advisorView[hidden]{display:none!important}
     .adv-hdr{display:block;font-size:18px;font-weight:800;margin:0 0 4px}
@@ -823,7 +823,7 @@
   .copybtn{border-radius:999px}
 
   /* View sections — soft settle */
-  #appliedView:not([hidden]),#boardView:not([hidden]),#companiesView:not([hidden]),#advisorView:not([hidden]),#upskillView:not([hidden]){animation:viewIn .3s ease-out both}
+  #appliedView:not([hidden]),#boardView:not([hidden]),#companiesView:not([hidden]),#advisorView:not([hidden]),#upskillView:not([hidden]),#outreachView:not([hidden]){animation:viewIn .3s ease-out both}
   @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .board-title{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:-.3px}
 
@@ -1232,7 +1232,7 @@
   @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
   /* ---- Applied view ---- */
-  #appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView{padding:20px 28px 56px}
+  #appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView{padding:20px 28px 56px}
   .board-title{font-size:20px;font-weight:800;letter-spacing:.3px}
   .board-sub{font-size:12.5px}
   .ap-tabs{gap:2px;border-bottom:1px solid var(--border);margin:6px 0 16px;flex-wrap:nowrap;overflow-x:auto}
@@ -1352,10 +1352,41 @@
     .pf-wrap{grid-template-columns:1fr}
     .pf-tabs{position:static;flex-direction:row;flex-wrap:wrap}
     #copilot{right:8px;left:8px;width:auto}
-    .jr-top,.jr-chips,main,.detail,#appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView{padding-left:12px;padding-right:12px}
+    .jr-top,.jr-chips,main,.detail,#appliedView,#boardView,#companiesView,#advisorView,#upskillView,#resumeView,#profileView,#agentView,#outreachView{padding-left:12px;padding-right:12px}
     .jr-search{margin-left:0;width:100%}
   }
   @media print{ header{display:none!important} body{padding-left:0} }
+
+  /* --- Outreach (controlled batch) ------------------------------------- */
+  #outreachView .ob-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    padding:12px 14px;border:1px solid var(--border);border-radius:12px;
+    background:var(--surface);margin:0 0 14px}
+  #outreachView .ob-cap{font-size:12.5px;color:var(--muted);margin-left:auto;
+    display:flex;align-items:center;gap:8px}
+  #outreachView .ob-cap b{color:var(--text)}
+  #outreachView .ob-meter{height:6px;width:120px;border-radius:99px;
+    background:var(--ring-track);overflow:hidden}
+  #outreachView .ob-meter i{display:block;height:100%;background:var(--mint);transition:width .3s}
+  #outreachView .ocard{border:1px solid var(--border);border-radius:14px;background:var(--surface);
+    padding:14px 16px;margin:10px 0;box-shadow:var(--shadow)}
+  #outreachView .ocard.blocked{opacity:.6}
+  #outreachView .ocard.sel{border-color:var(--mint)}
+  #outreachView .ohead{display:flex;gap:10px;align-items:flex-start}
+  #outreachView .ohead h3{margin:0;font-size:15px;font-weight:700;color:var(--text)}
+  #outreachView .ometa{color:var(--muted);font-size:12.5px;margin-top:2px}
+  #outreachView .chip{display:inline-block;padding:2px 8px;border-radius:var(--radius-pill);
+    font-size:11.5px;background:var(--surface-2);color:var(--muted);margin-right:6px}
+  #outreachView .chip.ok{background:var(--success-bg);color:var(--success-fg)}
+  #outreachView .chip.warn{background:var(--warn-bg);color:var(--warn-fg)}
+  #outreachView .chip.bad{background:var(--danger-bg);color:var(--danger-fg)}
+  #outreachView .opreview{margin-top:10px;border-top:1px solid var(--divider);padding-top:10px}
+  #outreachView .opreview pre{white-space:pre-wrap;font-family:var(--font);font-size:13px;
+    color:var(--text);background:var(--surface-2);border-radius:10px;padding:12px;margin:6px 0;
+    max-height:280px;overflow:auto}
+  #outreachView .ohist{margin-top:26px}
+  #outreachView .ohrow{display:flex;gap:10px;align-items:center;padding:8px 12px;
+    border:1px solid var(--border);border-radius:10px;margin:6px 0;background:var(--surface);font-size:13px}
+  #outreachView .oempty{color:var(--muted);padding:28px 4px;font-size:14px}
 </style>
 </head>
 <body>
@@ -1368,6 +1399,7 @@
     <a data-view="agent" id="navAgent" role="button" tabindex="0"><svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M8 14h.01M16 14h.01"/></svg>Agent<span class="nav-ct" id="navAgentCt" hidden></span></a>
     <a data-view="applied" id="navApplied" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Applied<span class="nav-ct" id="navAppliedCt" hidden></span></a>
     <a data-view="companies" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6M9 10h.01M15 10h.01M9 14h.01M15 14h.01"/></svg>Companies</a>
+    <a data-view="outreach" id="navOutreach" role="button" tabindex="0"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>Outreach<span class="nav-ct" id="navOutreachCt" hidden></span></a>
     <a data-view="advisor" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>Coaching</a>
     <a data-view="skills" role="button" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Skills</a>
   </nav>
@@ -1501,6 +1533,37 @@
     </div>
   </div>
   <div id="agentBody"><div class="empty">Loading…</div></div>
+</section>
+
+
+<section id="outreachView" hidden>
+  <div class="board-head">
+    <div>
+      <div class="board-title">OUTREACH <span style="color:var(--subtle);font-weight:400">›</span></div>
+      <div class="board-sub">Job posts that publish an application address. Every message is previewed
+        before it goes, tailored to its own job, and sent at most once per company per role &mdash; a hard
+        daily cap and a database constraint enforce that, not a setting.</div>
+    </div>
+  </div>
+
+  <div class="ob-bar">
+    <button class="btn" id="obRefresh">Find candidates</button>
+    <button class="btn" id="obPreview">Preview selected</button>
+    <button class="btn primary" id="obSend">Send selected&hellip;</button>
+    <button class="btn" id="obScanOptouts" title="Read recent replies for STOP / unsubscribe requests">Scan opt-outs</button>
+    <span class="ob-cap" id="obCap">
+      <span class="ob-meter"><i id="obMeter" style="width:0%"></i></span>
+      <span id="obCapText">&mdash;</span>
+    </span>
+  </div>
+
+  <div id="obStatus" class="ometa" style="margin:0 0 12px"></div>
+  <div id="obList"><div class="oempty">Click <b>Find candidates</b> to look for postings that publish an application address.</div></div>
+
+  <div class="ohist">
+    <div class="board-title" style="font-size:13px">SEND HISTORY</div>
+    <div id="obHistory"><div class="oempty">Nothing sent yet.</div></div>
+  </div>
 </section>
 
 <div class="wz-backdrop" id="wizard" hidden>
@@ -3073,8 +3136,9 @@ function showView(v){
     if(active) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current");
   });
   const board=v==="board", companies=v==="companies", advisor=v==="advisor", applied=v==="applied", skills=v==="skills",
-        detail=v==="detail", resume=v==="resume", profile=v==="profile", agent=v==="agent";
-  const hideMain=board||companies||advisor||applied||skills||detail||resume||profile||agent;
+        detail=v==="detail", resume=v==="resume", profile=v==="profile", agent=v==="agent",
+        outreach=v==="outreach";
+  const hideMain=board||companies||advisor||applied||skills||detail||resume||profile||agent||outreach;
   const m=document.querySelector("main"); if(m) m.style.display=hideMain?"none":"";
   const jt=$("#jrTop"), jc=document.querySelector(".jr-chips"), rc=$("#resultCount");
   [jt,jc,rc].forEach(el=>{ if(el) el.style.display=hideMain?"none":""; });
@@ -3085,6 +3149,7 @@ function showView(v){
   $("#resumeView").hidden=!resume;
   $("#profileView").hidden=!profile;
   $("#agentView").hidden=!agent;
+  const ov=$("#outreachView"); if(ov) ov.hidden=!outreach;
   const av=$("#advisorView"); if(av) av.hidden=!advisor;
   const uv=$("#upskillView"); if(uv) uv.hidden=!skills;
   $("#insights").classList.toggle("open", v==="insights");
@@ -3095,6 +3160,7 @@ function showView(v){
   if(resume) renderResume();
   if(profile) renderProfile();
   if(agent) renderAgent();
+  if(outreach) renderOutreach();
   if(advisor && av && !av.querySelector(".adv-stats")) runAdvisorReport();
   if(skills && uv && !uv.dataset.loaded) loadUpskill();
   if(!hideMain||detail) window.scrollTo({top:0});
@@ -3845,6 +3911,203 @@ function agResultCard(a){
         <div class="chips">${a.missing_fields.map(f=>`<span class="chip miss">${esc(f)}</span>`).join("")}</div></div>`:""}</div>
     <div class="acts">${ok&&a.has_tailored_cv?`<a class="btn-link" href="/api/file/${a.has_resume_pdf?"resume_pdf":"resume"}/${a.id}">Download Resume</a>`:""}${!ok?`<button class="btn-mint" data-continue="${a.id}" title="Opens the JobPilot Chromium with autofill loaded — it fills everything it can and leaves only what needs you">Continue application</button>`:""}<button class="btn-link" data-open="${a.id}">Open</button></div></div>`;
 }
+
+// ============================================================
+// Outreach — controlled batch application email
+// ------------------------------------------------------------
+// Preview-first by design: nothing is sent until rows are ticked and the
+// confirm dialog is accepted. The daily cap and the one-per-company-per-role
+// rule are enforced server-side (a UNIQUE constraint written before SMTP
+// opens), so this screen displays them but never decides them.
+// ============================================================
+const obState = { candidates: [], selected: new Set(), previews: {}, cap: null, enabled: false };
+
+async function obGet(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error((r.status + " " + await r.text()).slice(0,200));
+  return r.json();
+}
+async function obPost(path, body){
+  const r = await fetch(path, {method:"POST", headers:{"Content-Type":"application/json"},
+                               body: JSON.stringify(body||{})});
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok){
+    var msg = typeof d.detail === "string" ? d.detail
+            : (d.detail && d.detail.detail) ? d.detail.detail : ("HTTP " + r.status);
+    throw new Error(msg);
+  }
+  return d;
+}
+
+function obRenderCap(st){
+  const cap = st.cap || {};
+  obState.cap = cap; obState.enabled = !!st.enabled;
+  const used = cap.daily_cap ? (cap.sent_today/cap.daily_cap)*100 : 0;
+  const m = $("#obMeter"); if(m) m.style.width = Math.min(100, used) + "%";
+  const t = $("#obCapText");
+  if(t) t.innerHTML = "<b>" + (cap.sent_today||0) + "</b> / " + (cap.daily_cap||0) + " sent today"
+    + (cap.remaining!=null ? " &middot; " + cap.remaining + " left" : "");
+  const warn = [];
+  if(!st.mailer_ready) warn.push("Email not configured: " + esc(st.mailer_reason||"see config/gmail.yaml"));
+  if(!st.enabled) warn.push("<b>Preview-only.</b> Sending is off &mdash; set <code>mail.outreach.enabled: true</code> in settings.yaml to arm it.");
+  if(st.suppressions) warn.push(st.suppressions + " address(es) opted out");
+  const sb = $("#obStatus");
+  if(sb) sb.innerHTML = warn.length ? warn.map(function(w){ return "<div>"+w+"</div>"; }).join("") : "";
+  const btn = $("#obSend"); if(btn) btn.disabled = !st.enabled || !st.mailer_ready;
+}
+
+function obCard(c){
+  const id = c.application_id;
+  const chips = [];
+  if(c.fit_score!=null) chips.push('<span class="chip">fit ' + c.fit_score + '</span>');
+  if(c.recipient) chips.push('<span class="chip ok">' + esc(c.recipient) + '</span>');
+  if(c.recipient_source) chips.push('<span class="chip">via ' + esc(c.recipient_source) + '</span>');
+  if(c.already_sent) chips.push('<span class="chip warn">already contacted</span>');
+  if(c.no_materials) chips.push('<span class="chip bad">no CV yet</span>');
+  if(c.blocked) chips.push('<span class="chip bad">' + esc(c.blocked) + '</span>');
+  const pv = obState.previews[id];
+  const sel = obState.selected.has(id);
+  var html = '<div class="ocard ' + (c.eligible?"":"blocked") + ' ' + (sel?"sel":"") + '" data-id="' + id + '">'
+    + '<div class="ohead">'
+    + '<input type="checkbox" data-ob-sel="' + id + '" ' + (sel?"checked":"") + ' ' + (c.eligible?"":"disabled") + ' aria-label="select">'
+    + '<div style="flex:1;min-width:0">'
+    + '<h3>' + esc(c.title||"(untitled)") + '</h3>'
+    + '<div class="ometa">' + esc(c.company||"") + (c.location? " &middot; " + esc(c.location) : "") + '</div>'
+    + '<div style="margin-top:6px">' + chips.join("") + '</div>'
+    + (c.instructions ? '<div class="ometa" style="margin-top:6px">&ldquo;' + esc(c.instructions).slice(0,220) + '&rdquo;</div>' : "")
+    + '</div>'
+    + '<button class="btn" data-ob-preview="' + id + '">Preview</button>'
+    + '</div>';
+  if(pv){
+    html += '<div class="opreview">'
+      + '<div class="ometa"><b>To</b> ' + esc(pv.recipient||"") + ' &middot; <b>Subject</b> ' + esc(pv.subject||"") + '</div>'
+      + '<pre>' + esc(pv.body||"") + '</pre>'
+      + '<div class="ometa">Attachments: ' + ((pv.attachments||[]).map(esc).join(", ") || "<i>none</i>") + '</div>'
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
+function obPaint(){
+  const list = $("#obList"); if(!list) return;
+  if(!obState.candidates.length){
+    list.innerHTML = '<div class="oempty">No candidates. A job qualifies when its posting publishes an '
+      + 'application address and it already has a tailored CV.</div>';
+    return;
+  }
+  list.innerHTML = obState.candidates.map(obCard).join("");
+  list.querySelectorAll("[data-ob-sel]").forEach(function(cb){
+    cb.onchange = function(){
+      const id = +cb.dataset.obSel;
+      if(cb.checked) obState.selected.add(id); else obState.selected.delete(id);
+      obPaint();
+    };
+  });
+  list.querySelectorAll("[data-ob-preview]").forEach(function(b){
+    b.onclick = function(){ obPreviewOne(+b.dataset.obPreview); };
+  });
+}
+
+async function obPreviewOne(id){
+  try{
+    obState.previews[id] = await obGet("/api/outreach/preview/" + id);
+    obPaint();
+  }catch(e){ toast("Preview failed: " + e.message, true); }
+}
+
+async function obLoadHistory(){
+  const box = $("#obHistory"); if(!box) return;
+  try{
+    const d = await obGet("/api/outreach/history?limit=25");
+    const rows = d.sends || [];
+    box.innerHTML = rows.length ? rows.map(function(h){
+      const cls = h.status==="sent" ? "ok" : (h.status==="blocked" ? "warn" : "bad");
+      return '<div class="ohrow">'
+        + '<span class="chip ' + cls + '">' + esc(h.status) + '</span>'
+        + '<span style="flex:1;min-width:0">' + esc(h.company||"") + ' &middot; ' + esc(h.job_title||"") + '</span>'
+        + '<span class="ometa">' + esc(h.recipient||"") + '</span>'
+        + '<span class="ometa">' + esc((h.sent_at||h.created_at||"").slice(0,16).replace("T"," ")) + '</span>'
+        + (h.block_reason ? '<span class="chip warn">' + esc(h.block_reason) + '</span>' : "")
+        + '</div>';
+    }).join("") : '<div class="oempty">Nothing sent yet.</div>';
+  }catch(e){ box.innerHTML = '<div class="oempty">History unavailable: ' + esc(e.message) + '</div>'; }
+}
+
+async function renderOutreach(){
+  try{ obRenderCap(await obGet("/api/outreach/status")); }
+  catch(e){ const sb=$("#obStatus"); if(sb) sb.textContent = "Outreach API unavailable: " + e.message; }
+  await obLoadHistory();
+  if(!obState.candidates.length) obPaint();
+}
+
+async function obFindCandidates(){
+  const list = $("#obList");
+  if(list) list.innerHTML = '<div class="oempty">Searching&hellip;</div>';
+  try{
+    const d = await obGet("/api/outreach/candidates?limit=50");
+    obState.candidates = d.candidates || [];
+    obState.selected.clear(); obState.previews = {};
+    const c = d.counts || {};
+    const sb = $("#obStatus");
+    if(sb) sb.innerHTML = '<div>' + (c.eligible||0) + ' ready &middot; ' + (c.no_recipient||0)
+      + ' publish no address &middot; ' + (c.already_sent||0) + ' already contacted &middot; '
+      + (c.no_materials||0) + ' need a CV first</div>' + sb.innerHTML;
+    obPaint();
+  }catch(e){
+    if(list) list.innerHTML = '<div class="oempty">Search failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function obPreviewSelected(){
+  const ids = Array.from(obState.selected);
+  if(!ids.length){ toast("Select at least one row first", true); return; }
+  try{
+    const d = await obPost("/api/outreach/preview", {application_ids: ids});
+    (d.previews||[]).forEach(function(pv){ if(pv.application_id) obState.previews[pv.application_id] = pv; });
+    obPaint();
+  }catch(e){ toast("Preview failed: " + e.message, true); }
+}
+
+async function obSendSelected(){
+  const ids = Array.from(obState.selected);
+  if(!ids.length){ toast("Select at least one row first", true); return; }
+  const unseen = ids.filter(function(i){ return !obState.previews[i]; });
+  if(unseen.length){ toast("Preview all " + ids.length + " first — " + unseen.length + " not previewed", true); return; }
+  const cap = obState.cap || {};
+  if(cap.remaining!=null && ids.length > cap.remaining){
+    toast("Daily cap: only " + cap.remaining + " send(s) left today", true); return;
+  }
+  if(!confirm("Send " + ids.length + " application email(s) now?\n\n"
+    + "Each goes to one employer with its own tailored CV. This cannot be undone, "
+    + "and each company/role can only ever be contacted once.")) return;
+  try{
+    const d = await obPost("/api/outreach/send-batch", {application_ids: ids, confirm: true, dry_run: false});
+    const results = d.results || [];
+    const sent = results.filter(function(r){ return r.sent; }).length;
+    toast(sent + " sent, " + (results.length - sent) + " blocked or failed");
+    obState.selected.clear();
+    await renderOutreach(); await obFindCandidates();
+  }catch(e){ toast("Send failed: " + e.message, true); }
+}
+
+async function obScanOptouts(){
+  try{
+    const d = await obPost("/api/outreach/scan", {});
+    toast(d.ok ? ("Opt-out scan: " + (d.new_suppressions||0) + " new")
+               : "Opt-out scan could not read the mailbox — sending stays blocked", !d.ok);
+    await renderOutreach();
+  }catch(e){ toast("Opt-out scan failed: " + e.message, true); }
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  const wire = function(id, fn){ const el = $(id); if(el) el.onclick = fn; };
+  wire("#obRefresh", obFindCandidates);
+  wire("#obPreview", obPreviewSelected);
+  wire("#obSend", obSendSelected);
+  wire("#obScanOptouts", obScanOptouts);
+});
+
+
 async function renderAgent(){
   const box=$("#agentBody"); if(!box) return;
   const st=await fetch("/api/agent/status").then(r=>r.ok?r.json():null).catch(()=>null);
