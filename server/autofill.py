@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -574,13 +575,19 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
 
     opts = field.get("options")
     prompt = (
-        "You are the job candidate filling out a job application. Answer the question "
-        "in first person, concisely (60-120 words, or one line if the question wants a "
-        "short factual answer). Ground every claim ONLY in the RESUME and KNOWN FACTS "
-        "below — never invent employers, dates, or numbers. When the JOB DESCRIPTION "
-        "is relevant (e.g. 'why do you want to work here'), connect the candidate's "
-        "actual experience to what the role needs. No preamble, no quotes — return "
-        "only the answer text.\n\n"
+        "You ARE the applicant, writing your own answer on your own job "
+        "application. Write in the FIRST PERSON: 'I', 'my', 'me'.\n"
+        "NEVER write about yourself in the third person and NEVER use your "
+        "own name — write 'I am 24' and never 'Haidar is 24'.\n"
+        "NEVER explain where the answer came from or how it was worked out — "
+        "write 'I graduated in 2025', not 'based on the graduation date on "
+        "the resume'. No preamble, no quotes, no meta-commentary: return only "
+        "the answer text, exactly as it should appear in the form field.\n"
+        "Be concise: 60-120 words, or a single short line when the question "
+        "wants a short factual answer. Ground every claim ONLY in the RESUME "
+        "and KNOWN FACTS below — never invent employers, dates, or numbers. "
+        "When the JOB DESCRIPTION is relevant (e.g. 'why do you want to work "
+        "here'), connect your actual experience to what the role needs.\n\n"
         f"QUESTION: {label}\n"
         + (f"PICK ONE OF THESE OPTIONS, returning its exact text: {opts}\n" if opts else "")
         + f"\nJOB: {job_title or ''} at {company or ''}\n"
@@ -589,10 +596,61 @@ def _draft_answer(field: dict, profile: dict, resume_summary: str, job_title: st
         + f"\nRESUME:\n{resume_summary[:2000]}"
     )
     try:
-        return generate_text(prompt) or fb
+        answer = generate_text(prompt) or fb
+        full_name = ((profile.get("identity") or {}).get("full_name") or "").strip()
+        return _to_first_person(answer, full_name)
     except Exception as e:  # Ollama down / timeout → fallback template (or None)
         logger.warning(f"[autofill] essay draft failed for {label!r}: {e}")
         return fb
+
+
+# The model drifts into describing the applicant ("Haidar is 24 years old
+# based on his graduation date") even when told to answer in first person.
+# Repairing the common shapes is cheaper and far more reliable than
+# re-prompting, and it runs on the fallback templates too.
+_META_PREFIX = re.compile(
+    r"^\s*(based on[^,.]{0,60}[,.]\s*|according to[^,.]{0,60}[,.]\s*|"
+    r"as (?:shown|stated|indicated|per)[^,.]{0,60}[,.]\s*)", re.I)
+
+
+def _to_first_person(text: str, full_name: str = "") -> str:
+    """Rewrite third-person self-reference into first person.
+
+    The answer goes into a form field under the applicant's own name, so
+    "Haidar is 24" reads as though somebody else filled it in.
+    """
+    if not text:
+        return text
+    out = text.strip().strip('"').strip()
+    out = _META_PREFIX.sub("", out)
+
+    names = [n for n in ([full_name] + full_name.split()) if len(n) > 2]
+    for n in sorted(set(names), key=len, reverse=True):
+        esc = re.escape(n)
+        out = re.sub(rf"\b{esc}'s\b", "my", out)
+        out = re.sub(rf"\b{esc}\s+is\b", "I am", out)
+        out = re.sub(rf"\b{esc}\s+was\b", "I was", out)
+        out = re.sub(rf"\b{esc}\s+has\b", "I have", out)
+        out = re.sub(rf"\b{esc}\s+had\b", "I had", out)
+        out = re.sub(rf"\b{esc}\b", "I", out)
+
+    for pat, rep in (
+        (r"\bthe (?:candidate|applicant)'s\b", "my"),
+        (r"\bthe (?:candidate|applicant) is\b", "I am"),
+        (r"\bthe (?:candidate|applicant) has\b", "I have"),
+        (r"\bthe (?:candidate|applicant) was\b", "I was"),
+        (r"\bthe (?:candidate|applicant)\b", "I"),
+    ):
+        out = re.sub(pat, rep, out, flags=re.I)
+
+    # Only fix pronouns once a first-person subject is present, so a sentence
+    # genuinely about someone else (a referrer, a manager) is left alone.
+    if re.search(r"\bI\b", out):
+        out = re.sub(r"\b(?:his|her|their)\b", "my", out, flags=re.I)
+        out = re.sub(r"\bhe\s+is\b|\bshe\s+is\b|\bthey\s+are\b", "I am", out, flags=re.I)
+
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return (out[:1].upper() + out[1:]) if out else out
 
 
 class LearnRequest(BaseModel):
@@ -609,16 +667,121 @@ class LearnRequest(BaseModel):
 
 
 def load_learned() -> dict:
-    """{key: value} for every active learned answer."""
+    """{key: value} for every active learned answer, INCLUDING its aliases.
+
+    Aliases let a rephrased question reuse the same answer. They resolve to the
+    identical value, so the planner needs no extra logic — a paraphrase is just
+    another key pointing at the same string.
+    """
     from db.database import get_session
-    from db.models import LearnedAnswer
+    from db.models import LearnedAnswer, LearnedAnswerAlias
     session = get_session()
     try:
         rows = session.query(LearnedAnswer).filter(LearnedAnswer.status == "active").all()
-        return {r.key: r.value for r in rows if r.key and r.value}
+        by_id = {r.id: r.value for r in rows if r.value}
+        out = {r.key: r.value for r in rows if r.key and r.value}
+        for a in session.query(LearnedAnswerAlias).filter(
+                LearnedAnswerAlias.status == "active").all():
+            val = by_id.get(a.answer_id)
+            if val and a.key and a.key not in out:
+                out[a.key] = val
+        return out
     except Exception as e:
         logger.warning(f"[autofill] learned answers unavailable: {e}")
         return {}
+    finally:
+        session.close()
+
+
+_ALIAS_TRIED: set = set()   # keys we already asked about this process
+
+
+def propose_aliases(unmatched: list[dict]) -> None:
+    """Ask the local LLM whether an unanswered question is a rephrasing of one
+    we already know, and record the match as an alias for next time.
+
+    Runs in a background thread AFTER the plan is returned — /plan is already
+    latency-sensitive and this must never make a page fill slower. The payoff
+    lands on the NEXT application, which is exactly when it is wanted.
+    """
+    from agents.autofill_mapper import learned_key
+    from db.database import get_session
+    from db.models import LearnedAnswer, LearnedAnswerAlias
+    from utils.ollama_client import generate_json
+
+    session = get_session()
+    try:
+        known = session.query(LearnedAnswer).filter(LearnedAnswer.status == "active").all()
+        if not known:
+            return
+        catalogue = [{"id": r.id, "question": r.label} for r in known][:60]
+
+        for field in unmatched:
+            label = (field.get("label") or "").strip()
+            key = learned_key(label)
+            if not key or key in _ALIAS_TRIED:
+                continue
+            _ALIAS_TRIED.add(key)
+            if session.query(LearnedAnswerAlias).filter(LearnedAnswerAlias.key == key).first():
+                continue
+            if session.query(LearnedAnswer).filter(LearnedAnswer.key == key).first():
+                continue
+
+            prompt = (
+                "Decide whether a NEW job-application question is just a "
+                "REWORDING of one of the KNOWN questions - that is, the "
+                "applicant would give the SAME answer to both.\n\n"
+                "EXAMPLES\n"
+                "Known: 'What is your highest level of education?'\n"
+                "New: 'Which degree have you completed?' -> MATCH\n"
+                "New: 'What did you study?' -> NO MATCH (subject, not level)\n"
+                "Known: 'Are you willing to relocate?'\n"
+                "New: 'Would you move for this role?' -> MATCH\n"
+                "New: 'Are you willing to travel?' -> NO MATCH\n\n"
+                "Same words do not mean the same question. Different topic "
+                "means NO MATCH, however similar the wording.\n\n"
+                'Reply ONLY with JSON: {"id": <known id or null>, "same": true|false}\n\n'
+                f"NEW QUESTION: {label}\n\nKNOWN QUESTIONS:\n"
+                + "\n".join(f'{c["id"]}: {c["question"]}' for c in catalogue)
+            )
+            try:
+                res = generate_json(prompt) or {}
+            except Exception as e:
+                logger.debug(f"[autofill] alias proposal failed: {e}")
+                continue
+
+            aid = res.get("id")
+            if not aid or not any(c["id"] == aid for c in catalogue):
+                continue        # no candidate, or a hallucinated id
+
+            # Second, focused pass. Measured on this model: picking the right
+            # candidate from a list is reliable, but its yes/no verdict in the
+            # same breath is not — it answered "same: false" for a genuine
+            # rewording. Asked about ONE pair on its own it scored 4/5 with no
+            # false positives, and the misses are conservative: a miss just
+            # means the LLM drafts an answer as before, whereas a false
+            # positive would silently answer a DIFFERENT question.
+            target = next(c["question"] for c in catalogue if c["id"] == aid)
+            try:
+                verdict = generate_json(
+                    "Two job-application questions. Would the applicant write "
+                    "the SAME answer in both boxes?\n\n"
+                    f"A: {target}\nB: {label}\n\n"
+                    'Answer JSON only: {"same": true} if they ask for the same '
+                    'information, {"same": false} if they ask about different '
+                    "things."
+                ) or {}
+            except Exception as e:
+                logger.debug(f"[autofill] alias confirmation failed: {e}")
+                continue
+            if not verdict.get("same"):
+                continue
+            session.add(LearnedAnswerAlias(key=key, label=label, answer_id=int(aid),
+                                           origin="llm", status="active"))
+            session.commit()
+            logger.info(f"[autofill] learned that {label!r} means the same as answer {aid}")
+    except Exception as e:
+        logger.warning(f"[autofill] alias proposal aborted: {e}")
     finally:
         session.close()
 
@@ -734,6 +897,25 @@ def plan(req: AutofillRequest):
     fields = [f.model_dump() for f in req.fields]
     result = build_plan(fields, profile, archetype, resume_summary,
                         essay_fn=essay_fn, learned=load_learned())
+
+    # Questions nothing could answer are candidates for "this is the same
+    # question I already answered, worded differently". Asking the LLM about
+    # them happens on a background thread AFTER this response is returned:
+    # /plan blocks a page fill, and the benefit lands on the NEXT application.
+    try:
+        # Includes fields the LLM *guessed* at: a guess is precisely where a
+        # remembered answer should have won, so those are the best candidates
+        # for "I have already answered this, worded differently".
+        unresolved = {o["id"] for o in result.get("fields", [])
+                      if o.get("source") in ("none", "llm", None)}
+        pending = [f.model_dump() if hasattr(f, "model_dump") else dict(f)
+                   for f in req.fields if f.id in unresolved]
+        if pending:
+            threading.Thread(target=propose_aliases, args=(pending,),
+                             name="jpaf-alias", daemon=True).start()
+    except Exception as e:
+        logger.debug(f"[autofill] alias scheduling skipped: {e}")
+
     return {
         "archetype": archetype or "ai_default",
         "archetype_label": archetype_label,

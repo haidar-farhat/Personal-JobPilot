@@ -143,7 +143,9 @@ function jAnchoredMatch(c, opts) {
 // target. Ungated, "Master of Science" matched "Bachelor of Science" on the
 // shared word "science" and filled a degree he does not hold.
 function jTokenOverlap(nv, opts) {
-  const dw = nv.split(" ").filter((w) => w.length > 2);
+  // A digit is the most distinctive token in "4 years"; dropping it made
+  // every range option match and picked "5+ years" for a 4-year answer.
+  const dw = nv.split(" ").filter((w) => w.length > 2 || /^\d+$/.test(w));
   if (!dw.length) return null;
   const covering = opts.filter((o) => { const ow = new Set(jnorm(o).split(" ")); return dw.every((w) => ow.has(w)); });
   if (!covering.length) return null;

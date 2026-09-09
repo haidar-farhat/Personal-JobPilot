@@ -91,7 +91,9 @@
   // Science", so it no longer qualifies. Ties return null and the field is
   // flagged for review instead of filled with a plausible wrong answer.
   function tokenOverlap(nv, opts) {
-    const dw = nv.split(" ").filter((w) => w.length > 2);
+    // A digit is the most distinctive token in "4 years"; dropping it made
+    // every range option match and picked "5+ years" for a 4-year answer.
+    const dw = nv.split(" ").filter((w) => w.length > 2 || /^\d+$/.test(w));
     if (!dw.length) return null;
     const covering = opts.filter((x) => {
       const ow = new Set(x.t.split(" "));

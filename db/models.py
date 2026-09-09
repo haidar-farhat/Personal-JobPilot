@@ -296,3 +296,39 @@ class LearnedAnswer(Base):
 
     def __repr__(self):
         return f"<LearnedAnswer(key='{self.key}', value='{(self.value or '')[:24]}')>"
+
+
+class LearnedAnswerAlias(Base):
+    """Another wording of a question already answered, pointing at the same row.
+
+    Paraphrase is NOT a lexical problem: measured on real pairs,
+    "preferred working arrangement" vs "which work setup do you prefer" scores
+    53 on token_set_ratio, while "what is your preferred pronoun" — a totally
+    different question — scores 85. No fuzzy threshold separates them, so an
+    alias is never inferred from string similarity at fill time. It is either
+    proposed by the local LLM (and shown to the user as needs-review on first
+    use) or created because the user answered that exact wording themselves.
+    """
+
+    __tablename__ = "learned_answer_aliases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(500), nullable=False)     # normalize(label) of the rephrasing
+    label = Column(String(500), nullable=False)   # verbatim, for the dashboard
+    answer_id = Column(Integer, ForeignKey("learned_answers.id", ondelete="CASCADE"),
+                       nullable=False)
+
+    status = Column(String(20), nullable=False, default="active")  # active|rejected
+    origin = Column(String(20), nullable=False, default="llm")     # llm|manual|exact
+    confirmed = Column(Boolean, default=False, nullable=False)     # user saw it and kept it
+    times_used = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_alias_key"),
+        Index("idx_alias_key", "key"),
+    )
+
+    def __repr__(self):
+        return f"<LearnedAnswerAlias(key='{self.key}' -> answer {self.answer_id})>"

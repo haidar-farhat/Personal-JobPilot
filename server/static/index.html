@@ -3807,12 +3807,13 @@ async function renderProfile(){
 let _agentPoll=null, _wasRunning=false;
 function summarizeToday(t){
   // Real outcomes from the database — covers scheduler cycles too, which the
-  // in-memory summary never saw.
+  // in-memory summary never saw. Prefixed "Today" because it sits beside the
+  // QUEUE count and was being read as "78 jobs queued" when only 1 was.
   if(!t||!t.attempted) return "";
-  const bits=[`${t.attempted} attempted today`];
-  if(t.submitted) bits.push(`<b>${t.submitted} submitted</b>`);
+  const bits=[`<b>${t.submitted||0}</b> submitted`];
   if(t.needs_you) bits.push(`${t.needs_you} need you`);
-  return bits.join(" · ");
+  if(t.cleared) bits.push(`${t.cleared} cleared`);
+  return `Today: ${t.attempted} applications attempted — ` + bits.join(", ");
 }
 function summarizeRun(s){
   if(!s||typeof s!=="object") return "No agent run yet.";
@@ -3888,7 +3889,8 @@ async function renderAgent(){
       <div class="ag-col"><h4>Prepare materials (${needRes.length})</h4>${needRes.map(agPrepCard).join("")||`<div class="empty">Every queued job has a tailored résumé ✓</div>`}</div>
       <div class="ag-col"><h4>Results${allResults.length>results.length?` <span class="muted" style="font-weight:400">(${results.length} of ${allResults.length})</span>`:""}</h4>
         <div class="res-tools"><button class="btn-link" id="clrOk" ${nOk?"":"disabled"} title="Hide the successful ones — the record and the Applied tab are kept">Clear applied${nOk?` (${nOk})`:""}</button>
-          <button class="btn-link" id="clrBad" ${nBad?"":"disabled"} title="Hide the failed ones — nothing is deleted or re-queued">Clear failed${nBad?` (${nBad})`:""}</button></div>
+          <button class="btn-link" id="clrBad" ${nBad?"":"disabled"} title="Hide the failed ones — nothing is deleted or re-queued">Clear failed${nBad?` (${nBad})`:""}</button>
+          ${(st&&st.today&&st.today.cleared)?`<button class="btn-link" id="showCleared" title="Bring back the result cards you cleared">Show ${st.today.cleared} cleared</button>`:""}</div>
         ${results.map(agResultCard).join("")||`<div class="empty">No agent runs yet.</div>`}</div></div>`;
   box.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openDetail(+b.dataset.open));
   // Continue: arm autofill for this job, then open the posting. The extension
@@ -3925,6 +3927,14 @@ async function renderAgent(){
     renderAgent(); };
   const cOk=$("#clrOk"); if(cOk) cOk.onclick=()=>dismiss(cOk,"applied","applied");
   const cBad=$("#clrBad"); if(cBad) cBad.onclick=()=>dismiss(cBad,"failed","failed");
+  const cShow=$("#showCleared"); if(cShow) cShow.onclick=async()=>{
+    cShow.disabled=true; cShow.textContent="Restoring…";
+    try{
+      const d=await fetch("/api/agent/results/restore",{method:"POST"}).then(r=>r.json());
+      state.apps.forEach(a=>{ a.result_dismissed=false; });
+      toast(`Restored ${d.restored??0} result card${(d.restored??0)===1?"":"s"} ✓`);
+    }catch(e){ toast("Couldn't restore the cleared results", true); }
+    loadAll(); renderAgent(); };
   box.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>changeStatus(+b.dataset.remove,"scored"));
   box.querySelectorAll("[data-gen]").forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent="Generating…";
     const d=await runTailor(+b.dataset.gen, coverWanted()); if(!d||!d.ok){ toast(`Tailoring failed: ${(d&&d.error)||"?"}`, true); b.disabled=false; b.textContent="Retry"; } else renderAgent(); });

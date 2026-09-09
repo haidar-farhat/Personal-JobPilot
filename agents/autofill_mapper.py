@@ -182,12 +182,23 @@ _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
 
 # Cross-vocabulary synonyms: some ATSes render "Man/Woman" for gender, spell out
 # race categories differently, etc. Keys and values are normalize()d forms.
-_CHOICE_SYNONYMS = {
-    "male": ["man"],
-    "female": ["woman"],
-    "heterosexual": ["straight", "heterosexual straight"],
-    "two or more races": ["two or more", "multiracial", "multiple races"],
-}
+# Spellings of the SAME answer. Written as groups and expanded both ways: a
+# one-directional dict meant an answer learned as "Remote" could not bind to a
+# site offering "Work from home", and vice versa — the exact case a remembered
+# answer has to survive when the next employer words its dropdown differently.
+_SYNONYM_GROUPS = [
+    {"male", "man"},
+    {"female", "woman"},
+    {"heterosexual", "straight", "heterosexual straight"},
+    {"two or more races", "two or more", "multiracial", "multiple races"},
+    {"remote", "fully remote", "work from home", "wfh", "telecommute",
+     "telecommuting", "remote work", "100 remote", "work remotely"},
+    {"onsite", "on site", "in office", "in person", "office based", "office",
+     "in the office", "on premise", "on premises"},
+    {"hybrid", "hybrid remote", "mix of both", "partially remote",
+     "hybrid onsite remote", "combination"},
+]
+_CHOICE_SYNONYMS = {m: sorted(g - {m}) for g in _SYNONYM_GROUPS for m in g}
 
 
 def _is_anchored(short: str, long: str) -> bool:
@@ -227,7 +238,10 @@ def _token_overlap(nd: str, options: list[str]) -> str | None:
     Science", so it no longer qualifies. Among qualifiers the tightest wins, and
     a tie returns None so the field is flagged for review.
     """
-    dwords = [w for w in nd.split() if len(w) > 2]
+    # A digit is the MOST distinctive token in "4 years" — dropping it left
+    # dwords=["years"], which every range option covers, so the word-count
+    # tie-break handed "5+ years" to a 4-year answer and overstated experience.
+    dwords = [w for w in nd.split() if len(w) > 2 or w.isdigit()]
     if not dwords:
         return None
     covering = [o for o in options if set(dwords) <= set(normalize(o).split())]
@@ -701,6 +715,46 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
     return None
 
 
+def match_numeric_range(value, options) -> str | None:
+    """Pick the option whose numeric range contains `value`.
+
+    "3 years" against ["0-1 years", "2-4 years", "5+ years"] is a NUMBER
+    problem, not a string problem: no amount of token overlap tells you 3 falls
+    inside 2-4. String matching either failed outright or, before the digit fix,
+    picked "5+ years" and overstated experience.
+    """
+    m = re.search(r"\d+", str(value or ""))
+    if not m or not options:
+        return None
+    n = int(m.group())
+
+    for opt in options:
+        text = str(opt).lower()
+        nums = [int(x) for x in re.findall(r"\d+", text)]
+        if not nums:
+            if n == 0 and re.search(r"\bnone\b|\bno experience\b", text):
+                return opt
+            continue
+        # "5+", "5 or more", "more than 5", "at least 5"
+        if re.search(r"\+|\bor more\b|\bmore than\b|\bat least\b|\bover\b", text):
+            low = nums[0]
+            if re.search(r"\bmore than\b|\bover\b", text):
+                low += 1
+            if n >= low:
+                return opt
+            continue
+        # "less than 1", "under 2", "up to 2"
+        if re.search(r"\bless than\b|\bunder\b|\bup to\b|\bfewer than\b", text):
+            if n < nums[0] or (re.search(r"\bup to\b", text) and n <= nums[0]):
+                return opt
+            continue
+        if len(nums) >= 2 and nums[0] <= n <= nums[1]:
+            return opt
+        if len(nums) == 1 and n == nums[0]:
+            return opt
+    return None
+
+
 def build_plan(fields, profile, archetype, resume_summary, essay_fn=None,
                max_essays: int = 4, learned: dict | None = None) -> dict:
     """Assemble the fill-plan: deterministic mapping first, essay_fn for the rest.
@@ -722,6 +776,18 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None,
         seen[key] = ord_ + 1
         m = map_standard_field(f, profile, entry_ord=ord_)
         if m is not None:
+            # A field with a fixed vocabulary can only hold one of ITS options.
+            # Some deterministic rules answer with a raw profile value ("3" for
+            # years of experience), which is not selectable in a dropdown
+            # offering "0-1 years / 2-4 years / 5+ years" — bind it or flag it.
+            opts = f.get("options") or []
+            val = m.get("value")
+            if opts and val and val not in opts:
+                bound = _match_choice(str(val), opts) or match_numeric_range(val, opts)
+                if bound:
+                    m = {**m, "value": bound}
+                else:
+                    m = {**m, "value": None, "needs_review": True}
             out.append({"id": f["id"], **m})
             continue
 
@@ -740,7 +806,7 @@ def build_plan(fields, profile, archetype, resume_summary, essay_fn=None,
                 # This site's option wording differs from where it was learned
                 # ("Yes, I am authorized" vs "Authorized to work"), so bind the
                 # remembered answer to a real option here or drop it.
-                val = _match_choice(val, opts)
+                val = _match_choice(val, opts) or match_numeric_range(val, opts)
             if ok and val:
                 out.append({"id": f["id"], "value": val, "source": "learned",
                             "confidence": 0.9, "needs_review": False})

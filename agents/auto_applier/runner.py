@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import yaml
+
 from playwright.sync_api import sync_playwright
 
 from agents.auto_applier.base import ApplyResult, load_profile
@@ -38,7 +40,8 @@ _PROGRESS: dict = {"active": False, "done": 0, "total": 0, "current": None,
                    "started_at": None, "finished_at": None}
 
 
-_LOCK_PATH = Path(__file__).resolve().parents[2] / "output" / "apply.lock"
+ROOT_DIR = Path(__file__).resolve().parents[2]
+_LOCK_PATH = ROOT_DIR / "output" / "apply.lock"
 _LOCK_STALE_SECONDS = 30 * 60
 
 
@@ -148,8 +151,63 @@ def _guess_quota_left(mail_cfg: dict) -> bool:
 _GUESS_SENT: dict = {"day": None, "count": 0}
 
 
+def email_for_application(app_id: int, config: dict | None = None,
+                         page_text: str = "") -> dict:
+    """Email the package for an application that has reached APPLIED.
+
+    The trigger is the TRANSITION INTO applied, not the apply attempt — so a
+    job the bot failed on and you finished by hand still gets its email when
+    you mark it applied, and a failed attempt never sends one.
+
+    Idempotent: the send is stamped into auto_apply_log, so re-marking a job
+    applied does not mail the employer twice.
+    """
+    from db.models import ApplicationStatus
+
+    if config is None:
+        try:
+            with open(ROOT_DIR / "config" / "settings.yaml", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.warning(f"[auto_apply] email config unreadable: {e}")
+            return {"sent": False, "reason": "no config"}
+
+    session = get_session()
+    try:
+        app = session.query(Application).get(app_id)
+        if not app:
+            return {"sent": False, "reason": "no application"}
+        status = app.status.value if hasattr(app.status, "value") else str(app.status)
+        if status != ApplicationStatus.APPLIED.value:
+            return {"sent": False, "reason": f"not applied ({status})"}
+
+        try:
+            log = json.loads(app.auto_apply_log) if isinstance(app.auto_apply_log, str) else (app.auto_apply_log or {})
+        except (ValueError, TypeError):
+            log = {}
+        if log.get("emailed_at"):
+            return {"sent": False, "reason": "already emailed"}
+
+        job = session.query(Job).get(app.job_id)
+        if not job:
+            return {"sent": False, "reason": "no job"}
+        profile = load_profile()
+        sent = _email_application(profile, config, job, app, page_text=page_text)
+
+        if sent:
+            log["emailed_at"] = datetime.now(timezone.utc).isoformat()
+            app.auto_apply_log = json.dumps(log)
+            session.commit()
+        return {"sent": bool(sent)}
+    except Exception as e:
+        logger.warning(f"[auto_apply] application email failed: {e}")
+        return {"sent": False, "reason": str(e)}
+    finally:
+        session.close()
+
+
 def _email_application(profile: dict, config: dict | None, job, app,
-                       page_text: str = "") -> None:
+                       page_text: str = "") -> bool:
     """Email the resume + cover letter for an application just submitted.
 
     Controlled by settings.yaml `mail:`. Recipient resolution, most trustworthy
@@ -171,7 +229,7 @@ def _email_application(profile: dict, config: dict | None, job, app,
         logger.info("[auto_apply] no email: %s",
                     "config not passed to run_auto_apply" if not config
                     else "mail.enabled is false")
-        return
+        return False
 
     from utils.mailer import find_employer_recipient, send_application_email
 
@@ -196,10 +254,10 @@ def _email_application(profile: dict, config: dict | None, job, app,
         # application, so by default send nothing — the ATS form already
         # carried the résumé. Opt in with mail.self_copy for an archive.
         if not mail_cfg.get("self_copy"):
-            return
+            return False
         to_addr, self_copy = identity.get("email", ""), True
     if not to_addr:
-        return
+        return False
 
     res = send_application_email(
         to_addr=to_addr,
@@ -213,8 +271,9 @@ def _email_application(profile: dict, config: dict | None, job, app,
     )
     if res.get("sent"):
         logger.info(f"[auto_apply] emailed package for '{job.title}' -> {res['to']}")
-    else:
-        logger.warning(f"[auto_apply] package email not sent: {res.get('error')}")
+        return True
+    logger.warning(f"[auto_apply] package email not sent: {res.get('error')}")
+    return False
 
 
 def get_progress() -> dict:
@@ -413,7 +472,12 @@ def _record_result(session, app: Application, result: ApplyResult) -> None:
     elif result.status == "submitted_unverified":
         app.next_action = "Check email — bot clicked Submit but saw no confirmation; verify before re-applying"
 
-    if result.success and result.status == "submitted":
+    # Both submitted shapes are an application that WENT OUT — the form was
+    # filled and Submit was clicked. "unverified" only means no confirmation
+    # text appeared within 20s, which is a confidence level, not a failure.
+    # Leaving them at materials_ready made 24 real submissions read as
+    # "needs your action" on the Agent screen and kept them out of Applied.
+    if result.status in ("submitted", "submitted_unverified"):
         record_status_change(session, app, ApplicationStatus.APPLIED,
                              source="auto_applier",
                              note=f"auto-apply {result.status}")
@@ -598,11 +662,13 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None,
                 finally:
                     fresh_session.close()
 
-                # Email the application package (self-copy record by default).
-                # Never blocks or fails the apply cycle.
+                # Email only once the row is actually APPLIED — _record_result
+                # above makes that transition. A failed attempt sends nothing;
+                # if you finish it by hand later, marking it applied sends it
+                # then. Never blocks or fails the apply cycle.
                 if result.status in ("submitted", "submitted_unverified"):
                     try:
-                        _email_application(profile, config, job, app, page_text=page_text)
+                        email_for_application(app.id, config=config, page_text=page_text)
                     except Exception as e:
                         logger.warning(f"[auto_apply] application email failed: {e}")
 

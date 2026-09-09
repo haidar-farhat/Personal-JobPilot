@@ -647,6 +647,17 @@ async def api_update_status(app_id: int, request: Request):
             app_obj.notes = notes
 
         session.commit()
+
+        # Resolving a failed application by hand is still an application going
+        # out, so it earns its email here — the same one the bot would have
+        # sent had it finished the form itself. Idempotent downstream.
+        if status_enum == ApplicationStatus.APPLIED:
+            try:
+                from agents.auto_applier.runner import email_for_application
+                email_for_application(app_id, config=_load_settings())
+            except Exception as e:
+                logger.warning(f"[dashboard] applied-email failed for {app_id}: {e}")
+
         return {"success": True, "new_status": status_enum.value}
     finally:
         session.close()
@@ -721,6 +732,26 @@ async def api_dismiss_results(request: Request):
             dismissed += 1
         session.commit()
         return {"success": True, "dismissed": dismissed, "scope": scope}
+    finally:
+        session.close()
+
+
+@app.post("/api/agent/results/restore")
+def api_restore_results():
+    """Un-hide every cleared result card. Clearing is a view preference, not a
+    deletion, so there has to be a way back."""
+    session = get_session()
+    try:
+        rows = (session.query(Application)
+                .filter(Application.auto_apply_attempted_at.isnot(None)).all())
+        restored = 0
+        for app_obj in rows:
+            log = _parse_apply_log(app_obj)
+            if log.pop("dismissed_at", None) is not None:
+                app_obj.auto_apply_log = json.dumps(log)
+                restored += 1
+        session.commit()
+        return {"success": True, "restored": restored}
     finally:
         session.close()
 
@@ -1581,13 +1612,20 @@ def api_agent_status():
         session = get_session()
         try:
             start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            rows = (session.query(Application.auto_apply_status)
+            rows = (session.query(Application)
                     .filter(Application.auto_apply_attempted_at >= start).all())
-            statuses = [r[0] or "" for r in rows]
+            statuses = [(r.auto_apply_status or "") for r in rows]
+            # "needs you" must mean "you can act on this now". A card you
+            # already cleared is not actionable, so counting it made the
+            # summary contradict an empty Results column.
+            hidden = sum(1 for r in rows
+                         if (r.auto_apply_status or "").startswith("failed")
+                         and _result_dismissed(r))
             today_stats = {
                 "attempted": len(statuses),
                 "submitted": sum(1 for x in statuses if x.startswith("submitted")),
-                "needs_you": sum(1 for x in statuses if x.startswith("failed")),
+                "needs_you": sum(1 for x in statuses if x.startswith("failed")) - hidden,
+                "cleared": hidden,
             }
         finally:
             session.close()
