@@ -312,6 +312,28 @@ def choose_archetype(title, page_text, archetypes, resume_pref: str = "auto") ->
     return None
 
 
+def _month_num(m):
+    """A month as 1-12, from either a number or a name/abbreviation.
+
+    The profile is hand-edited YAML, so `end_month: "January"` is the natural
+    thing to write — and int() on it raised, returning a 500 from /plan and
+    killing autofill outright for any form with an education date.
+    """
+    if m is None or m == "":
+        return None
+    if isinstance(m, int):
+        return m if 1 <= m <= 12 else None
+    t = str(m).strip()
+    if t.isdigit():
+        n = int(t)
+        return n if 1 <= n <= 12 else None
+    t = t.lower()[:3]
+    for i, name in enumerate(_MONTH_NAMES, start=1):
+        if name.lower().startswith(t):
+            return i
+    return None
+
+
 def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict | None:
     """Map a single field to a profile value deterministically, or None if unknown.
 
@@ -401,6 +423,7 @@ def map_standard_field(field: dict, profile: dict, entry_ord: int = 0) -> dict |
         return choice("Yes" if flag else "No")
 
     def month_year(m, y):
+        m = _month_num(m)
         """Answer a date field: month/year <select>s (year lists are numeric,
         month lists aren't), split month/year text inputs, or one MM/YYYY box.
         Comboboxes (react-select) expose no options at plan time — answer with

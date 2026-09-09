@@ -534,7 +534,11 @@
     const plan = await send({ cmd: "plan", fields, ctx, resumePref });
     if (!plan || plan.error) throw new Error((plan && plan.error) || "Failed to get a plan.");
     plan._scanMeta = fields;  // lets fill.js know which ids are aria/combo widgets
-    plan._ctx = { company: ctx.company, title: ctx.h1 || ctx.title };
+    // armState carries the dashboard's app_id when this job was armed from the
+    // Agent screen — that is what lets the backend hand back THIS job's
+    // optimised CV instead of matching on a company name guessed off the page.
+    plan._ctx = { company: ctx.company, title: ctx.h1 || ctx.title,
+                  appId: (armState && armState.app_id) || "" };
     const stats = window.__jpafApply ? await window.__jpafApply(plan) : { filled: 0 };
     stepSet("fields", "done", `${stats.filled || 0} filled`);
     return {
@@ -576,12 +580,14 @@
       // NEVER Submit or the review step) and filling each new step.
       let total = 0, review = 0, fileFlags = 0, kept = 0, offline = false, sawAny = 0, pages = 0, scanned = 0;
       const reviewItems = [];
+      const swapped = [];   // stale attachments replaced by the tailored file
       const MAX_PAGES = 7;
       while (true) {
         const r = await fillCurrentPage(resumePref, mode);
         total += r.filled; review += r.needs_review; fileFlags += r.file_flags; kept += r.kept || 0;
         reviewItems.push(...(r.review_fields || []));
         offline = offline || !!r.offline;
+        swapped.push(...(r.replaced_files || []));
         sawAny += r.scanned + r.filled;
         scanned += r.scanned;
         pages++;
@@ -613,6 +619,28 @@
         (kept ? ` · kept ${kept} you'd already answered` : "") +
         (fileFlags ? ` · attach file manually` : "") +
         (offline ? ` · offline mode` : "") +
+        // Swapping a file the page already had is the one place autofill
+        // overrides something that was there — never do it silently.
+        (swapped.length
+          ? `<div class="cta">Replaced ${swapped.length === 1
+              ? `<b>${esc(swapped[0].from || "the attached file")}</b> with
+                 <b>${esc(swapped[0].to || "the tailored one")}</b>`
+              : `${swapped.length} attachments with the tailored ones`} —
+             the CV optimised for this job.</div>`
+          : "") +
+        // Offline means the standalone mapper filled from a cached profile.
+        // It cannot reach the tailored résumé or the drafted answers, so the
+        // CV attached is the generic one — say so plainly rather than let a
+        // weaker fill look identical to a full one.
+        (offline
+          ? `<div class="cta amber">JobPilot isn't running, so this used your cached
+             profile and the generic CV — not the résumé tailored for this job.
+             Start JobPilot (start_all.bat) and click Autofill again to attach
+             the optimised one.</div>`
+          : "") +
+        (!offline && fileFlags
+          ? `<div class="cta">Couldn't attach a file automatically — attach it yourself.</div>`
+          : "") +
         `<div class="cta">Review &amp; submit yourself — JobPilot never clicks Apply.</div>`
       );
       renderReview(reviewItems);

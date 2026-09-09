@@ -280,11 +280,48 @@ def _attach_format() -> str:
         return "pdf"
 
 
+def _resume_path_for_app(app_id) -> Path | None:
+    """The exact tailored résumé for ONE application, by id.
+
+    When the dashboard arms a job it knows precisely which application this is,
+    so there is no need to fuzzy-match a company name the extension guessed off
+    the page — that guess is empty on custom career sites and silently fell
+    back to the generic base résumé, attaching an untailored CV to a job the
+    tailor had already optimised for.
+    """
+    try:
+        app_id = int(app_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from db.database import get_session
+        from db.models import Application
+        s = get_session()
+        try:
+            app = s.query(Application).get(app_id)
+            if not app or not app.resume_path:
+                return None
+            p = Path(app.resume_path)
+            if not p.is_absolute():
+                p = Path(__file__).parent.parent / p
+            return p if p.exists() else None
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning(f"[autofill] resume lookup for app {app_id} failed: {e}")
+        return None
+
+
 @router.get("/resume_file")
-def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = ""):
+def resume_file(resume_pref: str = "auto", company: str = "", job_title: str = "",
+                app_id: str = ""):
     """Best résumé file for the extension to attach: the tailored .docx for a
-    matching application if one exists, otherwise a rendered base résumé."""
-    tailored = _tailored_resume_path(company, job_title)
+    matching application if one exists, otherwise a rendered base résumé.
+
+    app_id wins when supplied — it names the application exactly, so an armed
+    job always gets ITS optimised CV rather than a name-matched guess.
+    """
+    tailored = _resume_path_for_app(app_id) or _tailored_resume_path(company, job_title)
     if tailored is not None:
         # The Word-verified one-page PDF when the tailor produced one — ATS
         # parsers and recruiters both prefer it (settings tailor.attach_format).
@@ -419,10 +456,41 @@ def resume_upload(req: ResumeUpload):
     return {"ok": True, **resume_meta(req.resume_pref)}
 
 
+def _cover_path_for_app(app_id) -> Path | None:
+    """The exact tailored cover letter for ONE application, by id."""
+    try:
+        app_id = int(app_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from db.database import get_session
+        from db.models import Application
+        s = get_session()
+        try:
+            app = s.query(Application).get(app_id)
+            if not app or not app.cover_letter_path:
+                return None
+            p = Path(app.cover_letter_path)
+            if not p.is_absolute():
+                p = Path(__file__).parent.parent / p
+            return p if p.exists() else None
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning(f"[autofill] cover lookup for app {app_id} failed: {e}")
+        return None
+
+
 @router.get("/cover_letter_file")
-def cover_letter_file(company: str = "", job_title: str = ""):
+def cover_letter_file(company: str = "", job_title: str = "", app_id: str = ""):
     """Tailored cover letter for a matching application, if one exists.
-    No generic fallback — a wrong-company letter is worse than none."""
+    No generic fallback — a wrong-company letter is worse than none.
+
+    app_id names the application exactly (used when the dashboard armed it).
+    """
+    exact = _cover_path_for_app(app_id)
+    if exact is not None:
+        return FileResponse(exact, filename=exact.name)
     if not company:
         return JSONResponse({"error": "no company context"}, status_code=404)
     try:

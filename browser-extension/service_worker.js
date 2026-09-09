@@ -84,9 +84,14 @@ async function fetchHistory(company, title) {
 
 // Best résumé file (tailored if we have one for this company/role, else base),
 // base64-encoded — chrome.runtime messages can't carry binary.
-async function fetchFileB64(endpoint, company, title) {
+async function fetchFileB64(endpoint, company, title, appId) {
   try {
+    // appId comes from the dashboard's arm record and names the application
+    // exactly. Without it the backend has to guess from a page-derived company
+    // name, which is empty on custom career sites — and a miss silently
+    // attaches the generic base CV instead of the one tailored for this job.
     const qs = new URLSearchParams({ company: company || "", job_title: title || "" });
+    if (appId) qs.set("app_id", String(appId));
     const r = await fetch(`${BACKEND}/api/autofill/${endpoint}?${qs}`, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const disp = r.headers.get("content-disposition") || "";
@@ -636,8 +641,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     else if (msg.cmd === "plan") { await cacheProfile(); sendResponse(await fetchPlan(msg.fields, msg.ctx, msg.resumePref)); }
     else if (msg.cmd === "learn") sendResponse(await saveLearned(msg.answer));
     else if (msg.cmd === "history") sendResponse(await fetchHistory(msg.company, msg.title));
-    else if (msg.cmd === "resume_file") sendResponse(await fetchFileB64("resume_file", msg.company, msg.title));
-    else if (msg.cmd === "cover_letter_file") sendResponse(await fetchFileB64("cover_letter_file", msg.company, msg.title));
+    else if (msg.cmd === "resume_file") sendResponse(await fetchFileB64("resume_file", msg.company, msg.title, msg.appId));
+    else if (msg.cmd === "cover_letter_file") sendResponse(await fetchFileB64("cover_letter_file", msg.company, msg.title, msg.appId));
     else if (msg.cmd === "resume_meta") {
       try {
         const r = await fetch(`${BACKEND}/api/autofill/resume_meta?resume_pref=${encodeURIComponent(msg.resumePref || "auto")}`, { cache: "no-store" });

@@ -260,12 +260,29 @@
     });
   }
 
+  // Stale attachments swapped for the tailored file. Module scope because
+  // attachFile() records into it and __jpafApply() reports it.
+  const replacedFiles = [];
+
   async function attachFile(el, ctx, cmd) {
     try {
-      if (el.files && el.files.length) return true;  // user already attached one
+      const already = !!(el.files && el.files.length);
+      // Normally we never touch a file the user attached. But an ATS that
+      // remembers your last upload pre-fills a STALE generic CV, and when this
+      // job was armed from the dashboard we have a résumé tailored to it —
+      // which is the entire point of "Continue application". So an armed job
+      // may replace a pre-existing file; an unarmed page still never does.
+      const armed = !!(ctx && ctx.appId);
+      if (already && !armed) return true;
       const f = await sendBg({ cmd, company: (ctx && ctx.company) || "",
-                               title: (ctx && ctx.title) || "" });
-      if (!f || !f.b64) return false;
+                               title: (ctx && ctx.title) || "",
+                               appId: (ctx && ctx.appId) || "" });
+      if (!f || !f.b64) return already;   // keep whatever was there
+      if (already) {
+        const had = (el.files[0] && el.files[0].name) || "";
+        if (had && had === (f.filename || "")) return true;   // same file already
+        replacedFiles.push({ from: had, to: f.filename || "" });
+      }
       const bytes = Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0));
       const name = f.filename || "resume.pdf";
       const mime = f.mime || (/\.pdf$/i.test(name) ? "application/pdf"
@@ -528,6 +545,7 @@
     const fileFieldCount = (plan.fields || []).filter((x) => x.source === "file").length;
     const comboRetries = [];
     const reviewFields = [];
+    replacedFiles.length = 0;   // fresh per run (declared at module scope below)
     const noteReview = (f, el) => {
       const meta = metaById.get(f.id) || {};
       const label = (meta.label ||
@@ -657,6 +675,7 @@
     const orderedReview = reviewFields.slice()
       .sort((a, b) => (b.required ? 1 : 0) - (a.required ? 1 : 0));
     return { filled, needs_review: review, file_flags: fileFlags, kept,
+             replaced_files: replacedFiles,
              resume_attached: resumeAttached, cover_attached: coverAttached,
              review_fields: orderedReview.slice(0, 15),
              required_pending: orderedReview.filter((f) => f.required).length,
