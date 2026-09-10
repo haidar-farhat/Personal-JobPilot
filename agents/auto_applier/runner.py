@@ -151,8 +151,30 @@ def _guess_quota_left(mail_cfg: dict) -> bool:
 _GUESS_SENT: dict = {"day": None, "count": 0}
 
 
+#: Failure statuses where the FORM WAS NEVER SUBMITTED, so an email is the
+#: first and only touch rather than a second one. Emailing after one of these
+#: is not a follow-up; it is the application.
+#:
+#: Measured 2026-09-10: 69 of 105 auto-apply attempts ended in one of these —
+#: 59 of them `failed_required_fields_unfilled`, the bot correctly refusing to
+#: invent answers to required questions. Every one was a dead end that left the
+#: user to apply by hand.
+#:
+#: `submitted_unverified` is deliberately ABSENT. There the submit button was
+#: clicked and only the confirmation page was missed, so the form may well have
+#: gone through; mailing would risk being a genuine second touch.
+EMAIL_FALLBACK_STATUSES = frozenset({
+    "failed_required_fields_unfilled", "failed_too_many_essays",
+    "failed_form_not_found", "failed_no_resume_upload",
+    "failed_resume_field_not_found", "failed_too_complex",
+    "failed_captcha", "failed_login_required", "failed_workday_login_required",
+    "failed_not_workday", "failed_unknown", "failed_no_submit_button",
+    "failed_submit_button", "failed_navigation",
+})
+
+
 def email_for_application(app_id: int, config: dict | None = None,
-                         page_text: str = "") -> dict:
+                         page_text: str = "", *, fallback: bool = False) -> dict:
     """Email the package for an application that has reached APPLIED.
 
     The trigger is the TRANSITION INTO applied, not the apply attempt — so a
@@ -178,8 +200,12 @@ def email_for_application(app_id: int, config: dict | None = None,
         if not app:
             return {"sent": False, "reason": "no application"}
         status = app.status.value if hasattr(app.status, "value") else str(app.status)
-        if status != ApplicationStatus.APPLIED.value:
+        if not fallback and status != ApplicationStatus.APPLIED.value:
             return {"sent": False, "reason": f"not applied ({status})"}
+        if fallback and status == ApplicationStatus.APPLIED.value:
+            # Already applied by some other route, so emailing now WOULD be a
+            # second touch — exactly what the fallback must never become.
+            return {"sent": False, "reason": "already applied"}
 
         try:
             log = json.loads(app.auto_apply_log) if isinstance(app.auto_apply_log, str) else (app.auto_apply_log or {})
@@ -196,9 +222,20 @@ def email_for_application(app_id: int, config: dict | None = None,
 
         if sent:
             log["emailed_at"] = datetime.now(timezone.utc).isoformat()
+            log["emailed_as"] = "fallback" if fallback else "after_submit"
             app.auto_apply_log = json.dumps(log)
+            if fallback:
+                # The email IS the application here, so the row is applied.
+                # Without this it would sit in the queue looking like
+                # unfinished work and get retried or redone by hand — which is
+                # the manual rechecking this fallback exists to remove.
+                from db.database import record_status_change
+                record_status_change(
+                    session, app, ApplicationStatus.APPLIED,
+                    source="auto_applier",
+                    note="applied by email — the form could not be submitted")
             session.commit()
-        return {"sent": bool(sent)}
+        return {"sent": bool(sent), "fallback": fallback}
     except Exception as e:
         logger.warning(f"[auto_apply] application email failed: {e}")
         return {"sent": False, "reason": str(e)}
@@ -671,6 +708,21 @@ def run_auto_apply(config: dict | None = None, only_app_id: int | None = None,
                         email_for_application(app.id, config=config, page_text=page_text)
                     except Exception as e:
                         logger.warning(f"[auto_apply] application email failed: {e}")
+                elif (result.status in EMAIL_FALLBACK_STATUSES
+                      and (config or {}).get("mail", {}).get("on_failed_submit", True)):
+                    # The form could not be submitted, so apply by email instead
+                    # of leaving the job for the user to finish by hand. This is
+                    # the FIRST touch for this job, never a follow-up.
+                    try:
+                        res = email_for_application(app.id, config=config,
+                                                    page_text=page_text, fallback=True)
+                        if res.get("sent"):
+                            summary["emailed_fallback"] = summary.get("emailed_fallback", 0) + 1
+                            logger.info(
+                                f"[auto_apply] '{job.title}' could not be submitted "
+                                f"({result.status}) — applied by email instead")
+                    except Exception as e:
+                        logger.warning(f"[auto_apply] fallback email failed: {e}")
 
                 if result.success and result.status == "submitted":
                     summary["submitted"] += 1
