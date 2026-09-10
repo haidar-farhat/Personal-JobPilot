@@ -71,8 +71,13 @@ TARGETS_PATH = ROOT / "config" / "target_companies.yaml"
 #: domain. A curated career_url often points at a marketing or docs subdomain.
 _EXTRA_SUBS = ("about", "www2", "info", "go", "get", "corporate", "company")
 
-#: Tried in order when guessing a domain from a bare name.
-_TLDS = (".com", ".io", ".ai", ".co", ".net", ".org", ".tech", ".dev")
+#: Tried in order when guessing a domain from a bare name. `.com` first because
+#: it is overwhelmingly the most likely, then the tech TLDs, then the country
+#: ones for markets this search actually covers — a Lebanese employer is far
+#: more likely to sit on `.com.lb` or `.lb` than on `.dev`, and without them a
+#: Beirut company can never have an address constructed for it at all.
+_TLDS = (".com", ".io", ".ai", ".co", ".net", ".org", ".tech", ".dev",
+         ".com.lb", ".lb", ".me", ".ae", ".sa", ".com.tr", ".eu")
 
 #: A domain label containing one of these is a CAREERS domain, not the
 #: employer's mail domain — kaiserpermanentejobs.org is a real example.

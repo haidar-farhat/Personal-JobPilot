@@ -2184,6 +2184,18 @@ const REGION_DEFS = [
   {val:"benelux",   label:"Netherlands / Benelux", terms:["netherlands","amsterdam","rotterdam","utrecht","belgium","brussels","luxembourg"]},
   {val:"nordics",   label:"Nordics",           terms:["sweden","stockholm","norway","oslo","denmark","copenhagen","finland","helsinki","iceland"]},
   {val:"cee",       label:"Central / Eastern Europe", terms:["poland","warsaw","krakow","kraków","romania","bucharest","ukraine","kyiv","czech","prague","hungary","budapest","bulgaria","sofia","serbia","belgrade","estonia","lithuania","latvia","slovakia","croatia"]},
+  // Lebanon gets its own facet rather than living inside MENA: it is the
+  // home market, and "Middle East / Africa" buries it among UAE, Saudi,
+  // Egypt and Nigeria. It still ALSO matches mena below — regionsOf adds
+  // every region that matches, so filtering either one finds these jobs.
+  //
+  // `not` exists for exactly one reason: Lebanon, PENNSYLVANIA. It is a real
+  // US town, LinkedIn resolves the bare string "Lebanon" to it, and a
+  // substring match on "lebanon" would file those Harrisburg jobs under
+  // Beirut. Verified live — a "Lebanon" search returned CVS Health and
+  // Pearson roles in PA.
+  {val:"lebanon",   label:"Lebanon",           not:["lebanon, pa","lebanon,pa","lebanon, pennsylvania","lebanon, oh","lebanon, tn","lebanon, in","lebanon, mo","lebanon, nh","lebanon, or","new lebanon","mount lebanon, pa"],
+                                               terms:["lebanon","beirut","tripoli","sidon","saida","tyre, ","sour, ","zahle","jounieh","byblos","jbeil","baabda","jal el dib","zgharta","keserwan","metn","chouf","aley","batroun","koura","akkar","nabatieh","bekaa","hazmieh","dbayeh","antelias","achrafieh","ashrafieh","hamra","verdun","badaro","mount lebanon","north governorate","south governorate"]},
   {val:"mena",      label:"Middle East / Africa", terms:["lebanon","beirut","uae","dubai","abu dhabi","saudi","riyadh","qatar","doha","kuwait","bahrain","jordan","amman","egypt","cairo","israel","tel aviv","turkey","istanbul","morocco","nigeria","kenya","south africa","cape town","africa"]},
   {val:"apac",      label:"APAC",              terms:["apac","singapore","japan","tokyo","australia","sydney","melbourne","new zealand","hong kong","korea","seoul","taiwan","malaysia","kuala lumpur","indonesia","jakarta","philippines","manila","thailand","vietnam","china","shanghai"]},
   {val:"india",     label:"India",             terms:["india","bangalore","bengaluru","hyderabad","pune","mumbai","delhi","gurgaon","noida","chennai"]},
@@ -2198,7 +2210,12 @@ function regionsOf(a){
   const s=(a.location||"").toLowerCase();
   const out=new Set();
   if(a.is_remote || /\bremote\b|\banywhere\b|distributed/.test(s)) out.add("remote");
-  for(const r of REGION_WITH_TERMS){ if(r.terms.some(t=>s.includes(t))) out.add(r.val); }
+  for(const r of REGION_WITH_TERMS){
+    // `not` wins over `terms`: "Lebanon, PA" contains "lebanon" but is a US
+    // town, and filing it under Lebanon would be worse than not matching.
+    if(r.not && r.not.some(t=>s.includes(t))) continue;
+    if(r.terms.some(t=>s.includes(t))) out.add(r.val);
+  }
   // Only fall back once nothing specific matched — "Remote - Austin, TX" is
   // both remote and Texas, but neither "other" nor "unknown".
   if(!out.size) out.add(s.trim() ? "other" : "unknown");
@@ -4218,7 +4235,11 @@ async function obFindCandidates(){
   const list = $("#obList");
   if(list) list.innerHTML = '<div class="oempty">Searching&hellip;</div>';
   try{
-    const d = await obGet("/api/outreach/candidates?limit=50");
+    // Ask for the whole pool, not the top 50. Filtering here is client-side,
+    // and the server sorts scored jobs first — so a low limit silently hides
+    // every UNSCORED job, which is all of them from a newly added market. The
+    // Lebanese postings existed the whole time and simply ranked below the cut.
+    const d = await obGet("/api/outreach/candidates?limit=200");
     obState.candidates = d.candidates || [];
     obState.selected.clear(); obState.previews = {};
     const c = d.counts || {};
@@ -4392,7 +4413,7 @@ document.addEventListener("DOMContentLoaded", function(){
 // ============================================================
 const OB_FILTER_DEFAULTS = {
   q: "", sort: "ready",
-  work_mode: [], seniority: [], employment_type: [], source: [], archetype: [],
+  region: [], work_mode: [], seniority: [], employment_type: [], source: [], archetype: [],
   recipient: "any",        // any | has | none
   materials: "any",        // any | ready | missing
   contacted: "any",        // any | no | yes
@@ -4425,6 +4446,10 @@ function obFiltersActive() {
 
 // --- facet definitions -------------------------------------------------------
 const OB_FACETS = [
+  // Region is computed from the location string via the same regionsOf() the
+  // Jobs screen uses, so "Lebanon" means the same thing on both screens and a
+  // Beirut posting is one click away rather than a free-text guess.
+  { key: "region",          label: "Location",   order: null },
   { key: "work_mode",       label: "Work mode",  order: ["remote", "hybrid", "onsite"] },
   { key: "seniority",       label: "Seniority",  order: ["intern", "entry", "junior", "mid", "senior", "staff", "principal", "lead", "director", "executive"] },
   { key: "employment_type", label: "Job type",   order: ["full_time", "part_time", "contract", "internship", "per_diem"] },
@@ -4443,7 +4468,23 @@ function obPretty(v) {
   return String(v).replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
+/** Region labels for one candidate, via the Jobs screen's own regionsOf(). */
+function obRegions(c) {
+  try {
+    const vals = [...regionsOf({ location: c.location || "", is_remote: c.is_remote })];
+    const named = vals.filter(v => v !== "other" && v !== "unknown");
+    return (named.length ? named : vals)
+      .map(v => (REGION_DEFS.find(r => r.val === v) || {}).label || v);
+  } catch (e) { return []; }
+}
+
 function obFacetValue(c, key) {
+  // A job can sit in several regions ("Remote - Beirut" is both), so the facet
+  // takes the most specific one for display and obMatches checks them all.
+  if (key === "region") {
+    const rs = obRegions(c);
+    return rs.length ? rs[0] : null;
+  }
   const v = c[key];
   return (v === undefined || v === null || v === "") ? null : String(v);
 }
@@ -4469,10 +4510,17 @@ function obMatches(c, skipKey) {
   for (const fc of OB_FACETS) {
     if (skipKey === fc.key) continue;
     const sel = f[fc.key];
-    if (sel && sel.length) {
-      const v = obFacetValue(c, fc.key);
-      if (sel.indexOf(v === null ? "__unknown__" : v) < 0) return false;
+    if (!sel || !sel.length) continue;
+    if (fc.key === "region") {
+      // Match ANY of the job's regions, not just the displayed one — picking
+      // "Lebanon" must find a posting also tagged Remote or MENA.
+      const rs = obRegions(c);
+      if (!rs.length) { if (sel.indexOf("__unknown__") < 0) return false; continue; }
+      if (!rs.some(r => sel.indexOf(r) >= 0)) return false;
+      continue;
     }
+    const v = obFacetValue(c, fc.key);
+    if (sel.indexOf(v === null ? "__unknown__" : v) < 0) return false;
   }
   if (skipKey !== "recipient" && f.recipient !== "any") {
     if (f.recipient === "has" && !c.recipient) return false;

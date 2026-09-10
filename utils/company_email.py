@@ -68,7 +68,11 @@ _ATS_HOSTS = _BOARD_HOSTS + ("greenhouse.io", "ashbyhq.com", "lever.co", "mywork
 # (careers.airbnb.com -> airbnb.com), which is where mail actually lands.
 _CAREER_SUBS = ("careers", "career", "jobs", "job", "apply", "work", "boards",
                 "job-boards", "hire", "hiring", "talent", "recruiting")
-_TLDS = (".com", ".io", ".ai", ".co", ".tech", ".dev")
+# Country TLDs matter as soon as the search covers a market outside the US: a
+# Beirut employer is far likelier to be on .com.lb or .lb than on .dev, and
+# without them no address can be constructed for one at all.
+_TLDS = (".com", ".io", ".ai", ".co", ".tech", ".dev",
+         ".com.lb", ".lb", ".me", ".ae", ".sa")
 _PATHS = ("", "/careers", "/jobs", "/contact", "/about")
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
